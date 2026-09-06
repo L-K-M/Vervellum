@@ -60,8 +60,17 @@ final class ResearchContextTests: XCTestCase {
         XCTAssertLessThanOrEqual(ResearchContext.measure(assembled.payload), ResearchContext.maxCharacters)
     }
 
-    /// A single enormous turn cannot be dropped below one — the current question must
-    /// still be sent.
+    func testHistoryBudgetIncludesJSONSeparators() {
+        let history = [turn("First", answer: "A"), turn("Second", answer: "B")]
+        let base = ResearchContext.assemble(question: "Q", history: history, today: "D")
+        let padding = ResearchContext.maxCharacters - ResearchContext.measure(base.payload) + 1
+        let context = ResearchContext.assemble(question: "Q" + String(repeating: "x", count: padding),
+                                               history: history, today: "D")
+        XCTAssertTrue(context.trimmed)
+        XCTAssertLessThanOrEqual(ResearchContext.measure(context.payload), ResearchContext.maxCharacters)
+    }
+
+    /// Keep oversized questions intact; the request boundary rejects them locally.
     func testAlwaysReturnsAPayloadEvenWhenNothingFits() {
         let huge = String(repeating: "y", count: 400_000)
         let assembled = ResearchContext.assemble(question: huge, history: [], today: "2026-09-05")
@@ -76,6 +85,7 @@ final class ResearchContextTests: XCTestCase {
         let answer = thread.first?["answer"] as? String ?? ""
         XCTAssertLessThan(answer.count, long.count)
         XCTAssertTrue(answer.hasSuffix("[…]"))
+        XCTAssertTrue(assembled.trimmed)
     }
 
     /// A `[2]` in last turn's answer indexed *last turn's* sources; passed on verbatim it
@@ -89,8 +99,21 @@ final class ResearchContextTests: XCTestCase {
         let assembled = ResearchContext.assemble(question: "And?", history: [previous], today: "2026-09-06")
         let thread = assembled.payload["thread"] as? [[String: Any]] ?? []
         let answer = thread.first?["answer"] as? String ?? ""
-        XCTAssertEqual(answer, "X is true. Both agree. Not [9].")
+        XCTAssertEqual(answer, "X is true. Both agree. Not.")
         XCTAssertEqual(thread.first?["source_domains"] as? [String], ["a.example.com", "b.example.com"])
+    }
+
+    func testHistoryPreservesAssessmentFailureWithoutStaleReferences() {
+        var previous = turn("Old", answer: "Unassessed [9]. Code `items[9]`.")
+        previous.notices = [.assessmentUnavailable, .invalidCitation]
+        previous.findings = [Finding(claim: "Unsettled [9]", verdict: .insufficient,
+                                     reasoning: "", sourceNumbers: [])]
+        let context = ResearchContext.assemble(question: "Summarize our findings", history: [previous], today: "D")
+        let entry = (context.payload["thread"] as? [[String: Any]])?.first
+        XCTAssertEqual(entry?["answer"] as? String, "Unassessed. Code `items[9]`.")
+        XCTAssertEqual(entry?["notices"] as? [String], ["assessmentUnavailable", "invalidCitation"])
+        let claims = entry?["unsettled"] as? [[String: String]]
+        XCTAssertEqual(claims?.first?["claim"], "Unsettled")
     }
 
     func testCarriesUnsettledClaimsForward() {
@@ -118,6 +141,16 @@ final class ResearchContextTests: XCTestCase {
         XCTAssertGreaterThan(dropped, 0)
         XCTAssertLessThanOrEqual(ResearchContext.measure(entries), ResearchContext.maxEvidenceCharacters)
         XCTAssertEqual(entries.count + dropped, sources.count)
+    }
+
+    func testEvidenceBudgetIncludesArrayBrackets() {
+        var source = Source(number: 1, url: "https://a.example", title: "A", snippet: "")
+        let base = ResearchContext.evidence(from: [source]).entries
+        let padding = ResearchContext.maxEvidenceCharacters - ResearchContext.measure(base) + 1
+        source.snippet = String(repeating: "x", count: padding)
+        let evidence = ResearchContext.evidence(from: [source])
+        XCTAssertEqual(evidence.dropped, 1)
+        XCTAssertLessThanOrEqual(ResearchContext.measure(evidence.entries), ResearchContext.maxEvidenceCharacters)
     }
 
     func testEvidenceKeepsNumbersAndOmitsAnEmptyDate() {

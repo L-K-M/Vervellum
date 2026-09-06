@@ -193,7 +193,7 @@ enum TurnNotice: String, Codable, Equatable {
     var message: String {
         switch self {
         case .contextTrimmed:
-            return "Earlier turns in this thread were left out to fit the model's context."
+            return "Earlier context was shortened or omitted to fit the model's context."
         case .evidenceTrimmed:
             return "Some sources were found but not shown to the model, because the "
                 + "evidence would not fit its context. The answer could not have used them."

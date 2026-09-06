@@ -9,6 +9,25 @@ import XCTest
 
 final class CitationValidatorTests: XCTestCase {
 
+    func testCRLFFencesDoNotHideFollowingProseCitations() {
+        let answer = "```swift\r\nitems[0]\r\n```\r\nFact [1]."
+        let result = CitationValidator.validate(answer: answer, sourceCount: 1)
+        XCTAssertEqual(result.citedSourceIndices, [0])
+        XCTAssertTrue(result.outOfRangeCitations.isEmpty)
+    }
+
+    func testEscapedBackticksRemainProse() {
+        let answer = #"Escaped \` prose [1] \`."#
+        XCTAssertEqual(CitationValidator.validate(answer: answer, sourceCount: 1).citedSourceIndices, [0])
+    }
+
+    func testMultilineInlineCodeDoesNotBecomeACitation() {
+        let answer = "`items\n[0]` then fact [1]."
+        let result = CitationValidator.validate(answer: answer, sourceCount: 1)
+        XCTAssertEqual(result.citedSourceIndices, [0])
+        XCTAssertTrue(result.outOfRangeCitations.isEmpty)
+    }
+
     func testSplitsTextAndCitations() {
         let result = CitationValidator.validate(answer: "Swift is fast [1] and safe [2].", sourceCount: 3)
         XCTAssertEqual(result.spans, [

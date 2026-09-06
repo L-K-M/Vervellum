@@ -120,37 +120,61 @@ enum CitationValidator {
         var ranges: [Range<String.Index>] = []
         var fenceStart: String.Index?
         var lineStart = text.startIndex
+        var paragraphStart = text.startIndex
+
+        func flushInline(to end: String.Index) {
+            ranges.append(contentsOf: inlineCodeRanges(in: text[paragraphStart..<end]))
+        }
 
         while lineStart < text.endIndex {
-            let lineEnd = text[lineStart...].firstIndex(of: "\n") ?? text.endIndex
-            let line = text[lineStart..<lineEnd]
-            let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
+            // CRLF is one Swift Character; searching only for LF misses the whole line.
+            let lineEnd = text[lineStart...].firstIndex(where: \.isNewline) ?? text.endIndex
+            let nextLine = lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex
+            let trimmed = text[lineStart..<lineEnd].drop(while: { $0 == " " || $0 == "\t" })
             if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
                 if let start = fenceStart {
                     ranges.append(start..<lineEnd)
                     fenceStart = nil
                 } else {
+                    flushInline(to: lineStart)
                     fenceStart = lineStart
                 }
-            } else if fenceStart == nil {
-                ranges.append(contentsOf: inlineCodeRanges(in: line))
+                paragraphStart = nextLine
+            } else if fenceStart == nil, trimmed.isEmpty {
+                flushInline(to: lineStart)
+                paragraphStart = nextLine
             }
-            lineStart = lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex
+            lineStart = nextLine
         }
-        if let start = fenceStart { ranges.append(start..<text.endIndex) }
+        if let start = fenceStart {
+            ranges.append(start..<text.endIndex)
+        } else {
+            flushInline(to: text.endIndex)
+        }
         return ranges
     }
 
-    /// Backtick spans within one line: a run of *n* backticks opens a span that the
-    /// next run of exactly *n* closes, which is how markdown lets a span contain a
-    /// backtick. A run with no closer is a literal backtick, not the start of a span
-    /// that swallows the rest of the line — mid-stream, that closer may simply not
-    /// have arrived, and the prose after it must still be validated.
+    private static func isEscaped(_ index: String.Index, in text: Substring) -> Bool {
+        var cursor = index
+        var slashes = 0
+        while cursor > text.startIndex {
+            cursor = text.index(before: cursor)
+            guard text[cursor] == "\\" else { break }
+            slashes += 1
+        }
+        return !slashes.isMultiple(of: 2)
+    }
+
+    /// Matched backtick runs may span lines, but not paragraphs. An unmatched or
+    /// escaped opener remains prose, so it cannot suppress subsequent citations.
     private static func inlineCodeRanges(in line: Substring) -> [Range<String.Index>] {
         var ranges: [Range<String.Index>] = []
         var index = line.startIndex
         while index < line.endIndex {
-            guard line[index] == "`" else { index = line.index(after: index); continue }
+            guard line[index] == "`", !isEscaped(index, in: line) else {
+                index = line.index(after: index)
+                continue
+            }
             let runEnd = line[index...].firstIndex(where: { $0 != "`" }) ?? line.endIndex
             let length = line.distance(from: index, to: runEnd)
             var search = runEnd

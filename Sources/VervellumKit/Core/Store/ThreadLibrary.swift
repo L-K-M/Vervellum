@@ -41,8 +41,7 @@ struct ThreadLibrary: Codable, Equatable {
 
     /// Marks every turn that was still running when the document was written as failed.
     ///
-    /// A turn is saved when it is asked and again when it finishes; between the two the
-    /// file holds it as queued or answering. If the app crashed, was force-quit or the
+    /// Active turns are checkpointed, so the file may hold queued or answering work. If the app crashed, was force-quit or the
     /// machine restarted in that window, the turn would otherwise come back as running
     /// forever: a spinner nothing will ever stop, no way to retry, and a dead question
     /// sent to the model as history on the next follow-up. Whatever answer had arrived
@@ -54,11 +53,13 @@ struct ThreadLibrary: Codable, Equatable {
                 threads[threadIndex].turns[turnIndex].stage = .failed
                 threads[threadIndex].turns[turnIndex].failure = Self.interruptedMessage
                 threads[threadIndex].turns[turnIndex].duration = nil
+                let sourceCount = threads[threadIndex].turns[turnIndex].sources.count
+                threads[threadIndex].turns[turnIndex].applyCitationValidation(sourceCount: sourceCount)
             }
         }
     }
 
-    /// Threads whose title or any question matches `query`, newest first.
+    /// Threads whose questions or answers match `query`, newest first.
     ///
     /// Case-insensitive via `range(of:options:)` rather than lowercasing both sides:
     /// the search field re-runs this on every keystroke, and `lowercased()` on every

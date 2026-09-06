@@ -180,6 +180,7 @@ final class LenientAssessmentFieldTests: XCTestCase {
     /// it either way would collapse *not established* into *false* for half of them.
     func testTheAmbiguousWordIsNotGuessed() {
         XCTAssertNil(AssessmentParser.verdict(from: "unsupported"))
+        XCTAssertNil(AssessmentParser.verdict(from: "disputed"))
     }
 
     func testAnUnreadableVerdictIsReportedRatherThanDroppedSilently() throws {

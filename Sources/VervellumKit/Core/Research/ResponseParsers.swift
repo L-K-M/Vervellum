@@ -171,7 +171,7 @@ enum AssessmentParser {
         case "not established", "unestablished", "unverified", "unclear", "uncertain",
              "unknown", "inconclusive", "insufficient evidence", "not enough evidence":
             return .insufficient
-        case "refuted", "false", "incorrect", "disputed", "contradicts", "contradicted by evidence":
+        case "refuted", "false", "incorrect", "contradicts", "contradicted by evidence":
             return .contradicted
         case "partial", "partially supported", "partly supported", "mixed evidence":
             return .mixed

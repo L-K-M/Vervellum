@@ -66,6 +66,21 @@ final class ThreadLibraryTests: XCTestCase {
 
 final class ThreadArchiveTests: XCTestCase {
 
+    func testRecoveredCheckpointsValidateTheirRetainedProse() {
+        var turn = ResearchTurn(question: "Interrupted")
+        turn.stage = .answering
+        turn.answer = "Unverified [9] https://example.com"
+        var thread = ResearchThread()
+        thread.turns = [turn]
+        var library = ThreadLibrary()
+        library.upsert(thread)
+        library.finishInterruptedTurns()
+        let recovered = library.threads.first?.turns.first
+        XCTAssertEqual(recovered?.stage, .failed)
+        XCTAssertTrue(recovered?.notices.contains(.invalidCitation) == true)
+        XCTAssertTrue(recovered?.notices.contains(.literalURL) == true)
+    }
+
     private var directory: URL!
     private var fileURL: URL!
 

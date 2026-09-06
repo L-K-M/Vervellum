@@ -12,9 +12,8 @@ import Foundation
 /// Pure and dependency-free, so it is fully unit-testable.
 enum ResearchContext {
 
-    /// Character ceiling on the assembled context. Chosen to sit inside a 32k-token
-    /// model with room for the answer; a larger model just means fewer turns get
-    /// dropped, never a different result.
+    /// Serialized UTF-8 context ceiling, not a tokenizer guarantee. The request
+    /// boundary rejects fixed content that cannot fit after history is removed.
     static let maxCharacters = 110_000
     /// Ceiling on the evidence block alone, so a verbose search provider cannot
     /// crowd out the conversation.
@@ -22,6 +21,11 @@ enum ResearchContext {
     /// Prior answers are summarised down to this length: the thread is there for
     /// pronoun resolution and follow-up context, not to be re-read in full.
     static let maxHistoricAnswerCharacters = 1_200
+
+    private static let maxHistoricDomains = 8
+    private static let maxHistoricFindings = 5
+    private static let jsonArrayBoundaryBytes = 2
+    private static let jsonSeparatorBytes = 1
 
     /// The conversation context plus a flag saying whether anything was dropped.
     struct Assembled {
@@ -44,9 +48,10 @@ enum ResearchContext {
         // keep informational turns in a thread — the Linux panel renders `/help` as a
         // turn with an empty question — and sending those would feed the model its own
         // help text as conversation history.
-        var entries = history
+        let summaries = history
             .filter { $0.stage == .complete && !$0.question.isEmpty }
             .map(historyEntry)
+        var entries = summaries.map { $0.payload }
 
         var payload: [String: Any] = extra
         payload["question"] = question
@@ -57,16 +62,19 @@ enum ResearchContext {
         // An explicit closure rather than `map(measure)`: passing an `(Any) -> Int`
         // function where `([String: Any]) -> Int` is expected relies on function
         // subtyping that type inference does not always resolve at a call site.
-        var sizes = entries.map { measure($0) }
-        var total = fixedSize + sizes.reduce(0, +)
-        var trimmed = false
+        let sizes = entries.map { measure($0) }
+        var total = fixedSize + sizes.reduce(0, +) + max(0, entries.count - 1) * jsonSeparatorBytes
+        var trimmed = summaries.contains { $0.trimmed }
+        var firstKept = 0
 
-        while total > maxCharacters, !entries.isEmpty {
-            total -= sizes.removeFirst()
-            entries.removeFirst()
+        while total > maxCharacters, firstKept < entries.count {
+            total -= sizes[firstKept]
+            if entries.count - firstKept > 1 { total -= jsonSeparatorBytes }
+            firstKept += 1
             trimmed = true
         }
 
+        entries.removeFirst(firstKept)
         payload["thread"] = entries
         return Assembled(payload: payload, trimmed: trimmed)
     }
@@ -81,19 +89,21 @@ enum ResearchContext {
     /// would accept as a citation of *this* turn's source 2 — a wrong attribution
     /// wearing a clean badge, which is exactly what citing by number is meant to make
     /// impossible. The domains that backed the earlier answer travel separately.
-    private static func historyEntry(_ turn: ResearchTurn) -> [String: Any] {
+    private static func historyEntry(_ turn: ResearchTurn) -> (payload: [String: Any], trimmed: Bool) {
+        let answer = withoutCitationMarkers(turn.answer)
         var entry: [String: Any] = [
             "question": turn.question,
-            "answer": shorten(withoutCitationMarkers(turn.answer, sourceCount: turn.sources.count),
-                              to: maxHistoricAnswerCharacters),
+            "answer": shorten(answer, to: maxHistoricAnswerCharacters),
         ]
-        let domains = Array(Set(turn.sources.map(\.domain))).sorted().prefix(8)
-        if !domains.isEmpty { entry["source_domains"] = Array(domains) }
+        let domains = Array(Set(turn.sources.map(\.domain))).sorted()
+        if !domains.isEmpty { entry["source_domains"] = Array(domains.prefix(maxHistoricDomains)) }
         let unsettled = turn.findings
             .filter { $0.verdict == .insufficient || $0.verdict == .mixed || $0.verdict == .contradicted }
-            .map { ["claim": $0.claim, "verdict": $0.verdict.rawValue] }
-        if !unsettled.isEmpty { entry["unsettled"] = Array(unsettled.prefix(5)) }
-        return entry
+            .map { ["claim": withoutCitationMarkers($0.claim), "verdict": $0.verdict.rawValue] }
+        if !unsettled.isEmpty { entry["unsettled"] = Array(unsettled.prefix(maxHistoricFindings)) }
+        if !turn.notices.isEmpty { entry["notices"] = turn.notices.map(\.rawValue) }
+        return (entry, answer.count > maxHistoricAnswerCharacters
+                || domains.count > maxHistoricDomains || unsettled.count > maxHistoricFindings)
     }
 
     /// The evidence block, trimmed to `maxEvidenceCharacters` by dropping the
@@ -106,7 +116,7 @@ enum ResearchContext {
     /// is missing.
     static func evidence(from sources: [Source]) -> (entries: [[String: Any]], dropped: Int) {
         var entries: [[String: Any]] = []
-        var used = 0
+        var used = jsonArrayBoundaryBytes
         for source in sources {
             var entry: [String: Any] = [
                 "number": source.number,
@@ -115,7 +125,7 @@ enum ResearchContext {
                 "snippet": source.snippet,
             ]
             if let published = source.publishedAt, !published.isEmpty { entry["published"] = published }
-            let size = measure(entry)
+            let size = measure(entry) + (entries.isEmpty ? 0 : jsonSeparatorBytes)
             guard used + size <= maxEvidenceCharacters else { break }
             used += size
             entries.append(entry)
@@ -125,11 +135,10 @@ enum ResearchContext {
 
     /// The answer with every `[n]` marker removed, and the space that carried it.
     ///
-    /// `sourceCount` is the *earlier* turn's, so only markers that were real citations
-    /// then are stripped; a bracketed number the validator would not have read as a
-    /// citation (inside code, or out of range) is left as the text it was.
-    static func withoutCitationMarkers(_ answer: String, sourceCount: Int) -> String {
-        let spans = CitationValidator.validate(answer: answer, sourceCount: sourceCount).spans
+    /// Remove even formerly invalid numbers: a later source list could make them valid.
+    /// Code remains literal. Int.max admits every syntactically recognized citation.
+    static func withoutCitationMarkers(_ answer: String) -> String {
+        let spans = CitationValidator.validate(answer: answer, sourceCount: Int.max).spans
         var result = ""
         for span in spans {
             switch span {
