@@ -37,6 +37,40 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertEqual(thread.title, "Line one Line two")
     }
 
+    // MARK: Thread library search
+
+    func testSearchMatchesQuestionsAndAnswersCaseInsensitively() {
+        var turn = ResearchTurn(question: "What is a tokamak?")
+        turn.answer = "A toroidal magnetic confinement device."
+        var thread = ResearchThread()
+        thread.turns = [turn]
+        var library = ThreadLibrary()
+        library.threads = [thread]
+
+        XCTAssertEqual(library.search("TOKAMAK").count, 1)
+        XCTAssertEqual(library.search("tokamak").count, 1)
+        XCTAssertEqual(library.search("TOROIDAL").count, 1)
+        XCTAssertFalse(library.search("stellarator").contains(thread))
+    }
+
+    func testSearchBlankQueryReturnsEverythingTrimmedIsBlank() {
+        var library = ThreadLibrary()
+        library.threads = [ResearchThread()]
+        XCTAssertEqual(library.search("").count, 1)
+        XCTAssertEqual(library.search("   ").count, 1)
+    }
+
+    func testSearchKeepsNewestFirstOrder() {
+        var older = ResearchThread()
+        older.turns = [ResearchTurn(question: "About rust language")]
+        var newer = ResearchThread()
+        newer.turns = [ResearchTurn(question: "About rust the fungus")]
+        var library = ThreadLibrary()
+        library.threads = [newer, older]
+
+        XCTAssertEqual(library.search("rust").map(\.id), [newer.id, older.id])
+    }
+
     // MARK: Verdicts
 
     /// The asymmetry is the point: it forces the model into the honest buckets when

@@ -59,13 +59,18 @@ struct ThreadLibrary: Codable, Equatable {
     }
 
     /// Threads whose title or any question matches `query`, newest first.
+    ///
+    /// Case-insensitive via `range(of:options:)` rather than lowercasing both sides:
+    /// the search field re-runs this on every keystroke, and `lowercased()` on every
+    /// answer in a full library allocates a copy of each — megabytes of transient
+    /// strings per keystroke for a 200-thread library. `range` walks in place.
     func search(_ query: String) -> [ResearchThread] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return threads }
         return threads.filter { thread in
             thread.turns.contains { turn in
-                turn.question.lowercased().contains(needle)
-                    || turn.answer.lowercased().contains(needle)
+                turn.question.range(of: needle, options: .caseInsensitive) != nil
+                    || turn.answer.range(of: needle, options: .caseInsensitive) != nil
             }
         }
     }
