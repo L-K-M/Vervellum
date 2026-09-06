@@ -93,7 +93,11 @@ struct BottomSentinel: NSViewRepresentable {
             let pinned = visibleBottom >= documentHeight - BottomSentinel.tolerance
             guard pinned != lastPinned else { return }
             lastPinned = pinned
-            onPinChanged(pinned)
+            // Bounds notifications can fire inside a SwiftUI layout pass, and writing
+            // view state synchronously there trips "publishing changes from within
+            // view updates". The value is unchanged one run-loop turn later.
+            let report = onPinChanged
+            DispatchQueue.main.async { report(pinned) }
         }
     }
 }
