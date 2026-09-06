@@ -310,12 +310,11 @@ final class ResearchRunner {
 
         // 5 — assess.
         update { $0.stage = .assessing }
-        let assessPayload: [String: Any] = [
-            "question": question,
-            "answer": answer,
-            "evidence": evidence,
-            "today": today,
-        ]
+        // Assessment is a fresh call: carry the reading and budgeted history too.
+        let assessContext = ResearchContext.assemble(
+            question: question, history: history, today: today,
+            extra: ["answer": answer, "evidence": evidence, "reading": plan.reading])
+        if assessContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
         // A failure here — a reply the parser cannot read, an output limit smaller
         // than eight findings, a transient 5xx — must not fail the turn. The answer has
         // streamed, been validated and been read; marking it failed would label it
@@ -326,7 +325,7 @@ final class ResearchRunner {
         let assessment: AssessmentParser.Assessment
         do {
             let assessObject = try await chat.completeJSON(
-                system: ResearchPrompts.assess, payload: assessPayload, label: "Assess")
+                system: ResearchPrompts.assess, payload: assessContext.payload, label: "Assess")
             assessment = try AssessmentParser.parse(assessObject, sourceCount: sources.count)
         } catch let error as ResearchError where error != ResearchError.cancelled && !Task.isCancelled {
             trace.warn("Assessment unavailable: \(error.message)")

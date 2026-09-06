@@ -52,11 +52,14 @@ enum ResearchPrompts {
 
         TASK: plan the web searches needed to answer the user's question with evidence.
 
-        Work out which factual questions the answer actually depends on, then plan \
-        between 1 and \(maxSearches) searches that would resolve them. Prefer searches \
-        that surface primary sources — original documentation, standards, filings, \
-        papers, official statistics — and reputable independent reporting over \
-        aggregators and content farms.
+        Work out which factual questions the answer actually depends on, then plan up \
+        to \(maxSearches) searches that would resolve them — as few as settle the \
+        question, and none at all when it needs no evidence (see the end). Prefer \
+        searches that surface primary sources — original documentation, standards, \
+        filings, papers, official statistics — and reputable independent reporting \
+        over aggregators and content farms. Write each query in the language most \
+        likely to surface those primary sources: usually the question's own language, \
+        English where a technical or scientific topic is documented in it.
 
         Include at least one search designed to DISCONFIRM the most likely answer \
         whenever disconfirmation is possible. A plan that can only confirm produces a \
@@ -86,7 +89,15 @@ enum ResearchPrompts {
     static let answer = """
         \(trust)
 
-        TASK: answer the user's question using the numbered evidence supplied.
+        TASK: answer the user's question using the numbered evidence supplied. Write \
+        in the language of the question, whatever language the evidence is in.
+
+        DATES. Each piece of evidence carries a "published" date where the search \
+        reported one, and the payload states today's date. For a claim about the \
+        current state of affairs — a version number, a price, who holds an office, what \
+        a rule says now — prefer the most recent source, say when it was published, \
+        and treat an undated or clearly older source as weaker. Do not present an old \
+        snapshot as the present.
 
         CITATION RULE — absolute. You may not write a URL, a bare domain, or a \
         markdown link anywhere in your answer. Refer to evidence only by its number in \
@@ -120,8 +131,11 @@ enum ResearchPrompts {
     static let assess = """
         \(trust)
 
-        TASK: assess the material claims in the answer you just wrote, against the same \
-        numbered evidence. Be harder on the answer than you were when writing it.
+        TASK: assess the material claims in the supplied "answer" against the numbered \
+        "evidence" it was written from. The answer was written by a model that had \
+        exactly this evidence and no more; be harder on it than its author was. The \
+        "reading" says how the question was understood, and "thread" holds earlier \
+        exchanges for context only — assess the claims in "answer", nothing else.
 
         For each claim the conclusion actually depends on, return one verdict:
         - "supported"    — the cited sources directly support it
@@ -135,7 +149,10 @@ enum ResearchPrompts {
         actually consulted that failed to settle the claim, or none if you consulted \
         none; "opinion" normally cites nothing. Cite only numbers that appear in the \
         supplied evidence. Do not manufacture a disagreement where there is none, and \
-        do not upgrade a thin summary to "supported" because the claim sounds right.
+        do not upgrade a thin summary to "supported" because the claim sounds right. \
+        A claim about the current state of affairs that rests only on undated sources, \
+        or on sources that predate a change the question could plausibly turn on, is \
+        "insufficient", not "supported" — say which date the evidence reaches.
 
         Return {"findings": [{"claim": "...", "verdict": "...", "reasoning": "...", \
         "sources": [1, 2]}], "limitations": "...", "followups": ["..."]}
@@ -164,7 +181,8 @@ enum ResearchPrompts {
         run for this turn, so you have no evidence to cite and must not pretend \
         otherwise.
 
-        Do not write URLs or citation markers — there is nothing to cite. Instead, be \
+        Write in the language of the question. Do not write URLs or citation markers — \
+        there is nothing to cite. Instead, be \
         explicit about the basis and the age of what you know: name where your \
         confidence is high, where it is low, and what would need checking against a \
         live source. If the question turns on a fact that changes over time, say that \
