@@ -1,12 +1,14 @@
 # Astra review
 
-Baseline: `5be8eab` on `main`. Review recorded before implementation.
+Baseline: `5be8eab` on `main`. A01–A40 were recorded before implementation;
+A41 surfaced during baseline test execution.
 
 Scope: shared pipeline, transport, evidence and citation handling, persistence,
 macOS panel/composer/settings, GTK/CLI, packaging, tests, and product documentation.
-This is a code review, not a desktop usability test. No Mac or display is available
-here. Visual concerns below require GUI verification; no measured frame-rate claims
-are made. Other agents' PRs were not consulted.
+This is a code review, not a desktop usability test. The initial review had no Mac
+or display; later Xvfb coverage is recorded below. Visual concerns still require a
+real desktop. No measured frame-rate claims are made. Other agents' PRs were not
+consulted.
 
 ## Assessment
 
@@ -464,7 +466,14 @@ source”; generic MCP support; Linux key precedence; all outbound networking re
 redirects; and “three workflows” beside a four-row table. Documentation should name
 implemented guarantees and limitations, not repeat intent as proof.
 
-## Recommended implementation order
+### A41 — Keep the minimum Swift toolchain testable · P2/S · reproduced
+
+`ThreadArchiveTests.swift` uses `(raw as? UInt).map(Int.init)`. Swift 6.0.3 cannot
+resolve the overloaded initializer, so the baseline test suite does not compile.
+Use `.map { Int($0) }`; verify the existing permission assertion and the full suite
+on the documented minimum toolchain. This was found while preparing regression tests.
+
+## Original recommended implementation order
 
 1. A02: strict assessment source numbers; small, portable, testable trust fix.
 2. A03: self-contained, honest exports; fixes Copy and Linux CLI together.
@@ -477,3 +486,33 @@ implemented guarantees and limitations, not repeat intent as proof.
 Keep independent patches in independent branches. Record shipped/pending work by ID
 when consolidating into `ANALYSIS.md`; remove implemented entries from the actionable
 backlog only while retaining their PR pointers and remaining validation requirements.
+
+## Implementation record — PRs remain open
+
+| Finding | PR | Branch | Result |
+|---|---|---|---|
+| A41 | [#4](https://github.com/L-K-M/Vervellum/pull/4) | `astra/test-portability` | Existing suite compiles; 198 tests pass. |
+| A02 | [#5](https://github.com/L-K-M/Vervellum/pull/5) | `astra/exact-citations` | Exact references; 204 tests pass. |
+| A03 | [#6](https://github.com/L-K-M/Vervellum/pull/6) | `astra/evidence-transcripts` | Complete source lists and honest partial exports; 203 tests pass. |
+| A21 | [#7](https://github.com/L-K-M/Vervellum/pull/7) | `astra/sse-lines` | Linear CR/LF/CRLF/BOM framing; 209 tests pass. |
+| A08 | [#8](https://github.com/L-K-M/Vervellum/pull/8) | `astra/private-diagnostics` | Arbitrary result keys stay out of logs; 203 tests pass. |
+| A16 | [#11](https://github.com/L-K-M/Vervellum/pull/11) | `astra/gtk-close` | Native close retains the GTK window; 199 tests pass under Xvfb. |
+
+Every fix had a failing regression assertion before its implementation; A41 had the
+existing suite's compiler failure. Each feature branch includes the same one-line
+A41 prerequisite; merge #4 first. The five independent fixes combine without
+conflicts and pass **226 tests**, including GTK close/reopen under Xvfb.
+
+Validation used Swift 6.0.3 and GTK 4.8.3 in a local Debian 12 sysroot. The SSE
+large-input debug fixture took 0.886s before and 0.036s after; this is not a UI
+benchmark. macOS, GNOME Wayland, real-desktop layout, release packaging, and remote
+CI remain unverified here. #11 adds an Xvfb CI step; headless local tests skip that
+one test unless a display is provided.
+
+No PR was merged. GitHub access is read-only for the upstream repository, so the
+branches are on a fork. GLM checks report **SKIPPED** because fork reviews are gated
+out; no review feedback arrived. This is review unavailability, not two successful
+review rounds. Direct publication of `ANALYSIS.md` to upstream `main` is blocked by
+the same permission limit. Upstream macOS/Linux CI reports `action_required` for
+fork execution and needs maintainer approval. Both documents are supplied in
+[the documentation PR](https://github.com/L-K-M/Vervellum/pull/1).
