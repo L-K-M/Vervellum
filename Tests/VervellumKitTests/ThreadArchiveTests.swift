@@ -128,6 +128,35 @@ final class ThreadArchiveTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
     }
 
+    func testLaunchingWithHistoryOffErasesExistingFiles() {
+        let previous = ThreadArchive(fileURL: fileURL, debounce: 0)
+        previous.save(thread("one"))
+        previous.flush()
+        previous.save(thread("two"))
+        previous.flush()
+
+        let disabled = ThreadArchive(fileURL: fileURL, historyEnabled: false)
+        XCTAssertTrue(disabled.library.threads.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.appendingPathExtension("bak").path))
+    }
+
+    func testContinuousSnapshotsDoNotStarveCheckpoints() throws {
+        let store = ThreadArchive(fileURL: fileURL, debounce: 0.05)
+        var active = thread("streaming")
+        let end = Date().addingTimeInterval(0.5)
+        while Date() < end {
+            active.turns[0].answer += "x"
+            store.save(active)
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+        store.flush()
+        let reloaded = ThreadArchive(fileURL: fileURL)
+        XCTAssertEqual(reloaded.library.threads.first?.turns.first?.answer, active.turns[0].answer)
+    }
+
     func testNothingIsWrittenWhileHistoryIsOff() {
         let store = ThreadArchive(fileURL: fileURL, historyEnabled: false, debounce: 0)
         store.save(thread("not stored"))
@@ -210,6 +239,36 @@ final class ThreadArchiveTests: XCTestCase {
         try future.write(to: fileURL.appendingPathExtension("bak"), atomically: true, encoding: .utf8)
         let store = ThreadArchive(fileURL: fileURL, debounce: 0)
         XCTAssertTrue(store.isReadOnly)
+    }
+
+    func testANewerBackupProtectsAnOtherwiseReadablePrimary() throws {
+        let store = ThreadArchive(fileURL: fileURL, debounce: 0)
+        store.save(thread("older primary"))
+        store.flush()
+        let future = "{\"version\": \(ThreadLibrary.currentVersion + 1), \"threads\": []}"
+        let backupURL = fileURL.appendingPathExtension("bak")
+        try future.write(to: backupURL, atomically: true, encoding: .utf8)
+        let before = try Data(contentsOf: fileURL)
+
+        let reloaded = ThreadArchive(fileURL: fileURL, debounce: 0)
+        XCTAssertTrue(reloaded.isReadOnly)
+        reloaded.save(thread("must not replace the backup"))
+        reloaded.flush()
+        XCTAssertEqual(try Data(contentsOf: fileURL), before)
+        XCTAssertEqual(try String(contentsOf: backupURL, encoding: .utf8), future)
+    }
+
+    func testFailedErasureBlocksFurtherWrites() throws {
+        let store = ThreadArchive(fileURL: fileURL, fileManager: StubbornFileManager(), debounce: 0)
+        store.save(thread("before"))
+        store.flush()
+        let before = try Data(contentsOf: fileURL)
+        store.deleteAll()
+        store.save(thread("after"))
+        store.flush()
+
+        XCTAssertNotNil(store.eraseFailure)
+        XCTAssertEqual(try Data(contentsOf: fileURL), before)
     }
 
     /// A turn saved mid-run — the app crashed or was killed before it finished — must

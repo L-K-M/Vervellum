@@ -33,12 +33,8 @@ enum SecretRedactor {
             // in a selection. Matched first so its base64 body is never re-matched.
             ("pem", #"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"#),
             // Authorization headers, copied wholesale out of curl commands and logs.
-            // Outside an `Authorization:` header the value must contain a digit or a
-            // punctuation mark: every real token does and no English word does, so "a
-            // basic misunderstanding" and "token internationalization" are left alone.
-            ("bearer",
-             #"(?i)(?:\bauthorization\s*:\s*(?:bearer|basic|token)?\s*[A-Za-z0-9._~+/=-]{16,}"#
-                 + #"|\b(?:bearer|basic|token)\s+(?=[A-Za-z0-9._~+/=-]{16,})[A-Za-z-]*[0-9._~+/=][A-Za-z0-9._~+/=-]*)"#),
+            // Alphabetic tokens are legal too; prefer a false positive to a leaked key.
+            ("bearer", #"(?i)\b(?:bearer|basic|token)\s+[A-Za-z0-9._~+/=-]{16,}"#),
             // `KEY=value` / `password: value` from .env files, YAML and config dumps.
             // The value's character class deliberately excludes brackets and spaces:
             // without that, `let token = parser.next()` reads as a leaked token.

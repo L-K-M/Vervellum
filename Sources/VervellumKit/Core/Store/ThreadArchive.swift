@@ -56,11 +56,9 @@ final class ThreadArchive {
     private let fileManager: FileManager
     private let debounce: TimeInterval
     private let queue = DispatchQueue(label: "\(AppIdentity.bundleIdentifier).threads")
-    /// Touched only from the thread that owns the archive (the UI thread). The work
-    /// item it holds runs on `queue` and never reads it back, so there is nothing to
-    /// synchronise.
+    // Queue-confined snapshots let continuous streams checkpoint without races.
     private var pendingSave: DispatchWorkItem?
-    private var hasPendingChanges = false
+    private var pendingSnapshot: ThreadLibrary?
     /// Whether the primary file is the "previous good copy" the `.bak` rotation
     /// promises: it decoded at launch, or this process has since written it. Set once
     /// in `init` and afterwards only on `queue`, where every write runs.
@@ -91,6 +89,9 @@ final class ThreadArchive {
                 + "but this build understands \(ThreadLibrary.currentVersion) — history is "
                 + "read-only so the newer file isn't downgraded.\n"
             FileHandle.standardError.write(Data(warning.utf8))
+        }
+        if !historyEnabled, !isReadOnly {
+            recordingFailure { try eraseEverything() }
         }
     }
 
@@ -125,12 +126,11 @@ final class ThreadArchive {
     /// write that is already running, and the file the user just erased would reappear a
     /// fraction of a second later.
     func eraseEverything() throws {
-        pendingSave?.cancel()
-        pendingSave = nil
-        hasPendingChanges = false
-
         var failure: Error?
         queue.sync {
+            pendingSave?.cancel()
+            pendingSave = nil
+            pendingSnapshot = nil
             for url in [fileURL, backupURL] where fileManager.fileExists(atPath: url.path) {
                 do { try fileManager.removeItem(at: url) } catch { failure = error }
             }
@@ -163,12 +163,10 @@ final class ThreadArchive {
     /// on the queue, and two overlapping `.bak` rotations would leave the backup in an
     /// undefined state. Serialising through the same queue makes the ordering explicit.
     func flush() {
-        guard hasPendingChanges else { return }
-        pendingSave?.cancel()
-        pendingSave = nil
-        hasPendingChanges = false
-        let snapshot = library
-        queue.sync { self.writeNow(snapshot) }
+        queue.sync {
+            pendingSave?.cancel()
+            writePending()
+        }
     }
 
     // MARK: Persistence
@@ -176,19 +174,28 @@ final class ThreadArchive {
     private var backupURL: URL { fileURL.appendingPathExtension("bak") }
 
     private func scheduleSave() {
-        guard isHistoryEnabled, !isReadOnly else { return }
-        hasPendingChanges = true
-        pendingSave?.cancel()
-        // Snapshot now, on the caller's thread. The work item must not read `library`
-        // later: it runs on another queue while the answer is still being appended to.
+        guard isHistoryEnabled, !isReadOnly, eraseFailure == nil else { return }
         let snapshot = library
-        let work = DispatchWorkItem { [weak self] in self?.writeNow(snapshot) }
-        pendingSave = work
-        queue.asyncAfter(deadline: .now() + debounce, execute: work)
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.pendingSnapshot = snapshot
+            // Keep the first deadline: resetting it on every token never saves.
+            guard self.pendingSave == nil else { return }
+            let work = DispatchWorkItem { [weak self] in self?.writePending() }
+            self.pendingSave = work
+            self.queue.asyncAfter(deadline: .now() + self.debounce, execute: work)
+        }
+    }
+
+    private func writePending() {
+        pendingSave = nil
+        guard let snapshot = pendingSnapshot else { return }
+        pendingSnapshot = nil
+        writeNow(snapshot)
     }
 
     private func writeNow(_ snapshot: ThreadLibrary) {
-        guard isHistoryEnabled, !isReadOnly else { return }
+        guard !isReadOnly else { return }
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -239,20 +246,19 @@ final class ThreadArchive {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         var loaded = Loaded()
-        for candidate in [url, url.appendingPathExtension("bak")] {
-            guard let data = fileManager.contents(atPath: candidate.path) else { continue }
-            // The stamp is read on its own first, and a newer one ends the search. A
-            // newer build's document may hold an enum case or a field this build cannot
-            // decode; if that failure were taken for corruption, the file would be
-            // "recovered" from the backup and then rotated out and written over — the
-            // exact loss the stamp exists to prevent. Nor is the backup adopted then:
-            // showing an older snapshot as the history, read-only, would only raise the
-            // question of where the newest threads went.
+        let candidates = [url, url.appendingPathExtension("bak")].compactMap { candidate -> (URL, Data)? in
+            guard let data = fileManager.contents(atPath: candidate.path) else { return nil }
+            return (candidate, data)
+        }
+        // Inspect both stamps before adopting either file; rotation can erase a newer backup.
+        for (_, data) in candidates {
             if let stamp = try? decoder.decode(VersionStamp.self, from: data),
                stamp.version > ThreadLibrary.currentVersion {
                 loaded.newerVersion = stamp.version
-                break
+                return loaded
             }
+        }
+        for (candidate, data) in candidates {
             guard var library = try? decoder.decode(ThreadLibrary.self, from: data) else { continue }
             library.finishInterruptedTurns()
             if candidate == url {

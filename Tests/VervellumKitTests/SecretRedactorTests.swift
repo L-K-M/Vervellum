@@ -31,6 +31,11 @@ final class SecretRedactorTests: XCTestCase {
         assertRedacted("rk_test_" + stripeBody, stripeBody)
     }
 
+    func testBareAlphabeticBearerTokensAreStillRedacted() {
+        assertRedacted("Bearer abcdefghijklmnopqrstuv", "abcdefghijklmnop")
+        assertRedacted("token ABCDEFGHIJKLMNOPQRSTUV", "ABCDEFGHIJKLMNOP")
+    }
+
     func testRedactsAuthorizationHeaders() {
         assertRedacted("curl -H 'Authorization: Bearer abcdefghijklmnopqrst'", "abcdefghijklmnop")
         assertRedacted("Basic dXNlcjpwYXNzd29yZDEyMw==", "dXNlcjpwYXNz")
@@ -81,9 +86,6 @@ final class SecretRedactorTests: XCTestCase {
             "The access_key rotation policy is documented in the wiki.",
             "Why does the secret sharing scheme need a threshold?",
             "token_count = countTokens(text)",
-            "There is a basic misunderstanding of how the tax applies.",
-            "A basic well-established principle of contract law.",
-            "The token internationalization work is scheduled for later.",
             "The sk_buffer_allocate_pages call is documented in the kernel tree.",
         ] {
             let result = SecretRedactor.redact(text)
