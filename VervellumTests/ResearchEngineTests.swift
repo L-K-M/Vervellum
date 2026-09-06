@@ -7,6 +7,8 @@ final class ResearchEngineTests: XCTestCase {
                                     secrets: EphemeralSecretStore())
         // Missing configuration fails locally; no credentials or network are used.
         engine.ask("Question")
+        // Hold the UI queue while the local failure queues its callbacks.
+        Thread.sleep(forTimeInterval: 0.2)
         engine.cancel()
         XCTAssertEqual(engine.thread.turns.last?.stage, .cancelled)
 
