@@ -13,8 +13,14 @@ struct HistoryView: View {
     var onClose: () -> Void
 
     @State private var query = ""
+    /// Lowercased haystacks, rebuilt when the library changes — not per keystroke.
+    /// Searching the raw library lowercases megabytes of answers on every key.
+    @State private var searchIndex: ThreadSearchIndex?
 
-    private var results: [ResearchThread] { store.library.search(query) }
+    private var results: [ResearchThread] {
+        if let searchIndex { return searchIndex.search(query, in: store.library) }
+        return store.library.search(query)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +31,10 @@ struct HistoryView: View {
             } else {
                 list
             }
+        }
+        .onAppear { searchIndex = ThreadSearchIndex(library: store.library) }
+        .onChange(of: store.library) { _, new in
+            searchIndex = ThreadSearchIndex(library: new)
         }
     }
 
