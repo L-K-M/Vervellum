@@ -1,6 +1,6 @@
 import Foundation
 
-/// Renders a finished turn as plain text.
+/// Renders a turn as plain text, including incomplete research.
 ///
 /// One formatter for two very different destinations — the macOS Copy button and the
 /// Linux command line — because the hard part is not the layout, it is deciding what
@@ -9,8 +9,8 @@ import Foundation
 /// with it; so do the verdicts, because an answer without them is exactly the
 /// confident-sounding paragraph this app exists to replace.
 ///
-/// Only *cited* sources are listed. A dump of everything the search happened to return
-/// misrepresents what the answer actually rests on.
+/// Only sources cited by the answer or its findings are listed. A dump of everything
+/// the search happened to return misrepresents what the research actually rests on.
 ///
 /// Pure and dependency-free, so it is fully unit-testable.
 enum TranscriptFormatter {
@@ -18,9 +18,15 @@ enum TranscriptFormatter {
     static func plainText(_ turn: ResearchTurn) -> String {
         var lines: [String] = [turn.question, ""]
 
+        // Copy is available during streaming; partial work must not look verified.
+        if turn.stage != .complete {
+            lines.append("Status: \(turn.stage.label) — research is incomplete.")
+            lines.append("")
+        }
+
         if let failure = turn.failure {
             lines.append("Failed: " + failure)
-            return lines.joined(separator: "\n")
+            lines.append("")
         }
 
         lines.append(turn.answer)
@@ -37,8 +43,14 @@ enum TranscriptFormatter {
             }
         }
 
-        let cited = turn.citedSources(
+        // A verdict can cite evidence the prose did not. Every exported reference
+        // needs its source, without listing unrelated search hits or duplicates.
+        let answerSources = turn.citedSources(
             using: CitationValidator.validate(answer: turn.answer, sourceCount: turn.sources.count))
+        let citedNumbers = Set(answerSources.map(\.number))
+            .union(turn.findings.flatMap(\.sourceNumbers))
+        let cited = turn.sources.filter { citedNumbers.contains($0.number) }
+            .sorted { $0.number < $1.number }
         if !cited.isEmpty {
             lines.append("")
             lines.append("Sources")
