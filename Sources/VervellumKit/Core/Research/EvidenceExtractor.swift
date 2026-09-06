@@ -169,10 +169,16 @@ enum EvidenceExtractor {
 
     // MARK: Diagnostics
 
+    private static let maxDiagnosticFields = 12
+    private static let diagnosticKeys = Set(titleKeys + snippetKeys + dateKeys + linkKeys + [
+        "content", "structuredContent", "type", "isError", "result", "results", "data",
+        "search_result", "search_results", "web_search_result", "web_search_results",
+    ])
+
     /// A content-free description of a result's structure, for the log.
     ///
-    /// Dictionary keys, array lengths, string lengths, and whether a string parses as
-    /// JSON — never a title, a summary or a link. It exists for the one failure that is
+    /// Known schema keys, array lengths, string lengths, and whether a string parses
+    /// as JSON — never arbitrary keys, titles, summaries, or links. It exists for the one failure that is
     /// otherwise undiagnosable from a log that must not contain results: a search that
     /// answered, in a shape this extractor did not recognise.
     static func shape(of value: Any?, depth: Int = 0) -> String {
@@ -180,9 +186,18 @@ enum EvidenceExtractor {
         guard depth < 6 else { return "…" }
         switch value {
         case let dictionary as [String: Any]:
-            let keys = dictionary.keys.sorted()
-            let fields = keys.prefix(12).map { "\($0): \(shape(of: dictionary[$0], depth: depth + 1))" }
-            return "{" + fields.joined(separator: ", ") + (keys.count > 12 ? ", …" : "") + "}"
+            // A provider can put secrets in keys too. Only application-known names
+            // may reach the log; unknown fields contribute a count, not their bytes.
+            let keys = diagnosticKeys.filter { dictionary[$0] != nil }.sorted()
+            var fields = keys.prefix(maxDiagnosticFields).map {
+                "\($0): \(shape(of: dictionary[$0], depth: depth + 1))"
+            }
+            if keys.count > maxDiagnosticFields { fields.append("…") }
+            let unknownCount = dictionary.count - keys.count
+            if unknownCount > 0 {
+                fields.append("\(unknownCount) other field\(unknownCount == 1 ? "" : "s")")
+            }
+            return "{" + fields.joined(separator: ", ") + "}"
         case let array as [Any]:
             guard let first = array.first else { return "[]" }
             return "[\(array.count) × \(shape(of: first, depth: depth + 1))]"
