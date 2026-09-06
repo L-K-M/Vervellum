@@ -34,8 +34,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.onShortcutsChanged = onShortcutsChanged
     }
 
-    func show() {
-        if NSApp.activationPolicy() != .regular {
+    /// Opens the window. `remembered` is the application the panel was going to hand
+    /// focus back to; when Settings is opened from the panel it takes over that duty,
+    /// because by then the panel has been dismissed and Vervellum itself is frontmost.
+    func show(restoring remembered: NSRunningApplication? = nil) {
+        if let remembered {
+            appToRestoreOnClose = remembered
+        } else if NSApp.activationPolicy() != .regular {
             let frontmost = NSWorkspace.shared.frontmostApplication
             appToRestoreOnClose = frontmost?.processIdentifier
                 == NSRunningApplication.current.processIdentifier ? nil : frontmost

@@ -105,7 +105,15 @@ final class PanelController {
         }
     }
 
-    func hide() {
+    /// The application the panel would hand focus back to on dismissal, for a caller
+    /// that dismisses it without restoring: Settings takes the panel's place, and
+    /// restores this app itself when it closes.
+    var applicationToRestore: NSRunningApplication? { appToRestoreOnClose }
+
+    /// Dismisses the panel. With `restoringActivation` false the app that was active
+    /// before the panel is *not* brought back — the caller is about to show a window
+    /// of its own and will do that when it closes.
+    func hide(restoringActivation: Bool = true) {
         guard isOpen, let panel else { return }
         isOpen = false
         NotificationCenter.default.post(name: .vervellumPanelWillHide, object: nil)
@@ -126,7 +134,12 @@ final class PanelController {
             panel?.orderOut(nil)
         }
 
-        restoreActivation()
+        if restoringActivation {
+            restoreActivation()
+        } else {
+            appToRestoreOnClose = nil
+            hadRestoreTarget = false
+        }
         onDismiss?()
     }
 

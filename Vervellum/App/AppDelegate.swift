@@ -92,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 engine: self.engine,
                 store: self.store,
                 preferences: self.preferences,
-                onOpenSettings: { [weak self] in self?.settingsWindow?.show() },
+                onOpenSettings: { [weak self] in self?.openSettings() },
                 onClose: { [weak self] in self?.panelController?.hide() }))
         }
         controller.isBusy = { [weak self] in self?.engine.isRunning ?? false }
@@ -311,7 +311,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func summon() { panelController?.show() }
     @objc private func summonSelection() { summonWithSelection() }
-    @objc private func openSettingsMenuItem() { settingsWindow?.show() }
+    @objc private func openSettingsMenuItem() { openSettings() }
+
+    /// Settings takes the panel's place.
+    ///
+    /// The panel floats above every ordinary window, so Settings opened behind it was
+    /// hidden by the very panel it was opened from — almost entirely, with the panel
+    /// centred. And a panel left open with dismiss-on-focus-loss on hid itself as
+    /// Settings took focus, handing activation to the previous app and putting
+    /// Settings behind *that* instead. So the panel is dismissed first, without
+    /// restoring activation, and Settings restores the panel's remembered app when it
+    /// closes.
+    private func openSettings() {
+        let remembered = panelController?.applicationToRestore
+        panelController?.hide(restoringActivation: false)
+        settingsWindow?.show(restoring: remembered)
+    }
     @objc private func checkForUpdates() { updateChecker.checkNow() }
 
     // MARK: Helpers
