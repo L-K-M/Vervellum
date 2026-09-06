@@ -173,11 +173,27 @@ enum TurnNotice: String, Codable, Equatable {
     case noEvidence
     /// A verdict was dropped because it named no source.
     case uncitedVerdictDropped
+    /// A finding was dropped because its verdict was not one of the five words.
+    case unreadableVerdictDropped
+    /// The assessment call failed, so the answer's claims were never checked.
+    case assessmentUnavailable
+    /// A notice written by a newer build that this one does not know. Kept rather than
+    /// failing the whole document: a `notices` array that refused to decode used to make
+    /// an older build start from an empty library and overwrite the newer file.
+    case unknown
+
+    /// Decodes leniently: an unfamiliar raw value becomes `.unknown` instead of an
+    /// error. Adding a case above therefore no longer needs a `ThreadLibrary` version
+    /// bump for builds from this one on; removing or renaming one still does.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TurnNotice(rawValue: raw) ?? .unknown
+    }
 
     var message: String {
         switch self {
         case .contextTrimmed:
-            return "Earlier turns in this thread were left out to fit the model's context."
+            return "Earlier context was shortened or omitted to fit the model's context."
         case .evidenceTrimmed:
             return "Some sources were found but not shown to the model, because the "
                 + "evidence would not fit its context. The answer could not have used them."
@@ -189,6 +205,13 @@ enum TurnNotice: String, Codable, Equatable {
             return "Answered without web evidence. Nothing here is source-backed."
         case .uncitedVerdictDropped:
             return "A verdict that cited no source was discarded."
+        case .unreadableVerdictDropped:
+            return "A finding whose verdict Vervellum could not read was discarded."
+        case .assessmentUnavailable:
+            return "The answer's claims could not be checked, because the assessment call failed. "
+                + "Nothing below the answer has been verified."
+        case .unknown:
+            return "This turn carries a note recorded by a newer version of Vervellum."
         }
     }
 }
@@ -203,6 +226,9 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// One sentence stating how the model read the question.
     var reading: String = ""
     var searches: [PlannedSearch] = []
+    /// How many of `searches` have been run. Drives the live "2 of 3" progress in the
+    /// trail while the searching stage lasts; meaningless once the stage has passed.
+    var searchesCompleted: Int = 0
     var sources: [Source] = []
     /// The streamed markdown answer, with `[n]` citations.
     var answer: String = ""
@@ -223,6 +249,43 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         self.askedAt = askedAt
     }
 
+    // MARK: Codable
+
+    // A hand-written decoder for exactly one reason: Swift's synthesized one ignores
+    // property defaults and requires *every* key, so the first field ever added to
+    // `ResearchTurn` would make every existing threads.json unreadable — and both the
+    // file and its `.bak` have the same shape, so the whole library would silently
+    // reset. Only `searchesCompleted` is tolerant of absence today; every other field
+    // still fails loudly, and a field added later must be given the same treatment
+    // here or old documents stop loading again.
+    //
+    // `encode(to:)` stays synthesized: with this `CodingKeys` covering every stored
+    // property, the existing round-trip test catches a field that goes missing from it.
+    enum CodingKeys: String, CodingKey {
+        case id, question, askedAt, stage, reading, searches, searchesCompleted, sources
+        case answer, findings, limitations, followups, notices, failure, duration, model
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        question = try container.decode(String.self, forKey: .question)
+        askedAt = try container.decode(Date.self, forKey: .askedAt)
+        stage = try container.decode(ResearchStage.self, forKey: .stage)
+        reading = try container.decode(String.self, forKey: .reading)
+        searches = try container.decode([PlannedSearch].self, forKey: .searches)
+        searchesCompleted = try container.decodeIfPresent(Int.self, forKey: .searchesCompleted) ?? 0
+        sources = try container.decode([Source].self, forKey: .sources)
+        answer = try container.decode(String.self, forKey: .answer)
+        findings = try container.decode([Finding].self, forKey: .findings)
+        limitations = try container.decode(String.self, forKey: .limitations)
+        followups = try container.decode([String].self, forKey: .followups)
+        notices = try container.decode([TurnNotice].self, forKey: .notices)
+        failure = try container.decodeIfPresent(String.self, forKey: .failure)
+        duration = try container.decodeIfPresent(TimeInterval.self, forKey: .duration)
+        model = try container.decode(String.self, forKey: .model)
+    }
+
     /// Whether this turn was asked with `/direct`.
     ///
     /// Derived rather than stored, so the on-disk document did not have to change. Both
@@ -232,6 +295,15 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// never runs the planner. Retry uses this to re-ask the way the user asked.
     var wasAskedDirectly: Bool {
         notices.contains(.noEvidence) && reading.isEmpty
+    }
+
+    /// The stage label for a running turn, with live progress where there is any:
+    /// "Searching the web · 2 of 3" rather than a static label for the whole stage.
+    /// Terminal stages fall through to `stage.label`, which is also what logs use.
+    var runningProgressLabel: String {
+        guard case .searching = stage, !searches.isEmpty else { return stage.label }
+        let attempted = min(max(searchesCompleted, 1), searches.count)
+        return "Searching the web · \(attempted) of \(searches.count)"
     }
 
     /// Records a notice once. Notices are a set in spirit but an array on disk, so

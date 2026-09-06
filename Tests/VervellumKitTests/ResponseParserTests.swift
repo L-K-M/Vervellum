@@ -151,3 +151,42 @@ final class AssessmentParserTests: XCTestCase {
         XCTAssertThrowsError(try AssessmentParser.parse(object, sourceCount: 2))
     }
 }
+
+/// The shapes a model actually writes, read the way the prompt meant them.
+final class LenientAssessmentFieldTests: XCTestCase {
+
+    func testMalformedSourceShapesCannotCreateEvidentialVerdicts() throws {
+        let malformed: [Any] = ["1, 2", 2, ["1.2"], ["1e2"], ["[1]"], ["2-3"], [[1]]]
+        for sources in malformed {
+            let entries: [[String: Any]] = [["claim": "X", "verdict": "supported", "sources": sources]]
+            let assessment = try AssessmentParser.parse(["findings": entries], sourceCount: 3)
+            XCTAssertTrue(assessment.findings.isEmpty)
+            XCTAssertTrue(assessment.notices.contains(.invalidCitation))
+            XCTAssertTrue(assessment.notices.contains(.uncitedVerdictDropped))
+        }
+    }
+
+    func testReadsVerdictSynonymsAndPadding() {
+        XCTAssertEqual(AssessmentParser.verdict(from: " Supported "), .supported)
+        XCTAssertEqual(AssessmentParser.verdict(from: "Not established"), .insufficient)
+        XCTAssertEqual(AssessmentParser.verdict(from: "not_established"), .insufficient)
+        XCTAssertEqual(AssessmentParser.verdict(from: "refuted"), .contradicted)
+        XCTAssertEqual(AssessmentParser.verdict(from: "Partially supported"), .mixed)
+        XCTAssertEqual(AssessmentParser.verdict(from: "subjective"), .opinion)
+        XCTAssertNil(AssessmentParser.verdict(from: 3))
+    }
+
+    /// "unsupported" means "no evidence" to some models and "false" to others. Mapping
+    /// it either way would collapse *not established* into *false* for half of them.
+    func testTheAmbiguousWordIsNotGuessed() {
+        XCTAssertNil(AssessmentParser.verdict(from: "unsupported"))
+        XCTAssertNil(AssessmentParser.verdict(from: "disputed"))
+    }
+
+    func testAnUnreadableVerdictIsReportedRatherThanDroppedSilently() throws {
+        let entries: [[String: Any]] = [["claim": "X", "verdict": "unsupported", "sources": [1]]]
+        let assessment = try AssessmentParser.parse(["findings": entries], sourceCount: 2)
+        XCTAssertTrue(assessment.findings.isEmpty)
+        XCTAssertTrue(assessment.notices.contains(.unreadableVerdictDropped))
+    }
+}

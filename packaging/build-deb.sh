@@ -9,9 +9,16 @@
 set -euo pipefail
 
 VERSION="${1:-0.1.0}"
+# The package's own version. Debian reads the *last* hyphen in a version as the start
+# of a Debian revision, and a revision sorts above no revision at all — so 1.1.0-beta.1
+# would outrank the 1.1.0 that follows it, and apt would refuse the stable package as
+# a downgrade. A tilde sorts below everything, which is exactly what a pre-release is:
+# 1.1.0~beta.1 < 1.1.0. The tag keeps its hyphen; only the package sees the tilde.
+# (Escaped, because bash tilde-expands an unquoted `~` in the replacement to $HOME.)
+DEB_VERSION="${VERSION/-/\~}"
 APP_ID="ch.lkmc.Vervellum"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-STAGE="$ROOT/build/deb/vervellum_${VERSION}"
+STAGE="$ROOT/build/deb/vervellum_${DEB_VERSION}"
 ARCH="$(dpkg --print-architecture)"
 
 echo "==> Building (release, static Swift runtime)"
@@ -65,9 +72,10 @@ chmod 0644 "$STAGE/usr/share/dbus-1/services/$APP_ID.service"
 install -m 0644 "$ROOT/packaging/debian/copyright" "$STAGE/usr/share/doc/vervellum/copyright"
 
 # A version with no Debian revision makes this a *native* package, and lintian then
-# requires changelog.gz — not changelog.Debian.gz.
+# requires changelog.gz — not changelog.Debian.gz. (The tilde above is what keeps a
+# pre-release native too: a hyphen would have made it a revision.)
 printf 'vervellum (%s) unstable; urgency=low\n\n  * Release %s.\n\n -- L-K-M <noreply@lkmc.ch>  %s\n' \
-    "$VERSION" "$VERSION" "$(date -R)" \
+    "$DEB_VERSION" "$VERSION" "$(date -R)" \
     | gzip -9n > "$STAGE/usr/share/doc/vervellum/changelog.gz"
 chmod 0644 "$STAGE/usr/share/doc/vervellum/changelog.gz"
 
@@ -110,7 +118,7 @@ INSTALLED_SIZE="$(du -ks "$STAGE" | cut -f1)"
 
 cat > "$STAGE/DEBIAN/control" <<CONTROL
 Package: vervellum
-Version: $VERSION
+Version: $DEB_VERSION
 Section: utils
 Priority: optional
 Architecture: $ARCH
@@ -134,7 +142,7 @@ CONTROL
 
 echo "==> Packaging"
 mkdir -p "$ROOT/build"
-OUTPUT="$ROOT/build/vervellum_${VERSION}_${ARCH}.deb"
+OUTPUT="$ROOT/build/vervellum_${DEB_VERSION}_${ARCH}.deb"
 # --root-owner-group, or every file is owned by the building user's uid — a lintian
 # error and a real permissions bug when building in a container.
 dpkg-deb --root-owner-group --build "$STAGE" "$OUTPUT"

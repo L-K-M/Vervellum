@@ -18,8 +18,7 @@ from the open web. Those are the two boundaries, and they are treated separately
 
 ### Credentials
 
-API keys are never written to the settings file, never included in a stored thread, and
-never written to a log line. They are attached as request headers only.
+Configured API keys are never written to settings, stored threads, or logs. They are attached as request headers only.
 
 Where they live depends on the platform, and the platforms are **not** equally strong:
 
@@ -30,14 +29,14 @@ Where they live depends on the platform, and the platforms are **not** equally s
 | Linux | `VERVELLUM_MODEL_KEY` / `VERVELLUM_SEARCH_KEY` | as safe as the environment that sets them |
 | Linux | a mode-0600 file in `~/.config/vervellum` | **not encrypted** — readable by anything running as you |
 
-Vervellum tries them in that order and reports which tier is in use rather than implying
-they are interchangeable. The bottom tier exists because a keyring fails predictably on
+Explicit environment keys override reads on Linux, followed by the keyring and file.
+Writes prefer the keyring, then the file; the backend label describes that write path. The bottom tier exists because a keyring fails predictably on
 a machine set up for automatic login, on a headless session and in a container, and an
 app that refused to start there would be broken for a large minority of users. The file
 is created with `O_CREAT`-style restrictive permissions *before* the secret is written
 to it, so there is no window in which it is world-readable.
 
-Every outbound request is built by one transport that enforces three rules:
+Provider requests use one transport that enforces three rules:
 
 - **Redirects are refused.** `URLSession` re-sends the `Authorization` header to a
   redirect target by default, so a provider — or anything that can answer for its
@@ -64,10 +63,11 @@ names what such text tends to look like.
 
 Prompting is a mitigation, not a guarantee, which is why the citation rule is
 structural rather than instructional: the model is given a **numbered list** of sources
-Vervellum itself fetched and may refer to evidence only by number. There is no syntax
-in which it could express a URL, so even a fully injected model cannot produce a link
-Vervellum did not retrieve. Numbers outside the range are stripped and reported; a
-literal URL appearing anyway is flagged on the turn as an explicit warning.
+Vervellum itself fetched and may refer to evidence only by number. Both renderers
+create actionable answer links only from those citations. Model-written links are
+inert; literal URLs are flagged. Invalid numbers remain plain text and are reported.
+Shared masking prevents raw placeholder characters from relocating real citations.
+These controls establish link provenance, not whether a source supports a claim.
 
 Retrieved text is never executed, never rendered as HTML, and never fetched a second
 time — Vervellum reads the search tool's summaries and does not load source pages.
@@ -103,7 +103,14 @@ replaced, with a visible count of how many.
 - **Stored threads are plain JSON.** The file is written `0600` — in Application Support
   on macOS, under `$XDG_DATA_HOME` on Linux — which protects it from other users but not
   from anything running as you. History can be turned off, and turning it off deletes the
-  file.
+  primary and backup files. Failed erasure is reported and blocks further writes
+  until erasure succeeds. Session-only deletion markers reject late snapshots;
+  deletion is not secure disk erasure and cannot remove external backups.
+- **Downgrades are not history-safe.** Schema 2 adds notice values that older releases
+  cannot decode. Those releases lack version preflight and can overwrite the file;
+  a version bump cannot repair their reader. Back up history before downgrading.
+  This build preserves newer primary or backup schemas without adopting either,
+  unless you explicitly erase history.
 - **The Linux file-backed key store is not encrypted.** See the table above. Install
   `libsecret-tools` and run a keyring, or supply the keys through the environment.
 - **The Linux `.deb` is unsigned and unrepositoried.** There is no apt signing key and no

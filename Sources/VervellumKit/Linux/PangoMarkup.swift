@@ -77,6 +77,8 @@ enum PangoMarkup {
                 // Not run through `inline`: inside a code block, markdown emphasis
                 // markers and bracketed numbers are literal text.
                 return "<tt>" + GTK.escape(block.text) + "</tt>"
+            case .table(let headers, let rows):
+                return table(headers, rows: rows, sources: sources)
             case .rule:
                 return "<span foreground=\"\(Colour.secondary)\">──────────</span>"
             }
@@ -86,21 +88,27 @@ enum PangoMarkup {
     /// Inline markdown plus citations, as markup.
     ///
     /// Citations are resolved first, so a `[3]` becomes a link before emphasis is
-    /// parsed and cannot be mistaken for markdown link syntax.
+    /// parsed and cannot be mistaken for markdown link syntax. Emphasis is then parsed
+    /// over the *whole* run, with each citation standing in as one placeholder
+    /// character. Parsing the text between citations piece by piece would leave a bold
+    /// run that contains a citation — `**Cost [2]:**`, the commonest shape a model
+    /// writes — with its opening marker in one piece and its closing marker in
+    /// another, and both would be printed as literal asterisks.
     static func inline(_ text: String, sources: [Source]) -> String {
-        let validation = CitationValidator.validate(answer: text, sourceCount: sources.count)
+        let mask = CitationMask(text, sourceCount: sources.count)
+        let citations = mask.sourceIndices.map { indices -> String in
+            let cited = indices.map { sources[$0] }
+            guard let first = cited.first else { return "" }
+            let label = cited.map { String($0.number) }.joined(separator: ",")
+            return "<a href=\"\(GTK.escape(first.url))\">"
+                + "<span size=\"small\" font_family=\"monospace\">[\(label)]</span></a>"
+        }
+
         var result = ""
-        for span in validation.spans {
-            switch span {
-            case .text(let value):
-                result += emphasis(value)
-            case .citation(let indices, let raw):
-                let cited = indices.compactMap { sources.indices.contains($0) ? sources[$0] : nil }
-                guard let first = cited.first else { result += GTK.escape(raw); continue }
-                let label = cited.map { String($0.number) }.joined(separator: ",")
-                result += "<a href=\"\(GTK.escape(first.url))\">"
-                    + "<span size=\"small\" font_family=\"monospace\">[\(label)]</span></a>"
-            }
+        var pending = citations.makeIterator()
+        for piece in emphasis(mask.text).split(separator: CitationMask.placeholder, omittingEmptySubsequences: false) {
+            result += piece
+            if let citation = pending.next() { result += citation }
         }
         return result
     }
@@ -158,6 +166,22 @@ enum PangoMarkup {
         return best
     }
 
+    // MARK: Tables
+
+    /// Labeled rows wrap without truncating evidence or disabling cell citations.
+    private static func table(_ headers: [String], rows: [[String]], sources: [Source]) -> String {
+        guard !rows.isEmpty else {
+            return headers.map { inline($0, sources: sources) }.joined(separator: " · ")
+        }
+        return rows.map { row in
+            headers.indices.map { column in
+                let value = row.indices.contains(column) ? row[column] : ""
+                return "<b>" + inline(headers[column], sources: sources) + ":</b> "
+                    + inline(value, sources: sources)
+            }.joined(separator: "\n")
+        }.joined(separator: "\n\n")
+    }
+
     // MARK: Turn sections
 
     static func question(_ text: String) -> String {
@@ -167,6 +191,10 @@ enum PangoMarkup {
     static func trail(_ turn: ResearchTurn) -> String {
         guard !turn.stage.isTerminal else {
             var parts: [String] = []
+            // A stopped run must say so: a truncated paragraph over an ordinary-looking
+            // summary line reads as the model simply stopping there, and nobody would
+            // know its claims were never checked.
+            if turn.stage == .cancelled { parts.append("Stopped") }
             parts.append(turn.searches.isEmpty
                          ? "no search"
                          : "\(turn.searches.count) search\(turn.searches.count == 1 ? "" : "es")")
@@ -185,7 +213,7 @@ enum PangoMarkup {
             }
             return line
         }
-        return small(turn.stage.label + "…")
+        return small(turn.runningProgressLabel + "…")
     }
 
     static func notices(_ notices: [TurnNotice]) -> String? {

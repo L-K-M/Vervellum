@@ -45,6 +45,9 @@ final class ThreadStore: ObservableObject {
     // MARK: Forwarding
 
     var isReadOnly: Bool { archive.isReadOnly }
+    /// Why the last erase left the file in place, if it did. Read after `library`
+    /// republishes, which every erase triggers.
+    var eraseFailure: String? { archive.eraseFailure }
 
     var isHistoryEnabled: Bool {
         get { archive.isHistoryEnabled }

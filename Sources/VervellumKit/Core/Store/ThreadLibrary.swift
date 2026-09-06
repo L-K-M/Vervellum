@@ -8,7 +8,9 @@ import Foundation
 /// data a future build would have understood.
 struct ThreadLibrary: Codable, Equatable {
 
-    static let currentVersion = 1
+    /// Version 2 adds tolerant notices. Future readers preflight this stamp; releases
+    /// predating that protection cannot safely open this schema, even with a bump.
+    static let currentVersion = 2
     /// How many threads are kept. Old research is the least valuable thing on the
     /// disk and the file is read wholesale at launch, so the list is bounded.
     static let maxThreads = 200
@@ -33,14 +35,42 @@ struct ThreadLibrary: Codable, Equatable {
         threads.removeAll { $0.id == id }
     }
 
-    /// Threads whose title or any question matches `query`, newest first.
+    /// What a turn says when the app stopped before its answer did.
+    static let interruptedMessage = "Vervellum quit before this answer finished."
+
+    /// Marks every turn that was still running when the document was written as failed.
+    ///
+    /// Active turns are checkpointed, so the file may hold queued or answering work.
+    /// After a crash, force-quit or restart, the turn would otherwise come back as running
+    /// forever: a spinner nothing will ever stop, no way to retry, and a dead question
+    /// sent to the model as history on the next follow-up. Whatever answer had arrived
+    /// is kept.
+    mutating func finishInterruptedTurns() {
+        for threadIndex in threads.indices {
+            for turnIndex in threads[threadIndex].turns.indices
+            where !threads[threadIndex].turns[turnIndex].stage.isTerminal {
+                threads[threadIndex].turns[turnIndex].stage = .failed
+                threads[threadIndex].turns[turnIndex].failure = Self.interruptedMessage
+                threads[threadIndex].turns[turnIndex].duration = nil
+                let sourceCount = threads[threadIndex].turns[turnIndex].sources.count
+                threads[threadIndex].turns[turnIndex].applyCitationValidation(sourceCount: sourceCount)
+            }
+        }
+    }
+
+    /// Threads whose questions or answers match `query`, newest first.
+    ///
+    /// Case-insensitive via `range(of:options:)` rather than lowercasing both sides:
+    /// the search field re-runs this on every keystroke, and `lowercased()` on every
+    /// answer in a full library allocates a copy of each — megabytes of transient
+    /// strings per keystroke for a 200-thread library. `range` walks in place.
     func search(_ query: String) -> [ResearchThread] {
-        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return threads }
         return threads.filter { thread in
             thread.turns.contains { turn in
-                turn.question.lowercased().contains(needle)
-                    || turn.answer.lowercased().contains(needle)
+                turn.question.range(of: needle, options: .caseInsensitive) != nil
+                    || turn.answer.range(of: needle, options: .caseInsensitive) != nil
             }
         }
     }

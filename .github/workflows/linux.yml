@@ -42,7 +42,7 @@ jobs:
           # libgtk-4-dev brings the headers pkg-config resolves for the CGtk target;
           # the rest are the packaging tools.
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            libgtk-4-dev pkg-config dpkg-dev binutils desktop-file-utils
+            libgtk-4-dev pkg-config dpkg-dev binutils desktop-file-utils xvfb xauth python3
 
       - name: Build
         run: swift build -c release --product vervellum
@@ -53,10 +53,24 @@ jobs:
       - name: Test the shared core
         run: swift test --parallel
 
+      - name: Test provider protocols over loopback
+        run: python3 Tests/Integration/provider_fixtures.py .build/release/vervellum
+
+      # Native close must retain the window that the next shortcut will reuse.
+      - name: Test the GTK window lifecycle
+        env:
+          VERVELLUM_REQUIRE_DISPLAY: '1'
+          GSETTINGS_BACKEND: memory
+          GTK_A11Y: none
+          GSK_RENDERER: cairo
+        run: xvfb-run --auto-servernum swift test --skip-build --filter LinuxPanelLifecycleTests
+
+      # D-Bus validation checks the filename as well as the contents.
       - name: Validate the desktop entry
         run: |
-          sed 's/@VERSION@/0.0.0/g' packaging/debian/ch.lkmc.Vervellum.desktop > /tmp/entry.desktop
-          desktop-file-validate /tmp/entry.desktop
+          mkdir -p /tmp/desktop
+          sed 's/@VERSION@/0.0.0/g' packaging/debian/ch.lkmc.Vervellum.desktop > /tmp/desktop/ch.lkmc.Vervellum.desktop
+          desktop-file-validate /tmp/desktop/ch.lkmc.Vervellum.desktop
 
       - name: Package
         run: packaging/build-deb.sh 0.0.0+ci

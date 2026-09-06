@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 
 extension Notification.Name {
     /// Carries text that should be dropped into the composer, in `userInfo["text"]`.
@@ -31,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let summonHotkey = CarbonHotkey(identifier: 1)
     private let selectionHotkey = CarbonHotkey(identifier: 2)
     private var statusItem: NSStatusItem?
+    private var runningObserver: AnyCancellable?
 
     // MARK: Lifecycle
 
@@ -56,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installStatusItem()
         registerHotkeys()
         updateChecker.start()
+        observeRunningState()
 
         // First launch has no keys, so the panel is the only place the user can find
         // out what is missing — show it once rather than leaving a silent menu-bar icon.
@@ -65,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        engine.flushProgress()
         store.flush()
         summonHotkey.unregister()
         selectionHotkey.unregister()
@@ -86,13 +90,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 engine: self.engine,
                 store: self.store,
                 preferences: self.preferences,
-                onOpenSettings: { [weak self] in self?.settingsWindow?.show() },
+                onOpenSettings: { [weak self] in self?.openSettings() },
                 onClose: { [weak self] in self?.panelController?.hide() }))
         }
         controller.isBusy = { [weak self] in self?.engine.isRunning ?? false }
         // Dismissing the panel is the natural moment to make the thread durable: the
         // store debounces writes by a second, and the user may quit right after.
-        controller.onDismiss = { [weak self] in self?.store.flush() }
+        controller.onDismiss = { [weak self] in
+            self?.engine.flushProgress()
+            self?.store.flush()
+        }
         controller.selectionProvider = { SelectedTextReader.selectedText() }
         controller.onSeedComposer = { [weak self] text in
             // Redact before the text reaches the composer, not before it is sent: the
@@ -243,13 +250,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Status item
 
+    private static let idleStatusSymbol = "text.magnifyingglass"
+    private static let busyStatusSymbol = "hourglass"
+
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "text.magnifyingglass",
+        item.button?.image = NSImage(systemSymbolName: Self.idleStatusSymbol,
                                      accessibilityDescription: "Vervellum")
         item.button?.image?.isTemplate = true
         item.menu = makeMenu()
         statusItem = item
+    }
+
+    /// Keep run state visible when the panel is hidden, without unsolicited sounds.
+    private func observeRunningState() {
+        runningObserver = engine.$isRunning
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRunning in
+                guard let self else { return }
+                let symbol = isRunning ? Self.busyStatusSymbol : Self.idleStatusSymbol
+                self.statusItem?.button?.image = NSImage(
+                    systemSymbolName: symbol,
+                    accessibilityDescription: isRunning ? "Vervellum — researching" : "Vervellum")
+                self.statusItem?.button?.image?.isTemplate = true
+            }
     }
 
     private func makeMenu() -> NSMenu {
@@ -282,7 +307,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func summon() { panelController?.show() }
     @objc private func summonSelection() { summonWithSelection() }
-    @objc private func openSettingsMenuItem() { settingsWindow?.show() }
+    @objc private func openSettingsMenuItem() { openSettings() }
+
+    /// Settings takes the panel's place.
+    ///
+    /// The panel floats above every ordinary window, so Settings opened behind it was
+    /// hidden by the very panel it was opened from — almost entirely, with the panel
+    /// centred. And a panel left open with dismiss-on-focus-loss on hid itself as
+    /// Settings took focus, handing activation to the previous app and putting
+    /// Settings behind *that* instead. So the panel is dismissed first, without
+    /// restoring activation, and Settings restores the panel's remembered app when it
+    /// closes.
+    private func openSettings() {
+        let remembered = panelController?.applicationToRestore
+        panelController?.hide(restoringActivation: false)
+        settingsWindow?.show(restoring: remembered)
+    }
     @objc private func checkForUpdates() { updateChecker.checkNow() }
 
     // MARK: Helpers

@@ -43,6 +43,16 @@ struct ProcessTrailView: View {
                     .font(PanelTheme.Font.caption)
                     .foregroundStyle(PanelTheme.Palette.secondaryText)
                     .lineLimit(1)
+                if isRunning {
+                    // A ticking clock turns "is it stuck?" into information. A slow
+                    // provider is common enough that the wait should be visible.
+                    TimelineView(.periodic(from: turn.askedAt, by: 1)) { context in
+                        Text(Formatting.duration(context.date.timeIntervalSince(turn.askedAt)))
+                            .font(PanelTheme.Font.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                    }
+                }
                 Spacer(minLength: 0)
                 if !isRunning {
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
@@ -108,14 +118,10 @@ struct ProcessTrailView: View {
         return parts.joined(separator: " · ")
     }
 
+    /// The live line while a turn runs. Search progress comes from the turn itself —
+    /// see `ResearchTurn.runningProgressLabel` — so both platforms show the same ticks.
     private var runningLine: String {
-        switch turn.stage {
-        case .searching where !turn.searches.isEmpty:
-            return "Searching the web · \(turn.searches.count) "
-                + "quer\(turn.searches.count == 1 ? "y" : "ies")"
-        default:
-            return turn.stage.label
-        }
+        turn.runningProgressLabel
     }
 
     // MARK: Detail

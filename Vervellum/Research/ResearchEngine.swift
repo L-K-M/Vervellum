@@ -23,8 +23,16 @@ final class ResearchEngine: ObservableObject {
     private let preferences: CorePreferences
     private let secrets: SecretStore
     private let logSink: LogSink
+    private let makeRunner: (ResearchRunner.Environment, ResearchTrace) -> ResearchRunning
+    private let deliver: (@escaping () -> Void) -> Void
     private var task: Task<Void, Never>?
     private var runningTurnID: UUID?
+
+    /// Rate-limits the streamed snapshots before they republish the thread. See
+    /// `SnapshotCoalescer` for the rule; optional because it can only be built in
+    /// `init` (its publish closure needs `self`), and every use is a `?.` rather than
+    /// an implicit unwrap.
+    private var coalescer: SnapshotCoalescer?
 
     /// Called whenever the thread changes, so the store can persist it.
     var onThreadChanged: ((ResearchThread) -> Void)?
@@ -32,11 +40,23 @@ final class ResearchEngine: ObservableObject {
     init(thread: ResearchThread = ResearchThread(),
          preferences: CorePreferences,
          secrets: SecretStore,
-         logSink: LogSink = OSLogSink()) {
+         logSink: LogSink = OSLogSink(),
+         makeRunner: @escaping (ResearchRunner.Environment, ResearchTrace) -> ResearchRunning = {
+             ResearchRunner(environment: $0, trace: $1)
+         },
+         deliver: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) },
+         after: @escaping (TimeInterval, @escaping () -> Void) -> Void = {
+             DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1)
+         }) {
         self.thread = thread
         self.preferences = preferences
         self.secrets = secrets
         self.logSink = logSink
+        self.makeRunner = makeRunner
+        self.deliver = deliver
+        coalescer = SnapshotCoalescer(
+            after: after,
+            publish: { [weak self] turn in self?.applyNow(turn) })
     }
 
     // MARK: Thread control
@@ -57,6 +77,8 @@ final class ResearchEngine: ObservableObject {
     /// changing their mind.
     func cancel() {
         guard let task else { return }
+        coalescer?.flush()
+        coalescer?.discardPending()
         task.cancel()
         self.task = nil
         if let id = runningTurnID {
@@ -64,6 +86,7 @@ final class ResearchEngine: ObservableObject {
                 if !turn.stage.isTerminal {
                     turn.stage = .cancelled
                     turn.duration = Date().timeIntervalSince(turn.askedAt)
+                    turn.applyCitationValidation(sourceCount: turn.sources.count)
                 }
             }
         }
@@ -93,22 +116,22 @@ final class ResearchEngine: ObservableObject {
         // would be a reference to a captured `var` in concurrently-executing code.
         let submitted = turn
         let history = thread.turns.filter { $0.id != id }
-        let runner = ResearchRunner(
-            environment: .init(preferences: preferences, secrets: secrets),
-            trace: ResearchTrace(sink: logSink))
+        let runner = makeRunner(.init(preferences: preferences, secrets: secrets),
+                                ResearchTrace(sink: logSink))
 
+        let deliver = self.deliver
         task = Task { [weak self] in
             // The runner reports from whatever thread it is running on, so every
             // snapshot is hopped onto the main queue in order. `async` is FIFO, so the
             // streamed chunks arrive in the order they were produced.
             let finished = await runner.run(submitted, mode: mode, history: history) { snapshot in
-                DispatchQueue.main.async { self?.apply(snapshot) }
+                deliver { self?.apply(snapshot) }
             }
             // The same queue as the snapshots, not `MainActor.run`. Both land on the
             // main thread, but mixing the two mechanisms means the completion could be
             // scheduled ahead of snapshots already queued — and the final turn would
             // then be overwritten by an earlier, partial one.
-            DispatchQueue.main.async { self?.finish(id, with: finished) }
+            deliver { self?.finish(id, with: finished) }
         }
     }
 
@@ -130,10 +153,24 @@ final class ResearchEngine: ObservableObject {
 
     // MARK: Turn mutation
 
+    /// A snapshot from the running turn. Runs on the main queue (see `ask`), which is
+    /// the queue the coalescer is documented to live on.
     private func apply(_ snapshot: ResearchTurn) {
-        guard let index = thread.turns.firstIndex(where: { $0.id == snapshot.id }) else { return }
+        guard snapshot.id == runningTurnID else { return }
+        coalescer?.receive(snapshot)
+    }
+
+    /// Publishes a snapshot directly — the coalescer's flush path and `finish`'s final
+    /// turn both land here.
+    private func applyNow(_ snapshot: ResearchTurn) {
+        guard snapshot.id == runningTurnID,
+              let index = thread.turns.firstIndex(where: { $0.id == snapshot.id }) else { return }
         thread.turns[index] = snapshot
         thread.updatedAt = Date()
+        // Published here rather than only at ask/finish so the debounced archive keeps
+        // receiving the growing answer: a crash mid-stream used to lose everything the
+        // run had produced so far, because nothing called save between the two.
+        publishChange()
     }
 
     private func update(_ id: UUID, _ body: (inout ResearchTurn) -> Void) {
@@ -143,13 +180,22 @@ final class ResearchEngine: ObservableObject {
     }
 
     private func finish(_ id: UUID, with turn: ResearchTurn) {
-        apply(turn)
-        if runningTurnID == id {
-            runningTurnID = nil
-            isRunning = false
-            task = nil
-        }
+        // A cancelled run cannot overwrite Stop or discard a newer run's pending work.
+        guard runningTurnID == id else { return }
+        // The finished turn is the whole truth; any coalesced snapshot still waiting is
+        // older by definition, and a scheduled flush firing after this would otherwise
+        // repaint the turn as mid-answer.
+        coalescer?.discardPending()
+        applyNow(turn)
+        runningTurnID = nil
+        isRunning = false
+        task = nil
         publishChange()
+    }
+
+    /// Make the latest displayed progress durable before dismissal or termination.
+    func flushProgress() {
+        coalescer?.flush()
     }
 
     private func publishChange() {

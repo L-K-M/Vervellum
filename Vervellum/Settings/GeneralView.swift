@@ -88,6 +88,14 @@ struct GeneralView: View {
                     Button("Delete all…") { showsEraseConfirmation = true }
                         .disabled(store.library.threads.isEmpty)
                 }
+                // The file is still there. Saying so beats a toggle that reads "off"
+                // over questions that are still on disk.
+                if let failure = store.eraseFailure {
+                    Text(failure)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             SettingsSection(

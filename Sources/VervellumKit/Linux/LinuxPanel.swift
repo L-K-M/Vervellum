@@ -26,6 +26,7 @@ final class LinuxPanel {
     private let environment: LinuxEnvironment
     private let window: GTK.Widget
     private let threadBox: GTK.Widget
+    private let threadScroller: GTK.Widget
     private let composer: GTK.Widget
     private let sendButton: GTK.Widget
     private let statusLabel: GTK.Widget
@@ -40,12 +41,16 @@ final class LinuxPanel {
     /// When the thread was last drawn. A streamed answer produces a snapshot per token,
     /// and rebuilding the widget tree that often is visibly slow on a long thread.
     private var lastRender = Date.distantPast
+    /// Set when a turn is appended, so the next render scrolls to it even if the reader
+    /// had scrolled up: a question just asked is always the thing to look at.
+    private var scrollToNewest = false
 
     init(application: UnsafeMutablePointer<GtkApplication>,
          environment: LinuxEnvironment = .shared) {
         self.environment = environment
 
         window = gtk_application_window_new(application)!
+        GTK.hideOnClose(window)
         gtk_window_set_title(vv_window(window), "Vervellum")
         gtk_window_set_default_size(vv_window(window), 560, 680)
 
@@ -58,13 +63,16 @@ final class LinuxPanel {
         // leave *both* attached, and the placeholder would still fire.
         sendButton = gtk_button_new_with_label("Ask")!
 
+        threadScroller = GTK.scrolled(threadBox)
+
         gtk_window_set_child(vv_window(window), root)
         GTK.append(root, header())
         GTK.margins(threadBox, 16)
-        GTK.append(root, GTK.scrolled(threadBox))
+        GTK.append(root, threadScroller)
         GTK.append(root, footer())
 
-        GTK.applyStylesheet(Self.stylesheet)
+        GTK.addStyle(threadBox, "thread")
+        GTK.applyStylesheet(Self.stylesheet(textScale: environment.preferences.textScale))
         wireComposer()
         render()
     }
@@ -73,8 +81,14 @@ final class LinuxPanel {
 
     /// The shortcut's action. A second press hides the window rather than raising it
     /// again, which is what "toggle" has to mean for a summoned panel.
+    ///
+    /// "Up" means visible *and* active. On macOS the panel floats above everything,
+    /// so visible means on top; here the compositor owns stacking, and a window that
+    /// is visible but buried behind the editor the user clicked into is, to them, not
+    /// up. Hiding it would make the shortcut appear to do nothing and cost a second
+    /// press; presenting it is what the shortcut means.
     func toggle() {
-        if gtk_widget_get_visible(window) != 0 {
+        if gtk_widget_get_visible(window) != 0, gtk_window_is_active(vv_window(window)) != 0 {
             gtk_widget_set_visible(window, 0)
         } else {
             show()
@@ -142,11 +156,19 @@ final class LinuxPanel {
             }
             guard GTK.isReturn(keyval) else { return false }
             // With submit-on-Return, a bare Return sends and Shift-Return adds a line;
-            // with the preference inverted, so are they.
+            // with the preference inverted, so are they. Control-Return always sends,
+            // the way Command-Return does on macOS, so there is one key that asks
+            // whichever way Return is configured.
             let submitOnReturn = self.environment.preferences.submitOnReturn
-            let submitting = GTK.hasShift(modifiers) ? !submitOnReturn : submitOnReturn
+            let submitting = GTK.hasControl(modifiers)
+                || (GTK.hasShift(modifiers) ? !submitOnReturn : submitOnReturn)
             guard submitting else { return false }   // let the text view insert a newline
-            self.submitOrStop()
+            // Return never stops a run. A user who types a follow-up while the answer
+            // streams and presses Return out of habit must not lose the answer; the
+            // draft stays and the key is swallowed, exactly as on macOS. Only the Stop
+            // button cancels.
+            guard !self.isRunning else { return true }
+            self.submit()
             return true
         }
     }
@@ -167,11 +189,17 @@ final class LinuxPanel {
         render()
     }
 
+    /// The button: Ask while idle, Stop while a run is in flight.
     private func submitOrStop() {
         if isRunning {
             runningTask?.cancel()
             return
         }
+        submit()
+    }
+
+    private func submit() {
+        guard !isRunning else { return }
         let text = GTK.text(of: composer).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
@@ -209,6 +237,8 @@ final class LinuxPanel {
         thread.turns.append(turn)
         runningTurnID = turn.id
         isRunning = true
+        scrollToNewest = true
+        environment.archive.save(persistableThread)
         render()
 
         // Informational turns (`/help`) are filtered out again by `ResearchContext`;
@@ -233,7 +263,8 @@ final class LinuxPanel {
     }
 
     private func apply(_ snapshot: ResearchTurn) {
-        guard let index = thread.turns.firstIndex(where: { $0.id == snapshot.id }) else { return }
+        guard snapshot.id == runningTurnID,
+              let index = thread.turns.firstIndex(where: { $0.id == snapshot.id }) else { return }
         let previous = thread.turns[index]
         thread.turns[index] = snapshot
         thread.updatedAt = Date()
@@ -242,11 +273,9 @@ final class LinuxPanel {
         // Anything structural — a new stage, sources arriving, verdicts landing — is
         // drawn immediately, because those are the moments the user is waiting for. The
         // final frame is guaranteed by `finish(_:)`, which always draws.
-        let structural = previous.stage != snapshot.stage
-            || previous.sources.count != snapshot.sources.count
-            || previous.findings.count != snapshot.findings.count
-            || previous.notices != snapshot.notices
-        guard structural || Date().timeIntervalSince(lastRender) >= 0.1 else { return }
+        let structural = SnapshotCoalescer.isStructural(snapshot, relativeTo: previous)
+        guard structural || Date().timeIntervalSince(lastRender) >= SnapshotCoalescer.defaultInterval else { return }
+        environment.archive.save(persistableThread)
         render()
     }
 
@@ -262,6 +291,16 @@ final class LinuxPanel {
         render()
     }
 
+    /// Re-asks a turn's question the way it was asked. A turn that is still last is
+    /// replaced in place; an older one is asked again at the end, where the answer
+    /// belongs — the same rule the macOS engine follows.
+    private func retry(_ turn: ResearchTurn) {
+        guard !isRunning else { return }
+        let mode: ResearchRunner.Mode = turn.wasAskedDirectly ? .direct : .research
+        if thread.turns.last?.id == turn.id { thread.turns.removeLast() }
+        ask(turn.question, mode: mode)
+    }
+
     /// A message from the panel itself — `/help`, or a command this platform lacks —
     /// shown in the thread as a turn with no question.
     ///
@@ -272,6 +311,7 @@ final class LinuxPanel {
         turn.answer = markdown
         turn.stage = .complete
         thread.turns.append(turn)
+        scrollToNewest = true
         render()
     }
 
@@ -286,6 +326,12 @@ final class LinuxPanel {
 
     private func render() {
         lastRender = Date()
+        // Sampled before the rebuild, which resets the content height: a reader who
+        // had scrolled up to re-read is left where they were; one who was at the end
+        // follows the answer as it grows. The rebuild keeps the scroller's value, so
+        // without this a new question and its answer landed below the fold.
+        let follow = scrollToNewest || GTK.isScrolledToBottom(threadScroller)
+        scrollToNewest = false
         GTK.removeAllChildren(of: threadBox)
 
         if thread.turns.isEmpty {
@@ -297,8 +343,15 @@ final class LinuxPanel {
         }
 
         gtk_label_set_markup(vv_label(statusLabel),
-                             isRunning ? "<span size=\"small\">Researching… press Ask again to stop</span>" : "")
+                             isRunning ? "<span size=\"small\">Researching… press Stop to cancel</span>" : "")
         gtk_button_set_label(vv_button(sendButton), isRunning ? "Stop" : "Ask")
+
+        if follow {
+            // One idle hop later, after the new children have been laid out and the
+            // adjustment's upper bound reflects them.
+            let scroller = threadScroller
+            GTK.onMainLoop { GTK.scrollToBottom(scroller) }
+        }
     }
 
     private func turnView(_ turn: ResearchTurn) -> GTK.Widget {
@@ -308,7 +361,12 @@ final class LinuxPanel {
             let question = GTK.markupLabel(PangoMarkup.question(turn.question))
             GTK.addStyle(question, "question")
             GTK.append(box, question)
-            GTK.append(box, GTK.markupLabel(PangoMarkup.trail(turn)))
+            // Honor the same preference as macOS; the status bar still shows activity.
+            if environment.preferences.showProcessTrail
+                && (!turn.stage.isTerminal || !turn.searches.isEmpty
+                    || !turn.reading.isEmpty || turn.stage == .failed) {
+                GTK.append(box, GTK.markupLabel(PangoMarkup.trail(turn)))
+            }
         }
 
         if let notices = PangoMarkup.notices(turn.notices) {
@@ -316,6 +374,13 @@ final class LinuxPanel {
         }
         if let failure = turn.failure {
             GTK.append(box, GTK.markupLabel(PangoMarkup.failure(failure)))
+        }
+        // One click re-asks, as on macOS. Retyping the question was the only recourse
+        // before, and the composer had been cleared on submit.
+        if turn.failure != nil || turn.stage == .cancelled, !turn.question.isEmpty {
+            let retry = GTK.button("Try again") { [weak self] in self?.retry(turn) }
+            gtk_widget_set_halign(retry, GTK_ALIGN_START)
+            GTK.append(box, retry)
         }
         if !turn.answer.isEmpty {
             let answer = GTK.markupLabel(PangoMarkup.answer(turn.answer, sources: turn.sources))
@@ -366,20 +431,37 @@ final class LinuxPanel {
                              + "VERVELLUM_SEARCH_KEY. Keys are read from "
                              + environment.secrets.backendDescription + ".")
         }
+        // The hint follows the preference; a hint that says the opposite of what Return
+        // does reads as the app being broken.
+        let keys = environment.preferences.submitOnReturn
+            ? "Return asks · Shift-Return adds a line"
+            : "Return adds a line · Shift-Return asks"
         return "<span weight=\"bold\">Ask a question.</span>\n\n"
             + GTK.escape("Vervellum plans web searches, runs them, then writes an answer that "
                          + "cites only what it found — and grades its own claims against that "
                          + "evidence.")
             + "\n\n<span size=\"small\">"
-            + GTK.escape("Return asks · Shift-Return adds a line · Esc clears, then closes · "
+            + GTK.escape(keys + " · Ctrl-Return always asks · Esc clears, then closes · "
                          + "/ for commands")
             + "</span>"
     }
 
-    private static let stylesheet = """
-        .question { font-size: 1.05em; }
-        .composer { border: 1px solid alpha(currentColor, 0.2); border-radius: 8px; }
-        .status { opacity: 0.7; }
-        """
+    /// The panel's stylesheet, with the thread scaled by the shared `textScale`
+    /// preference.
+    ///
+    /// One rule on the thread container is enough: GTK's `em` is relative to the
+    /// parent's size, and every `size="small"` in the Pango markup is relative to its
+    /// label, so headings, trails and citations all scale together. The composer and
+    /// header keep the system size, as on macOS. The preference arrives clamped;
+    /// `String(format:)` writes the decimal point the CSS parser expects whatever the
+    /// user's locale.
+    static func stylesheet(textScale: Double) -> String {
+        return """
+            .thread { font-size: \(String(format: "%.2fem", textScale)); }
+            .question { font-size: 1.05em; }
+            .composer { border: 1px solid alpha(currentColor, 0.2); border-radius: 8px; }
+            .status { opacity: 0.7; }
+            """
+    }
 }
 #endif

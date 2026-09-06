@@ -33,6 +33,7 @@ enum SecretRedactor {
             // in a selection. Matched first so its base64 body is never re-matched.
             ("pem", #"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"#),
             // Authorization headers, copied wholesale out of curl commands and logs.
+            // Alphabetic tokens are legal too; prefer a false positive to a leaked key.
             ("bearer", #"(?i)\b(?:bearer|basic|token)\s+[A-Za-z0-9._~+/=-]{16,}"#),
             // `KEY=value` / `password: value` from .env files, YAML and config dumps.
             // The value's character class deliberately excludes brackets and spaces:
@@ -43,8 +44,11 @@ enum SecretRedactor {
             // Hence the optional prefix and suffix groups.
             ("assignment",
              #"(?i)\b(?:[A-Za-z0-9]+[_-]){0,3}(?:api[_-]?key|secret|token|password|passwd|pwd|access[_-]?key|private[_-]?key|client[_-]?secret)(?:[_-][A-Za-z0-9]+){0,2}\b\s*[:=]\s*["']?[A-Za-z0-9._~+/=-]{12,}["']?"#),
-            // Vendor-prefixed keys, which are self-identifying by design.
-            ("vendor", #"\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}"#),
+            // Vendor-prefixed keys, which are self-identifying by design. Stripe's use an
+            // underscore and name the mode — sk_live_, rk_test_ — and a bare one copied
+            // out of a dashboard or a terminal has no `=` or `Bearer` for the other
+            // patterns to anchor on.
+            ("vendor", #"\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}|\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,}"#),
             ("github", #"\bgh[pousr]_[A-Za-z0-9]{20,}"#),
             ("slack", #"\bxox[abposr]-[A-Za-z0-9-]{10,}"#),
             ("google", #"\bAIza[A-Za-z0-9_-]{30,}"#),

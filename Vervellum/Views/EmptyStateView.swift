@@ -11,6 +11,9 @@ struct EmptyStateView: View {
     let isConfigured: Bool
     let summonShortcut: String
     var onOpenSettings: () -> Void
+    /// Loads the composer with the example — seeding, not submitting. The user
+    /// should be able to edit or discard a suggestion, not be committed to it.
+    var onSeedComposer: (String) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.large) {
@@ -37,6 +40,27 @@ struct EmptyStateView: View {
                 hint(summonShortcut, "summon or dismiss from anywhere")
             }
             .padding(.top, PanelTheme.Space.small)
+
+            // Three questions that show what the tool is for: current, checkable,
+            // and worth citing. Clicking one seeds the composer.
+            VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
+                Text("TRY")
+                    .font(PanelTheme.Font.label)
+                    .tracking(0.7)
+                    .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                ForEach(Self.examples, id: \.self) { example in
+                    Button { onSeedComposer(example) } label: {
+                        Text(example)
+                            .font(PanelTheme.Font.caption)
+                            .foregroundStyle(PanelTheme.Palette.accent)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.top, PanelTheme.Space.medium)
         }
     }
 
@@ -57,6 +81,12 @@ struct EmptyStateView: View {
                 .tint(PanelTheme.Palette.accent)
         }
     }
+
+    private static let examples: [String] = [
+        "Summarize today's top technology news",
+        "Is Pluto a planet? What do astronomers currently say?",
+        "Compare OLED and mini-LED displays for a laptop",
+    ]
 
     private func hint(_ key: String, _ meaning: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {

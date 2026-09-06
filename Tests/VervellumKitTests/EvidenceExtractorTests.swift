@@ -21,6 +21,14 @@ final class EvidenceExtractorTests: XCTestCase {
         XCTAssertEqual(sources[1].domain, "b.example.com")
     }
 
+    /// Wikipedia's disambiguated titles end in a parenthesis; a source link that lost
+    /// it would open the wrong page.
+    func testKeepsParenthesesInAStructuredURL() {
+        let planet = "https://en.wikipedia.org/wiki/Mercury_(planet)"
+        let payload: [String: Any] = ["results": [["title": "Mercury (planet)", "url": planet]]]
+        XCTAssertEqual(EvidenceExtractor.sources(from: [payload]).first?.url, planet)
+    }
+
     /// Two searches routinely surface the same page; giving it two citation numbers
     /// would make the source list lie about how much evidence there is.
     func testCollapsesDuplicateURLs() {
@@ -135,5 +143,20 @@ final class EvidenceExtractorTests: XCTestCase {
     func testHonoursAStartingNumber() {
         let payload: [String: Any] = ["results": [["title": "T", "url": "https://e.example.com/x"]]]
         XCTAssertEqual(EvidenceExtractor.sources(from: [payload], startingAt: 5).first?.number, 5)
+    }
+}
+
+/// Two people with the same server response must see the same source numbers.
+final class EvidenceNumberingTests: XCTestCase {
+
+    func testNumberingFollowsSortedKeysNotDictionaryOrder() {
+        let result: [String: Any] = [
+            "results": [["url": "https://b.example.com/", "title": "B"]],
+            "related": [["url": "https://a.example.com/", "title": "A"]],
+        ]
+        let numbered = (0..<20).map { _ in EvidenceExtractor.sources(from: [result]).map(\.url) }
+        XCTAssertEqual(Set(numbered.map { $0.joined(separator: " ") }).count, 1, "numbering varied between runs")
+        // "related" sorts before "results".
+        XCTAssertEqual(numbered[0], ["https://a.example.com/", "https://b.example.com/"])
     }
 }

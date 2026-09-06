@@ -20,6 +20,11 @@ import Foundation
 /// The tool's real `inputSchema` is fetched rather than assumed: the model is given
 /// that schema to write its query arguments against, and the arguments are checked
 /// back against it before the call goes out.
+///
+/// Recognized names cover z.ai, Brave, Tavily, Exa and SearXNG. Unknown operations
+/// are never inferred from descriptions or query-shaped arguments.
+/// Everything downstream is already backend-agnostic: the planner writes arguments
+/// against whatever schema was advertised, and `EvidenceExtractor` walks any result.
 final class SearchMCPClient {
 
     /// One MCP tool as advertised by `tools/list`.
@@ -33,6 +38,7 @@ final class SearchMCPClient {
             guard let properties = inputSchema["properties"] as? [String: Any] else { return [] }
             return Set(properties.keys)
         }
+
     }
 
     private let endpoint: URL
@@ -43,8 +49,13 @@ final class SearchMCPClient {
 
     private(set) var tool: Tool?
 
-    /// The tool names z.ai has shipped for the same search capability.
-    private static let searchToolNames: Set<String> = ["web_search_prime", "webSearchPrime"]
+    /// Tool names known to be a web search: z.ai's two spellings first, then the names
+    /// the common MCP search servers ship. Unknown operations are never inferred.
+    private static let knownSearchToolNames: [String] = [
+        "web_search_prime", "webSearchPrime",
+        "brave_web_search", "tavily-search", "tavily_search", "web_search_exa",
+        "searxng_web_search", "web_search",
+    ]
 
     init(endpoint: URL, apiKey: String, trace: ResearchTrace, transport: HTTPTransport = .shared) {
         self.endpoint = endpoint
@@ -76,15 +87,33 @@ final class SearchMCPClient {
 
         let listing = try await call("tools/list", params: [:])
         let tools = listing["tools"] as? [[String: Any]] ?? []
-        guard let match = tools.first(where: {
-            Self.searchToolNames.contains(($0["name"] as? String) ?? "")
-        }), let name = match["name"] as? String else {
-            throw ResearchError("The search provider did not advertise a supported web-search tool.")
+        guard let resolved = Self.resolveSearchTool(from: tools) else {
+            // Names are provider-controlled too; never copy them into diagnostics.
+            throw ResearchError("The search provider did not advertise a recognized web-search tool name. "
+                                + "Check the endpoint's compatibility with the supported search providers.")
         }
-        tool = Tool(name: name,
-                    description: match["description"] as? String,
-                    inputSchema: match["inputSchema"] as? [String: Any] ?? [:])
-        trace.log("Search tool ready: \(name)")
+        tool = resolved
+        trace.log("Search tool ready")
+    }
+
+    /// Picks the web-search tool out of a `tools/list` reply.
+    ///
+    /// Accept known names in preference order.
+    /// Unknown names are rejected: a query field and "web search" in a description
+    /// cannot distinguish searching from deleting search history.
+    ///
+    /// Pure, so the rules are unit-tested with fixture listings.
+    static func resolveSearchTool(from tools: [[String: Any]]) -> Tool? {
+        let candidates = tools.compactMap { entry -> Tool? in
+            guard let name = entry["name"] as? String, !name.isEmpty else { return nil }
+            return Tool(name: name,
+                        description: entry["description"] as? String,
+                        inputSchema: entry["inputSchema"] as? [String: Any] ?? [:])
+        }
+        for known in knownSearchToolNames {
+            if let match = candidates.first(where: { $0.name == known }) { return match }
+        }
+        return nil
     }
 
     // MARK: Search
@@ -151,6 +180,19 @@ final class SearchMCPClient {
         try checkGatewayEnvelope(body, method: method)
     }
 
+    /// Whether a gateway's own message describes a bad key rather than something else.
+    ///
+    /// "token" on its own is deliberately not a signal: quota and billing messages say
+    /// "insufficient token balance" and "tokens per minute", and reading those as an
+    /// invalid key tells the user to replace a key that works. The text is classified
+    /// only; it is never shown.
+    static func describesAuthenticationFailure(_ message: String) -> Bool {
+        let lowered = message.lowercased()
+        let markers = ["auth", "api key", "apikey", "api-key", "invalid token", "token expired",
+                       "expired token", "invalid key", "unauthorized", "unauthorised", "forbidden"]
+        return markers.contains { lowered.contains($0) }
+    }
+
     private func captureSession(from responseHeaders: [String: String]) {
         for (name, value) in responseHeaders where name.lowercased() == "mcp-session-id" {
             headers["Mcp-Session-Id"] = value
@@ -163,9 +205,9 @@ final class SearchMCPClient {
     private func checkGatewayEnvelope(_ body: [String: Any], method: String) throws {
         guard (body["success"] as? Bool) == false else { return }
         let code = body["code"] as? Int
-        let message = ((body["msg"] as? String) ?? "").lowercased()
+        let message = (body["msg"] as? String) ?? ""
         trace.log("Search gateway rejection method=\(method) code=\(code.map(String.init) ?? "unknown")")
-        if message.contains("auth") || message.contains("api key") || message.contains("token") {
+        if Self.describesAuthenticationFailure(message) {
             throw ResearchError(
                 "The search provider rejected the API key (authentication failed). "
                 + "Replace the web-search key in Settings ▸ Providers.")

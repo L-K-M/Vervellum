@@ -23,6 +23,17 @@ struct PanelRootView: View {
     @State private var redactionNote: Int?
     /// Earlier questions, newest first, for ↑/↓ recall in the composer.
     @State private var recallIndex: Int?
+    /// Whether the thread is scrolled to its end. Streams auto-scroll only while
+    /// pinned, so reading back during an answer is never undone by the next token.
+    @State private var isPinnedToBottom = true
+
+    /// The measured width of the composer's row, once layout has run.
+    @State private var composerRowWidth: CGFloat?
+
+    /// Horizontal room the send button and its spacing take from the composer's row.
+    /// Named rather than inlined: the height estimate silently drifts when the button
+    /// is restyled, and the bug is invisible until the composer wraps a line early.
+    private static let sendButtonReservation: CGFloat = 24 + PanelTheme.Space.small
 
     /// Whether the providers are configured, sampled rather than computed.
     ///
@@ -48,6 +59,7 @@ struct PanelRootView: View {
             if showsHistory {
                 HistoryView(store: store,
                             onOpen: openThread,
+                            onDelete: deleteThread,
                             onClose: { showsHistory = false })
             } else {
                 thread
@@ -89,6 +101,13 @@ struct PanelRootView: View {
         // state before the user had typed anything. The window tells us when it closes.
         .onReceive(NotificationCenter.default.publisher(for: .vervellumSettingsDidClose)) { _ in
             refreshConfiguredState()
+            // Delete All and history off/on erase stored threads. Release the open
+            // copy too; archive tombstones also reject any late runner snapshots.
+            if store.isHistoryEnabled, !engine.thread.isEmpty,
+               !store.library.threads.contains(where: { $0.id == engine.thread.id }) {
+                engine.startNewThread()
+                recallIndex = nil
+            }
         }
         // Command shortcuts raised by the panel window. See `PanelCommand`.
         .onReceive(NotificationCenter.default.publisher(for: .vervellumPanelCommand)) { note in
@@ -115,7 +134,8 @@ struct PanelRootView: View {
                     if engine.thread.isEmpty && !showsHelp {
                         EmptyStateView(isConfigured: isConfigured,
                                        summonShortcut: preferences.summonHotkey.displayString,
-                                       onOpenSettings: onOpenSettings)
+                                       onOpenSettings: onOpenSettings,
+                                       onSeedComposer: { draft = $0 })
                             .padding(.top, PanelTheme.Space.section)
                     }
                     if showsHelp {
@@ -138,8 +158,17 @@ struct PanelRootView: View {
                 }
                 .padding(.horizontal, PanelTheme.Space.gutter)
                 .padding(.vertical, PanelTheme.Space.large)
+                // Keep observation alive outside lazy children, but inside the scroll content.
+                .background(BottomSentinel { pinned in isPinnedToBottom = pinned })
             }
+            .overlay(alignment: .bottom) {
+                if !isPinnedToBottom, engine.isRunning {
+                    jumpToLatest(proxy)
+                }
+            }
+            .animation(PanelTheme.Motion.disclosure, value: isPinnedToBottom)
             .onChange(of: engine.thread.turns.last?.answer) { _, _ in
+                guard isPinnedToBottom else { return }
                 scrollToBottom(proxy)
             }
             .onChange(of: engine.thread.turns.count) { _, _ in
@@ -154,6 +183,26 @@ struct PanelRootView: View {
         // Unanimated: an animated scroll re-targeted on every streamed token fights
         // itself and the text visibly judders.
         proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+    }
+
+    /// The way back to the stream after scrolling up mid-answer. Tapping it scrolls,
+    /// and the sentinel then re-pins, so follow mode resumes on its own.
+    private func jumpToLatest(_ proxy: ScrollViewProxy) -> some View {
+        Button {
+            scrollToBottom(proxy)
+        } label: {
+            Label("Latest", systemImage: "arrow.down")
+                .font(PanelTheme.Font.caption)
+                .padding(.horizontal, PanelTheme.Space.medium)
+                .padding(.vertical, PanelTheme.Space.small)
+                .background(PanelTheme.Palette.accent,
+                            in: Capsule(style: .continuous))
+                .foregroundStyle(.white)
+        }
+        .buttonStyle(.plain)
+        .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+        .padding(.bottom, PanelTheme.Space.small)
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
 
     // MARK: Composer
@@ -180,12 +229,18 @@ struct PanelRootView: View {
                              isEnabled: !engine.isRunning,
                              onSubmit: { submit(draft) },
                              onArrow: recall)
-                    // The composer's own width: the panel minus its gutters and the
-                    // send button. Measured rather than guessed, so a widened panel
-                    // stops growing the field a line too early.
+                    // The composer's height for its content, laid out at the width the
+                    // row will actually give it: the measured row width minus what the
+                    // send button and its spacing take. Measured rather than derived
+                    // from the panel-width preference, which is unclamped while
+                    // PanelPlacement clamps the real panel on a small display or a
+                    // Stage Manager slice — a height computed against a width that no
+                    // longer exists wraps the field a line too early. The estimate only
+                    // bridges the first frame, before any layout has happened.
                     .frame(height: ComposerView.height(
                         for: draft,
-                        width: preferences.panelWidth - PanelTheme.Space.medium * 2 - 34))
+                        width: (composerRowWidth ?? estimatedComposerRowWidth)
+                            - Self.sendButtonReservation))
 
                 Button {
                     if engine.isRunning { engine.cancel() } else { submit(draft) }
@@ -206,9 +261,24 @@ struct PanelRootView: View {
                 .help(engine.isRunning ? "Stop the research (⌘.)" : "Ask")
                 .padding(.bottom, 3)
             }
+            // Measured on the row, not the composer: the composer's own width already
+            // excludes the send button, and subtracting the reservation from it too
+            // would under-estimate and wrap early — the very bug this fixes.
+            .background(GeometryReader { geometry in
+                Color.clear.onAppear { composerRowWidth = geometry.size.width }
+                    .onChange(of: geometry.size.width) { _, width in
+                        composerRowWidth = width
+                    }
+            })
         }
         .padding(.horizontal, PanelTheme.Space.medium)
         .padding(.vertical, PanelTheme.Space.small)
+    }
+
+    /// Width the composer's row should have, per the width preference — used only
+    /// until real geometry arrives. Same arithmetic the row itself applies.
+    private var estimatedComposerRowWidth: CGFloat {
+        preferences.panelWidth - PanelTheme.Space.medium * 2
     }
 
     private var placeholder: String {
@@ -257,10 +327,14 @@ struct PanelRootView: View {
             return
         case .ask(let question):
             showsHelp = false
+            // The composer is live while the history list is open, and a question
+            // asked from there must not run invisibly behind it.
+            showsHistory = false
             draft = ""
             engine.ask(question, mode: .research)
         case .direct(let question):
             showsHelp = false
+            showsHistory = false
             draft = ""
             engine.ask(question, mode: .direct)
         case .newThread:
@@ -274,6 +348,7 @@ struct PanelRootView: View {
             onOpenSettings()
         case .copyLastAnswer:
             draft = ""
+            engine.flushProgress()
             guard let last = engine.thread.turns.last else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(last.transcript, forType: .string)
@@ -332,6 +407,18 @@ struct PanelRootView: View {
         draft = ""
         recallIndex = nil
         engine.startNewThread()
+    }
+
+    /// Deleting the open thread must take it out of the engine too, or the next
+    /// change the engine publishes writes the deleted thread back into the library.
+    /// The history list stays open and the draft is kept: the user is tidying, not
+    /// starting over.
+    private func deleteThread(_ thread: ResearchThread) {
+        store.delete(id: thread.id)
+        if engine.thread.id == thread.id {
+            engine.startNewThread()
+            recallIndex = nil
+        }
     }
 
     private func openThread(_ thread: ResearchThread) {

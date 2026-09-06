@@ -146,6 +146,11 @@ enum GTK {
 
     // MARK: Layout
 
+    /// Keep borrowed widget pointers valid when the window manager closes the panel.
+    static func hideOnClose(_ window: Widget) {
+        gtk_window_set_hide_on_close(vv_window(window), 1)
+    }
+
     static func verticalBox(spacing: Int32 = 0) -> Widget { vv_vbox(spacing) }
     static func horizontalBox(spacing: Int32 = 0) -> Widget { vv_hbox(spacing) }
 
@@ -204,6 +209,22 @@ enum GTK {
             gtk_widget_set_vexpand(scroller, 1)
         }
         return scroller
+    }
+
+    /// Whether the scroller is at (or within a few pixels of) the end of its content.
+    static func isScrolledToBottom(_ scroller: Widget) -> Bool {
+        guard let adjustment = gtk_scrolled_window_get_vadjustment(vv_scrolled(scroller)) else { return true }
+        let value = gtk_adjustment_get_value(adjustment)
+        let end = gtk_adjustment_get_upper(adjustment) - gtk_adjustment_get_page_size(adjustment)
+        return value >= end - 8
+    }
+
+    /// Scrolls to the end of the content. Call from an idle after a rebuild, once
+    /// the adjustment's upper bound reflects the new children.
+    static func scrollToBottom(_ scroller: Widget) {
+        guard let adjustment = gtk_scrolled_window_get_vadjustment(vv_scrolled(scroller)) else { return }
+        gtk_adjustment_set_value(adjustment,
+                                 gtk_adjustment_get_upper(adjustment) - gtk_adjustment_get_page_size(adjustment))
     }
 
     /// The composer: a wrapping text view.

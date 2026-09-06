@@ -56,15 +56,69 @@ final class TranscriptFormatterTests: XCTestCase {
         XCTAssertTrue(text.contains("Note: " + TurnNotice.noEvidence.message))
     }
 
-    /// A failed turn has no answer worth printing, and saying why is the only useful
-    /// thing left.
-    func testAFailedTurnReportsOnlyTheFailure() {
-        var subject = turn()
+    /// Failure before prose still has a useful explanation, but no evidence to export.
+    func testFailureBeforeAnAnswerReportsTheFailure() {
+        var subject = ResearchTurn(question: "Why?")
         subject.failure = "The provider rejected the API key."
         subject.stage = .failed
         let text = TranscriptFormatter.plainText(subject)
         XCTAssertTrue(text.contains("Failed: The provider rejected the API key."))
         XCTAssertFalse(text.contains("Sources"))
+    }
+
+    func testIncludesSourcesCitedOnlyByFindings() {
+        var subject = turn()
+        subject.findings.append(Finding(claim: "Counterevidence", verdict: .contradicted,
+                                        reasoning: "Another source disagrees.", sourceNumbers: [3, 1]))
+        let text = TranscriptFormatter.plainText(subject)
+        XCTAssertTrue(text.contains("[3] Three — https://three.example.com"))
+        XCTAssertEqual(text.components(separatedBy: "[1] One —").count, 2)
+        XCTAssertTrue(text.contains("[1] One — https://one.example.com\n"
+                                    + "[2] Two — https://two.example.com\n"
+                                    + "[3] Three — https://three.example.com"))
+    }
+
+    func testAssessmentFailureKeepsTheAnswerEvidenceAndCaveats() {
+        var subject = turn()
+        subject.stage = .failed
+        subject.failure = "The assessment did not finish."
+        subject.notices = [.invalidCitation]
+        let text = TranscriptFormatter.plainText(subject)
+        XCTAssertTrue(text.contains("Failed: The assessment did not finish."))
+        XCTAssertTrue(text.contains(subject.answer))
+        XCTAssertTrue(text.contains("[1] One — https://one.example.com"))
+        XCTAssertTrue(text.contains("SUPPORTED [1]"))
+        XCTAssertTrue(text.contains(subject.limitations))
+        XCTAssertTrue(text.contains(TurnNotice.invalidCitation.message))
+        XCTAssertTrue(text.contains("incomplete"))
+    }
+
+    func testEveryUnfinishedStageIsExplicit() {
+        for stage: ResearchStage in [.queued, .planning, .searching, .answering, .assessing,
+                                     .cancelled, .failed] {
+            var subject = turn()
+            subject.stage = stage
+            let text = TranscriptFormatter.plainText(subject)
+            XCTAssertTrue(text.contains(stage.label), stage.rawValue)
+            XCTAssertTrue(text.contains("incomplete"), stage.rawValue)
+            XCTAssertTrue(text.contains(subject.answer), stage.rawValue)
+        }
+    }
+
+    func testACompleteAnswerHasNoIncompleteStatus() {
+        XCTAssertFalse(TranscriptFormatter.plainText(turn()).contains("Status:"))
+    }
+
+    func testUnsourcedAndCancelledAnswersKeepTheirWarnings() {
+        var subject = ResearchTurn(question: "Direct question")
+        subject.answer = "Partial background answer."
+        subject.stage = .cancelled
+        subject.notices = [.noEvidence]
+        let text = TranscriptFormatter.plainText(subject)
+        XCTAssertTrue(text.contains("Cancelled"))
+        XCTAssertTrue(text.contains(TurnNotice.noEvidence.message))
+        XCTAssertTrue(text.contains(subject.answer))
+        XCTAssertFalse(text.contains("\nSources\n"))
     }
 
     func testTheModelHelperMatchesTheFormatter() {

@@ -57,6 +57,18 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     /// forever without ever tripping it.
     static let deadline: TimeInterval = 600
 
+    /// How long a request may go without a byte arriving before it is abandoned.
+    ///
+    /// An *idle* timeout on both platforms — Darwin documents it as the wait for
+    /// additional data, and FoundationNetworking rebuilds its timer on every chunk —
+    /// which is what a streamed answer wants: a token a second keeps it alive, and a
+    /// stall ends it. A non-streaming call is the opposite case. A plan or an
+    /// assessment sends nothing until the model has finished generating, so "idle"
+    /// there is the whole generation, and a local model working through a large
+    /// evidence block takes minutes. Those requests get `deadline` instead; see
+    /// `request(url:payload:headers:acceptsEventStream:)`.
+    static let idleTimeout: TimeInterval = 120
+
     // MARK: Session
 
     /// Built once in `init`, not lazily. `lazy` is not atomic, so two threads reaching
@@ -71,12 +83,11 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
 
     private static func makeSession(delegate: URLSessionDelegate) -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        // On Linux this is an *idle* timeout: the request timer is rebuilt on every
-        // chunk received, which is exactly the semantics a long-lived SSE stream wants.
+        // The idle timeout, overridden per request for non-streaming calls.
         // `timeoutIntervalForResource` is deliberately not set — it is stored but never
         // read by FoundationNetworking, so relying on it would be a timeout that
         // silently does nothing.
-        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForRequest = idleTimeout
         configuration.httpShouldSetCookies = false
         configuration.httpCookieAcceptPolicy = .never
         // Nothing here should be served from a cache: a stale plan or stale search
@@ -131,6 +142,12 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
                         acceptsEventStream: Bool) throws -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        // A call that does not stream is silent until the model has finished, so the
+        // idle timeout would cut it off after two minutes of ordinary generation and
+        // blame the connection. It gets the end-to-end budget instead; the streamed
+        // and MCP calls keep the idle timeout, where a stall really is a failure.
+        // FoundationNetworking honours a per-request interval too, once it is set.
+        request.timeoutInterval = acceptsEventStream ? idleTimeout : deadline
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(acceptsEventStream ? "application/json, text/event-stream" : "application/json",
                          forHTTPHeaderField: "Accept")
@@ -208,27 +225,20 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
                         return
                     }
 
-                    var payload: [String] = []
+                    var assembler = SSEFrameAssembler()
                     var finished = false
                     try await Self.readLines(from: body, limit: Self.maxStreamBytes) { line in
                         try Task.checkCancellation()
-                        if line.isEmpty {
-                            if let object = Self.decodeFrame(payload) { continuation.yield(object) }
-                            payload.removeAll(keepingCapacity: true)
-                            return true
-                        }
-                        if line.hasPrefix(":") { return true }   // an SSE comment / keep-alive
-                        guard line.hasPrefix("data:") else { return true }
-                        let value = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-                        if value == "[DONE]" {
+                        let step = try assembler.consume(line)
+                        if let object = step.frame { continuation.yield(object) }
+                        if step.done {
                             finished = true
                             return false
                         }
-                        payload.append(value)
                         return true
                     }
                     // A stream that ends without a trailing blank line still has a frame.
-                    if !finished, let object = Self.decodeFrame(payload) { continuation.yield(object) }
+                    if !finished, let object = try assembler.flush() { continuation.yield(object) }
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: ResearchError.cancelled)
@@ -378,23 +388,16 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     /// other frame belongs to a different in-flight call and is skipped.
     private func firstMatchingEvent(in body: AsyncThrowingStream<Data, Error>,
                                     expectedID: Int?) async throws -> [String: Any]? {
-        var payload: [String] = []
+        var assembler = SSEFrameAssembler()
         var found: [String: Any]?
         do {
             try await Self.readLines(from: body, limit: Self.maxResponseBytes) { line in
-                if line.isEmpty {
-                    if let object = Self.decodeFrame(payload),
-                       Self.matches(object, expectedID: expectedID) {
-                        found = object
-                        return false
-                    }
-                    payload.removeAll(keepingCapacity: true)
-                    return true
+                let step = try assembler.consume(line)
+                if let object = step.frame, Self.matches(object, expectedID: expectedID) {
+                    found = object
+                    return false
                 }
-                if line.hasPrefix(":") { return true }
-                guard line.hasPrefix("data:") else { return true }
-                payload.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
-                return true
+                return !step.done
             }
         } catch let error as ResearchError {
             throw error
@@ -404,7 +407,7 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
             throw Self.sanitized(error)
         }
         if let found { return found }
-        if let object = Self.decodeFrame(payload), Self.matches(object, expectedID: expectedID) {
+        if let object = try assembler.flush(), Self.matches(object, expectedID: expectedID) {
             return object
         }
         return nil
@@ -420,13 +423,30 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     ///
     /// Chunk boundaries fall wherever the network put them, so a line can span two
     /// chunks and a chunk can hold many lines. Both cases are handled by buffering.
+    ///
+    /// The SSE grammar allows three line terminators — LF, CRLF and a lone CR — and
+    /// says a single leading byte-order mark is ignored. All three terminators are
+    /// accepted, because a gateway that emits one of the rarer two would otherwise
+    /// deliver its whole body as a single "line" at close, which decodes as nothing.
     static func readLines(from body: AsyncThrowingStream<Data, Error>,
                           limit: Int,
                           handle: (String) throws -> Bool) async throws {
         var buffer: [UInt8] = []
         buffer.reserveCapacity(4096)
         var consumed = 0
+        var followsCarriageReturn = false
+        var isFirstLine = true
         let started = Date()
+
+        func emitLine() throws -> Bool {
+            var line = String(decoding: buffer, as: UTF8.self)
+            buffer.removeAll(keepingCapacity: true)
+            if isFirstLine {
+                isFirstLine = false
+                if line.hasPrefix(SSELine.byteOrderMark) { line.removeFirst() }
+            }
+            return try handle(line)
+        }
 
         for try await chunk in body {
             // A wall-clock deadline as well as a size cap. The session's timeout is an
@@ -439,20 +459,32 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
             }
             consumed += chunk.count
             guard consumed <= limit else { throw ResearchError.responseTooLarge }
-            buffer.append(contentsOf: chunk)
 
-            while let newline = buffer.firstIndex(of: 0x0A) {
-                var line = Array(buffer[..<newline])
-                buffer.removeFirst(newline + 1)
-                if line.last == 0x0D { line.removeLast() }   // CRLF
-                guard try handle(String(decoding: line, as: UTF8.self)) else { return }
+            // Visit each byte once and keep only the unfinished line. Prefix removal
+            // per newline repeatedly copied the rest of a large chunk.
+            for byte in chunk {
+                if followsCarriageReturn, byte == SSELine.lineFeed {
+                    followsCarriageReturn = false
+                    continue
+                }
+                followsCarriageReturn = byte == SSELine.carriageReturn
+
+                // SSE permits CR, LF, and CRLF, even across separate chunks.
+                if byte == SSELine.carriageReturn || byte == SSELine.lineFeed {
+                    guard try emitLine() else { return }
+                } else {
+                    buffer.append(byte)
+                }
             }
         }
         // A final line with no trailing newline is still a line.
-        if !buffer.isEmpty {
-            if buffer.last == 0x0D { buffer.removeLast() }
-            _ = try handle(String(decoding: buffer, as: UTF8.self))
-        }
+        if !buffer.isEmpty { _ = try emitLine() }
+    }
+
+    private enum SSELine {
+        static let carriageReturn: UInt8 = 0x0D
+        static let lineFeed: UInt8 = 0x0A
+        static let byteOrderMark = "\u{FEFF}"
     }
 
     /// Whether an SSE frame is the response being waited for.
@@ -474,6 +506,44 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
 
+    /// Turns a sequence of SSE lines into decoded frames.
+    ///
+    /// A value type with no I/O, so the framing rules can be unit-tested with plain
+    /// strings. Two rules beyond the spec's blank-line dispatch:
+    ///
+    /// * `data: [DONE]` ends the stream — but it flushes the `data:` lines gathered
+    ///   before it first. A gateway that puts the last delta and the sentinel in one
+    ///   event block would otherwise lose that delta, and it is typically the one
+    ///   carrying `finish_reason`.
+    /// * Comment lines (`:` keep-alives) and fields other than `data:` are ignored.
+    struct SSEFrameAssembler {
+        private var payload: [String] = []
+
+        /// Feeds one line. Returns the frame that line completed, if any, and whether
+        /// the stream has announced its end.
+        mutating func consume(_ line: String) throws -> (frame: [String: Any]?, done: Bool) {
+            if line.isEmpty { return (try flush(), false) }
+            if line.hasPrefix(":") { return (nil, false) }
+            guard line.hasPrefix("data:") else { return (nil, false) }
+            let value = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+            if value == "[DONE]" { return (try flush(), true) }
+            payload.append(value)
+            return (nil, false)
+        }
+
+        /// Decodes and clears whatever has been gathered — the frame a blank line
+        /// dispatches, or the one a stream ends on without a trailing blank line.
+        mutating func flush() throws -> [String: Any]? {
+            defer { payload.removeAll(keepingCapacity: true) }
+            guard !payload.isEmpty else { return nil }
+            // Dropping a malformed delta would silently remove part of the answer.
+            guard let frame = HTTPTransport.decodeFrame(payload) else {
+                throw ResearchError.invalidResponse
+            }
+            return frame
+        }
+    }
+
     // MARK: Response checks
 
     private static func checkStatus(_ http: HTTPURLResponse) throws {
@@ -490,6 +560,9 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         }
         if http.statusCode == 429 {
             throw ResearchError("The provider is rate-limiting Vervellum (HTTP 429). Wait a moment and retry.")
+        }
+        if http.statusCode == 400 {
+            throw ResearchError.badRequest
         }
         if (300..<400).contains(http.statusCode) {
             // Refusing a redirect does not fail the task — `URLSession` completes it
@@ -523,6 +596,9 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         if error is CancellationError { return .cancelled }
         let nsError = error as NSError
         if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled { return .cancelled }
+        // Named separately: "connection failed" invites a retry that will hit the
+        // same wall, when the remedy is a faster model or a shorter question.
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut { return .timedOut }
         return .connectionFailed
     }
 

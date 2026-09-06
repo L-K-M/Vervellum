@@ -70,11 +70,17 @@ enum EvidenceExtractor {
                 // link mentioned inside a summary into a source of its own.
                 consumed = Set((titleKeys + snippetKeys + dateKeys).map { $0.lowercased() })
             }
-            for (key, item) in dictionary {
+            // Sorted, not in dictionary order: Swift randomises that per process, and a
+            // result with hits under two keys would otherwise number its sources
+            // differently on every launch. The model cites whatever numbering it was
+            // shown, so a thread stays consistent either way — but two people with the
+            // same response would get different lists, and a fixture could not assert
+            // a number.
+            for key in dictionary.keys.sorted() {
                 let lowered = key.lowercased()
                 if ignoredLinkKeys.contains(lowered) || linkKeys.contains(lowered)
                     || consumed.contains(lowered) { continue }
-                collect(item, into: &hits, seen: &seen, depth: depth + 1)
+                collect(dictionary[key], into: &hits, seen: &seen, depth: depth + 1)
             }
         case let array as [Any]:
             for item in array { collect(item, into: &hits, seen: &seen, depth: depth + 1) }
@@ -169,10 +175,16 @@ enum EvidenceExtractor {
 
     // MARK: Diagnostics
 
+    private static let maxDiagnosticFields = 12
+    private static let diagnosticKeys = Set(titleKeys + snippetKeys + dateKeys + linkKeys + [
+        "content", "structuredContent", "type", "isError", "result", "results", "data",
+        "search_result", "search_results", "web_search_result", "web_search_results",
+    ])
+
     /// A content-free description of a result's structure, for the log.
     ///
-    /// Dictionary keys, array lengths, string lengths, and whether a string parses as
-    /// JSON — never a title, a summary or a link. It exists for the one failure that is
+    /// Known schema keys, array lengths, string lengths, and whether a string parses
+    /// as JSON — never arbitrary keys, titles, summaries, or links. It exists for the one failure that is
     /// otherwise undiagnosable from a log that must not contain results: a search that
     /// answered, in a shape this extractor did not recognise.
     static func shape(of value: Any?, depth: Int = 0) -> String {
@@ -180,9 +192,18 @@ enum EvidenceExtractor {
         guard depth < 6 else { return "…" }
         switch value {
         case let dictionary as [String: Any]:
-            let keys = dictionary.keys.sorted()
-            let fields = keys.prefix(12).map { "\($0): \(shape(of: dictionary[$0], depth: depth + 1))" }
-            return "{" + fields.joined(separator: ", ") + (keys.count > 12 ? ", …" : "") + "}"
+            // A provider can put secrets in keys too. Only application-known names
+            // may reach the log; unknown fields contribute a count, not their bytes.
+            let keys = diagnosticKeys.filter { dictionary[$0] != nil }.sorted()
+            var fields = keys.prefix(maxDiagnosticFields).map {
+                "\($0): \(shape(of: dictionary[$0], depth: depth + 1))"
+            }
+            if keys.count > maxDiagnosticFields { fields.append("…") }
+            let unknownCount = dictionary.count - keys.count
+            if unknownCount > 0 {
+                fields.append("\(unknownCount) other field\(unknownCount == 1 ? "" : "s")")
+            }
+            return "{" + fields.joined(separator: ", ") + "}"
         case let array as [Any]:
             guard let first = array.first else { return "[]" }
             return "[\(array.count) × \(shape(of: first, depth: depth + 1))]"
@@ -207,7 +228,8 @@ enum EvidenceExtractor {
         -> (url: String, title: String, snippet: String, date: String?)? {
         var link: String?
         for key in linkKeys {
-            if let candidate = firstString(dictionary, key), let normalized = SourceHarvester.normalized(candidate) {
+            if let candidate = firstString(dictionary, key),
+               let normalized = SourceHarvester.normalized(candidate, trimmingPunctuation: false) {
                 link = normalized
                 break
             }

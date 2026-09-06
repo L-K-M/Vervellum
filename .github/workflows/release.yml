@@ -23,6 +23,11 @@ jobs:
     name: Build the Debian package
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # The workflow token is contents:write for the release job below. This job only
+    # reads the repository and uploads an artifact, which needs no token scope at
+    # all, so it drops the write half rather than carry it through a build.
+    permissions:
+      contents: read
     # The official Swift image for the target Ubuntu release. A .deb links against the
     # library versions present at build time, so building on anything newer produces a
     # package that will not install on 24.04.
@@ -40,7 +45,12 @@ jobs:
             libgtk-4-dev pkg-config dpkg-dev binutils desktop-file-utils
 
       - name: Version from tag
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        # DEB_VERSION is what build-deb.sh names the package: a pre-release's hyphen
+        # becomes a tilde so it sorts below the release that follows it.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "DEB_VERSION=${VERSION/-/\~}" >> "$GITHUB_ENV"
 
       # The same gate the macOS job applies: with no signing downstream, the suite is
       # the only automated quality check, and these are the shared rules.
@@ -52,7 +62,7 @@ jobs:
 
       - name: Install the package
         run: |
-          dpkg --install --force-depends build/vervellum_${VERSION}_*.deb
+          dpkg --install --force-depends build/vervellum_${DEB_VERSION}_*.deb
           /usr/bin/vervellum --version
 
       - name: Upload the package
@@ -87,7 +97,12 @@ jobs:
         run: brew install xcbeautify create-dmg
 
       - name: Version from tag
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        # DEB_VERSION names the Debian package in the release notes below; see the
+        # Linux job for why a pre-release's hyphen becomes a tilde.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "DEB_VERSION=${VERSION/-/\~}" >> "$GITHUB_ENV"
 
       - name: Fetch the Debian package
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -185,7 +200,7 @@ jobs:
             ### Linux (Ubuntu 24.04+)
 
             ```
-            sudo apt install ./vervellum_${{ env.VERSION }}_amd64.deb
+            sudo apt install ./vervellum_${{ env.DEB_VERSION }}_amd64.deb
             vervellum --install-shortcut
             ```
 

@@ -11,7 +11,7 @@ import SwiftUI
 /// * Substituting *after* means finding `[3]` inside an already-parsed
 ///   `AttributedString`, where an emphasis run may have split it in two.
 ///
-/// So each citation is replaced with a single U+FFFC OBJECT REPLACEMENT CHARACTER
+/// So each citation is replaced with the shared private-use placeholder
 /// before parsing — one character, no markdown meaning, impossible to split — and
 /// the placeholders are swapped for styled links afterwards, in order.
 struct MarkdownText: View {
@@ -25,9 +25,6 @@ struct MarkdownText: View {
     /// body size.
     var font: Font?
 
-    /// A stand-in that markdown parsing cannot interpret or split.
-    private static let placeholder: Character = "\u{FFFC}"
-
     var body: some View {
         Text(attributed)
             .font(font ?? PanelTheme.Font.body(scale))
@@ -37,8 +34,27 @@ struct MarkdownText: View {
     }
 
     private var attributed: AttributedString {
+        CitationText.render(markdown, sources: sources, scale: scale)
+    }
+}
+
+/// AppKit-side serialization, separate from the view so link attributes are testable.
+enum CitationText {
+    private static let placeholder = CitationMask.placeholder
+
+    static func render(_ markdown: String, sources: [Source], scale: Double = 1) -> AttributedString {
         let (masked, citations) = Self.mask(markdown, sources: sources)
         var result = Self.parseInline(masked)
+        // Markdown can consume text inside link destinations. Preserve every citation
+        // position by falling back to literal text rather than shifting later chips.
+        if result.characters.filter({ $0 == placeholder }).count != citations.count {
+            result = AttributedString(masked)
+        }
+        // A link the model wrote is exactly what the citation rule forbids: evidence
+        // is cited by number, and a URL in the prose is flagged, never followed. The
+        // markdown parser turns `[text](url)` into a clickable run, so the attribute
+        // is dropped and the text kept. The citation chips below are the only links.
+        result.link = nil
         Self.substitute(citations, in: &result, scale: scale)
         return result
     }
@@ -49,35 +65,19 @@ struct MarkdownText: View {
     private struct MaskedCitation {
         var label: String
         var url: URL?
-        var tooltip: String
     }
 
     /// Replaces every valid citation marker with a placeholder character, returning
     /// the masked text and the citations in the order they appeared.
     private static func mask(_ text: String, sources: [Source]) -> (String, [MaskedCitation]) {
-        let validation = CitationValidator.validate(answer: text, sourceCount: sources.count)
-        var masked = ""
-        var citations: [MaskedCitation] = []
-
-        for span in validation.spans {
-            switch span {
-            case .text(let value):
-                masked += value
-            case .citation(let indices, let raw):
-                let cited = indices.compactMap { sources.indices.contains($0) ? sources[$0] : nil }
-                guard !cited.isEmpty else { masked += raw; continue }
-                masked.append(placeholder)
-                citations.append(MaskedCitation(
-                    label: cited.map { String($0.number) }.joined(separator: ","),
-                    // A marker naming several sources can only link to one; the first
-                    // is the one the model put first. The others stay reachable in the
-                    // source list, and the tooltip names them all.
-                    url: URL(string: cited[0].url),
-                    tooltip: cited.map { "[\($0.number)] \($0.title) — \($0.domain)" }
-                        .joined(separator: "\n")))
-            }
+        let mask = CitationMask(text, sourceCount: sources.count)
+        let citations = mask.sourceIndices.map { indices -> MaskedCitation in
+            let cited = indices.map { sources[$0] }
+            // A grouped marker opens its first source; all remain in the source list.
+            return MaskedCitation(label: cited.map { String($0.number) }.joined(separator: ","),
+                                  url: cited.first.flatMap { URL(string: $0.url) })
         }
-        return (masked, citations)
+        return (mask.text, citations)
     }
 
     // MARK: Inline parsing
@@ -157,6 +157,9 @@ struct MarkdownBody: View {
         case .code(let language):
             CodeBlock(code: block.text, language: language, scale: scale)
 
+        case .table(let headers, let rows):
+            TableBlock(headers: headers, rows: rows, sources: sources, scale: scale)
+
         case .rule:
             Divider().overlay(PanelTheme.Palette.hairline)
         }
@@ -200,6 +203,47 @@ struct CodeBlock: View {
                     .textSelection(.enabled)
                     .padding(PanelTheme.Space.medium)
             }
+        }
+        .background(PanelTheme.Palette.cardFill, in:
+            RoundedRectangle(cornerRadius: PanelTheme.Radius.card, style: .continuous))
+    }
+}
+
+/// A pipe table, rendered as a real grid.
+///
+/// Cells go through `MarkdownText`, so emphasis and `[n]` citations work inside a
+/// table exactly as they do in prose. The grid sits in a horizontal ScrollView for
+/// the same reason code does: squashing a wide table into a 460-point panel makes
+/// it unreadable, and a table the model produced is usually worth its width.
+struct TableBlock: View {
+    let headers: [String]
+    let rows: [[String]]
+    let sources: [Source]
+    var scale: Double = 1.0
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .leading,
+                 horizontalSpacing: PanelTheme.Space.large,
+                 verticalSpacing: PanelTheme.Space.small) {
+                GridRow {
+                    ForEach(headers.indices, id: \.self) { column in
+                        MarkdownText(markdown: headers[column], sources: sources,
+                                     scale: scale, font: PanelTheme.Font.bodyEmphasis(scale))
+                    }
+                }
+                // A direct child of Grid (not wrapped in GridRow) spans all columns.
+                Divider().overlay(PanelTheme.Palette.hairline)
+                ForEach(rows.indices, id: \.self) { row in
+                    GridRow {
+                        ForEach(rows[row].indices, id: \.self) { column in
+                            MarkdownText(markdown: rows[row][column], sources: sources,
+                                         scale: scale)
+                        }
+                    }
+                }
+            }
+            .padding(PanelTheme.Space.medium)
         }
         .background(PanelTheme.Palette.cardFill, in:
             RoundedRectangle(cornerRadius: PanelTheme.Radius.card, style: .continuous))

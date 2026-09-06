@@ -25,7 +25,7 @@ import Foundation
 /// caller, because the two platforms answer it differently: macOS hops to the main
 /// dispatch queue, while a GTK application must use a GLib idle callback — its main
 /// loop is not the dispatch main queue, so a `MainActor` hop there would never run.
-final class ResearchRunner {
+final class ResearchRunner: ResearchRunning {
 
     /// Everything a run needs from the outside world, captured once so the settings
     /// cannot change halfway through a turn.
@@ -121,6 +121,16 @@ final class ResearchRunner {
                     turn.duration = Date().timeIntervalSince(turn.askedAt)
                 }
             }
+            // A partial answer is kept on purpose — a half-written answer with its
+            // sources is still worth showing — and it deserves the same scrutiny as a
+            // whole one. The validation after a successful stream is never reached on
+            // this path, and a literal URL the model wrote in paragraph two must carry
+            // its warning even if the user stopped in paragraph three.
+            update { turn in
+                if !turn.answer.isEmpty {
+                    turn.applyCitationValidation(sourceCount: turn.sources.count)
+                }
+            }
         }
         let finished = current ?? turn
         current = nil
@@ -207,7 +217,16 @@ final class ResearchRunner {
         // The reading stays on the turn, because it is where the planner says why.
         if plan.searches.isEmpty {
             trace.log("Plan asked for no searches; answering without evidence")
-            update { $0.addNotice(.noEvidence) }
+            update { turn in
+                turn.addNotice(.noEvidence)
+                // The reading is also the discriminator between "the planner chose not
+                // to search" and "/direct" (see `wasAskedDirectly`): a planner that
+                // returned an empty list and no reading would otherwise make Retry
+                // re-ask in direct mode, skipping the planner the user never opted out of.
+                if turn.reading.isEmpty {
+                    turn.reading = "The planner decided this question needs no web evidence."
+                }
+            }
             try await answerDirectly(chat: chat, question: question, history: history, today: today)
             return
         }
@@ -236,6 +255,9 @@ final class ResearchRunner {
                 trace.warn("Search \(index + 1) failed: \(error.message)")
                 searchFailures.append(error.message)
             }
+            // Counted whether the attempt succeeded or failed: "2 of 3" means two
+            // attempts are done, and a failed attempt is done.
+            update { $0.searchesCompleted = index + 1 }
         }
 
         let harvested = EvidenceExtractor.sources(from: rawResults)
@@ -291,15 +313,28 @@ final class ResearchRunner {
 
         // 5 — assess.
         update { $0.stage = .assessing }
-        let assessPayload: [String: Any] = [
-            "question": question,
-            "answer": answer,
-            "evidence": evidence,
-            "today": today,
-        ]
-        let assessObject = try await chat.completeJSON(
-            system: ResearchPrompts.assess, payload: assessPayload, label: "Assess")
-        let assessment = try AssessmentParser.parse(assessObject, sourceCount: sources.count)
+        // Assessment is a fresh call: carry the reading and budgeted history too.
+        let assessContext = ResearchContext.assemble(
+            question: question, history: history, today: today,
+            extra: ["answer": answer, "evidence": evidence, "reading": plan.reading])
+        if assessContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
+        // A failure here — a reply the parser cannot read, an output limit smaller
+        // than eight findings, a transient 5xx — must not fail the turn. The answer has
+        // streamed, been validated and been read; marking it failed would label it
+        // wrong, drop it from every later turn's context (which keeps `.complete` turns
+        // only), and blame the question for an assessment that was cut off. So the turn
+        // completes without findings and says, in a notice, that nothing was checked.
+        // Cancellation still propagates: a Stop is a Stop.
+        let assessment: AssessmentParser.Assessment
+        do {
+            let assessObject = try await chat.completeJSON(
+                system: ResearchPrompts.assess, payload: assessContext.payload, label: "Assess")
+            assessment = try AssessmentParser.parse(assessObject, sourceCount: sources.count)
+        } catch let error as ResearchError where error != ResearchError.cancelled && !Task.isCancelled {
+            trace.warn("Assessment unavailable: \(error.message)")
+            update { $0.addNotice(.assessmentUnavailable) }
+            return
+        }
         update { turn in
             turn.findings = assessment.findings
             turn.limitations = assessment.limitations
@@ -323,6 +358,11 @@ final class ResearchRunner {
         ) { [weak self] chunk in
             self?.update { $0.answer += chunk }
         }
+        // The same check the research path makes after its answer. A Stop pressed
+        // mid-stream ends the stream rather than failing it, and without this the
+        // fragment would be completed, persisted and sent as history to every later
+        // turn in the thread.
+        try Task.checkCancellation()
         // Citations are meaningless here, but a model that emitted a URL anyway is
         // exactly the failure the badge needs to warn about.
         update { $0.applyCitationValidation(sourceCount: 0) }

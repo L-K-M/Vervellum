@@ -32,6 +32,9 @@ enum MarkdownParser {
             case quote
             /// A fenced code block. The payload is the info string (`swift`, `json`).
             case code(language: String)
+            /// A pipe table. The payload carries the header row and the body rows;
+            /// `text` is unused (empty), like `.rule`.
+            case table(headers: [String], rows: [[String]])
             case rule
         }
 
@@ -40,13 +43,18 @@ enum MarkdownParser {
         /// The block's inline markdown source, with its marker removed. Empty for
         /// `.rule`; the verbatim body for `.code`.
         var text: String
+        /// Offsets in the original input, shared with citation validation.
+        var sourceRange: Range<String.Index>
     }
 
     /// Parses `markdown` into blocks.
     static func parse(_ markdown: String) -> [Block] {
         var blocks: [Block] = []
         var paragraph: [String] = []
+        var paragraphStart = markdown.startIndex
+        var paragraphEnd = markdown.startIndex
         var codeLines: [String]?
+        var codeStart = markdown.startIndex
         var codeLanguage = ""
         var nextID = 0
 
@@ -55,26 +63,36 @@ enum MarkdownParser {
             let text = paragraph.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             paragraph.removeAll(keepingCapacity: true)
             guard !text.isEmpty else { return }
-            blocks.append(Block(id: nextID, kind: .paragraph, text: text))
+            blocks.append(Block(id: nextID, kind: .paragraph, text: text,
+                                sourceRange: paragraphStart..<paragraphEnd))
             nextID += 1
         }
 
-        func append(_ kind: Block.Kind, _ text: String) {
+        func append(_ kind: Block.Kind, _ text: String, range: Range<String.Index>) {
             flushParagraph()
-            blocks.append(Block(id: nextID, kind: kind, text: text))
+            blocks.append(Block(id: nextID, kind: kind, text: text, sourceRange: range))
             nextID += 1
         }
 
-        // `components(separatedBy: .newlines)` would split "\r\n" into two lines and
-        // insert a spurious paragraph break for every line of Windows-style output.
-        for rawLine in markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") {
-            let line = rawLine
+        // CRLF is one Character. Keep original indices instead of normalizing a copy,
+        // so renderers and citation validation share exactly the same block boundaries.
+        let lines = markdown.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        // Index-based rather than `for`: the increment happens right after the read,
+        // so every `continue` below keeps working, and table parsing can consume a
+        // run of lines (header, delimiter, rows) by moving the index itself.
+        var index = lines.startIndex
+        while index < lines.endIndex {
+            let sourceLine = lines[index]
+            let line = String(sourceLine)
+            let range = sourceLine.startIndex..<sourceLine.endIndex
+            index = lines.index(after: index)
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             // Inside a fence, everything is literal until the closing fence.
             if codeLines != nil {
                 if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                    append(.code(language: codeLanguage), (codeLines ?? []).joined(separator: "\n"))
+                    append(.code(language: codeLanguage), (codeLines ?? []).joined(separator: "\n"),
+                           range: codeStart..<sourceLine.endIndex)
                     codeLines = nil
                     codeLanguage = ""
                 } else {
@@ -86,6 +104,7 @@ enum MarkdownParser {
             if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
                 flushParagraph()
                 codeLines = []
+                codeStart = sourceLine.startIndex
                 codeLanguage = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 continue
             }
@@ -96,12 +115,12 @@ enum MarkdownParser {
             }
 
             if isRule(trimmed) {
-                append(.rule, "")
+                append(.rule, "", range: range)
                 continue
             }
 
             if let (level, text) = heading(trimmed) {
-                append(.heading(level), text)
+                append(.heading(level), text, range: range)
                 continue
             }
 
@@ -111,30 +130,62 @@ enum MarkdownParser {
                 // them, instead of stacking one bar per line.
                 if paragraph.isEmpty, var last = blocks.last, last.kind == .quote {
                     last.text += "\n" + text
+                    last.sourceRange = last.sourceRange.lowerBound..<sourceLine.endIndex
                     blocks[blocks.count - 1] = last
                 } else {
-                    append(.quote, text)
+                    append(.quote, text, range: range)
                 }
                 continue
             }
 
             let depth = indentDepth(line)
             if let text = bullet(trimmed) {
-                append(.bullet(depth: depth), text)
+                append(.bullet(depth: depth), text, range: range)
                 continue
             }
             if let (number, text) = ordered(trimmed) {
-                append(.ordered(number: number, depth: depth), text)
+                append(.ordered(number: number, depth: depth), text, range: range)
                 continue
             }
 
+            // A pipe line whose next line is a delimiter row with the same column
+            // count is a table (GFM). The delimiter is the trigger, never the pipes
+            // alone: "a | b" in prose must not become a table because the next line
+            // happens to be dashes. Column-count equality is the second guard —
+            // CommonMark demands it, and it stops a rule line ("---") from pairing
+            // with a stray pipe above it.
+            if trimmed.contains("|"), index < lines.endIndex,
+               let columns = delimiterColumns(of: String(lines[index])) {
+                let header = splitRow(trimmed)
+                if header.count == columns {
+                    flushParagraph()
+                    index = lines.index(after: index)   // consume the delimiter
+                    var rows: [[String]] = []
+                    while index < lines.endIndex {
+                        let rowLine = String(lines[index])
+                        let rowTrimmed = rowLine.trimmingCharacters(in: .whitespaces)
+                        guard !rowTrimmed.isEmpty, rowTrimmed.contains("|") else { break }
+                        index = lines.index(after: index)
+                        // A repeated delimiter inside the body is decoration, not a row.
+                        if delimiterColumns(of: rowLine) != nil { continue }
+                        rows.append(splitRow(rowTrimmed, columns: columns))
+                    }
+                    append(.table(headers: header, rows: rows), "",
+                           range: sourceLine.startIndex..<lines[index - 1].endIndex)
+                    continue
+                }
+            }
+
+            if paragraph.isEmpty { paragraphStart = sourceLine.startIndex }
+            paragraphEnd = sourceLine.endIndex
             paragraph.append(trimmed)
         }
 
         // A fence still open at the end of the input is normal mid-stream: emit what
         // has arrived rather than hiding it until the closer shows up.
         if let codeLines {
-            append(.code(language: codeLanguage), codeLines.joined(separator: "\n"))
+            append(.code(language: codeLanguage), codeLines.joined(separator: "\n"),
+                   range: codeStart..<markdown.endIndex)
         }
         flushParagraph()
         return blocks
@@ -153,11 +204,15 @@ enum MarkdownParser {
         // "#hashtag" is not a heading; ATX headings require a space after the hashes.
         guard index < line.endIndex, line[index] == " " else { return nil }
         let text = String(line[index...]).trimmingCharacters(in: .whitespaces)
-        // Trailing hashes are a closing sequence in ATX, not content.
-        let cleaned = text.hasSuffix("#")
-            ? String(text.reversed().drop(while: { $0 == "#" }).reversed())
-                .trimmingCharacters(in: .whitespaces)
-            : text
+        // Trailing hashes are a closing sequence in ATX only when a space precedes
+        // them — "# C#" is a heading reading "C#", not a heading "C" with a
+        // closer. A run that *is* the whole text ("## #") is content, not a closer.
+        var cleaned = text
+        if cleaned.hasSuffix("#"),
+           let lastNonHash = cleaned.lastIndex(where: { $0 != "#" }),
+           cleaned[lastNonHash].isWhitespace {
+            cleaned = String(cleaned[...lastNonHash]).trimmingCharacters(in: .whitespaces)
+        }
         return (min(level, 3), cleaned)
     }
 
@@ -194,5 +249,60 @@ enum MarkdownParser {
             else { break }
         }
         return min(spaces / 2, 3)
+    }
+
+    // MARK: Tables
+
+    /// The column count of a table delimiter row (`|---|---|`, `:--|--:`), or nil
+    /// when the line is not one. Every cell must be dashes with optional alignment
+    /// colons, and at least one cell must exist.
+    static func delimiterColumns(of line: String) -> Int? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("-") else { return nil }
+        let cells = splitRow(trimmed)
+        guard !cells.isEmpty else { return nil }
+        for cell in cells {
+            let body = cell.trimmingCharacters(in: .whitespaces)
+            guard !body.isEmpty, body.contains("-"),
+                  body.allSatisfy({ $0 == "-" || $0 == ":" }) else { return nil }
+        }
+        return cells.count
+    }
+
+    /// Splits a table row into cells: the optional outer pipes dropped, cells split
+    /// on `|` (except `\|`, which becomes a literal pipe), each trimmed. Rows are
+    /// normalised to `columns` when given — short rows pad with empty cells, long
+    /// ones drop their tail, so the renderer never juggles ragged rows.
+    static func splitRow(_ line: String, columns: Int? = nil) -> [String] {
+        var result = tableCells(in: line[...]).map {
+            $0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\\|", with: "|")
+        }
+        if let columns {
+            if result.count < columns {
+                result += Array(repeating: "", count: columns - result.count)
+            } else if result.count > columns {
+                result = Array(result.prefix(columns))
+            }
+        }
+        return result
+    }
+
+    /// Preserve cell offsets so inline code cannot pair across rendered table cells.
+    static func tableCells(in line: Substring) -> [Substring] {
+        var body = line
+        while let first = body.first, first.isWhitespace { body.removeFirst() }
+        while let last = body.last, last.isWhitespace { body.removeLast() }
+        if body.hasPrefix("|") { body.removeFirst() }
+        if body.hasSuffix("|") { body.removeLast() }
+
+        var cells: [Substring] = []
+        var start = body.startIndex
+        for index in body.indices where body[index] == "|" {
+            if index > body.startIndex, body[body.index(before: index)] == "\\" { continue }
+            cells.append(body[start..<index])
+            start = body.index(after: index)
+        }
+        cells.append(body[start...])
+        return cells
     }
 }

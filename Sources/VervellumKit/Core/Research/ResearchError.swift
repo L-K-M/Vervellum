@@ -28,9 +28,24 @@ struct ResearchError: LocalizedError, Equatable {
         "The provider's response exceeded Vervellum's size limit and was discarded.")
     static let connectionFailed = ResearchError(
         "The provider connection failed or timed out. Please try again.")
+    static let timedOut = ResearchError(
+        "The provider did not answer in time and the request was abandoned. "
+        + "A slow or local model may need a faster one, or a shorter question; otherwise try again.")
+    static let invalidContext = ResearchError(
+        "The request context is too large or cannot be encoded. Shorten the question or start a new thread.")
     static let invalidResponse = ResearchError(
         "The provider returned a response Vervellum could not read.")
     static let cancelled = ResearchError("Research cancelled.")
+    static let streamInterrupted = ResearchError(
+        "The model's reply ended without a valid completion or contained an error. "
+        + "The answer may be incomplete. Try again.")
+
+    /// HTTP 400. Named rather than generic because the client acts on it: a request
+    /// carrying optional parameters is retried once without them before this reaches
+    /// the user.
+    static let badRequest = ResearchError(
+        "The provider rejected the request (HTTP 400). Check the model name in the provider "
+        + "settings; the model may also not accept a request parameter Vervellum sends.")
 
     static func providerStatus(_ code: Int) -> ResearchError {
         ResearchError("The provider returned HTTP \(code). Check the endpoint, key, model and quota.")
