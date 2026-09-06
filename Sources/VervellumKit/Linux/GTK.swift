@@ -206,6 +206,22 @@ enum GTK {
         return scroller
     }
 
+    /// Whether the scroller is at (or within a few pixels of) the end of its content.
+    static func isScrolledToBottom(_ scroller: Widget) -> Bool {
+        guard let adjustment = gtk_scrolled_window_get_vadjustment(vv_scrolled(scroller)) else { return true }
+        let value = gtk_adjustment_get_value(adjustment)
+        let end = gtk_adjustment_get_upper(adjustment) - gtk_adjustment_get_page_size(adjustment)
+        return value >= end - 8
+    }
+
+    /// Scrolls to the end of the content. Call from an idle after a rebuild, once
+    /// the adjustment's upper bound reflects the new children.
+    static func scrollToBottom(_ scroller: Widget) {
+        guard let adjustment = gtk_scrolled_window_get_vadjustment(vv_scrolled(scroller)) else { return }
+        gtk_adjustment_set_value(adjustment,
+                                 gtk_adjustment_get_upper(adjustment) - gtk_adjustment_get_page_size(adjustment))
+    }
+
     /// The composer: a wrapping text view.
     static func textView() -> Widget {
         let view = gtk_text_view_new()!
