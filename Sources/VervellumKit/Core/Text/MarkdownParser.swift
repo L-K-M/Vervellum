@@ -32,6 +32,9 @@ enum MarkdownParser {
             case quote
             /// A fenced code block. The payload is the info string (`swift`, `json`).
             case code(language: String)
+            /// A pipe table. The payload carries the header row and the body rows;
+            /// `text` is unused (empty), like `.rule`.
+            case table(headers: [String], rows: [[String]])
             case rule
         }
 
@@ -67,8 +70,14 @@ enum MarkdownParser {
 
         // `components(separatedBy: .newlines)` would split "\r\n" into two lines and
         // insert a spurious paragraph break for every line of Windows-style output.
-        for rawLine in markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") {
-            let line = rawLine
+        let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        // Index-based rather than `for`: the increment happens right after the read,
+        // so every `continue` below keeps working, and table parsing can consume a
+        // run of lines (header, delimiter, rows) by moving the index itself.
+        var index = lines.startIndex
+        while index < lines.endIndex {
+            let line = lines[index]
+            index = lines.index(after: index)
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             // Inside a fence, everything is literal until the closing fence.
@@ -126,6 +135,33 @@ enum MarkdownParser {
             if let (number, text) = ordered(trimmed) {
                 append(.ordered(number: number, depth: depth), text)
                 continue
+            }
+
+            // A pipe line whose next line is a delimiter row with the same column
+            // count is a table (GFM). The delimiter is the trigger, never the pipes
+            // alone: "a | b" in prose must not become a table because the next line
+            // happens to be dashes. Column-count equality is the second guard —
+            // CommonMark demands it, and it stops a rule line ("---") from pairing
+            // with a stray pipe above it.
+            if trimmed.contains("|"), index < lines.endIndex,
+               let columns = delimiterColumns(of: lines[index]) {
+                let header = splitRow(trimmed)
+                if header.count == columns {
+                    flushParagraph()
+                    index = lines.index(after: index)   // consume the delimiter
+                    var rows: [[String]] = []
+                    while index < lines.endIndex {
+                        let rowLine = lines[index]
+                        let rowTrimmed = rowLine.trimmingCharacters(in: .whitespaces)
+                        guard !rowTrimmed.isEmpty, rowTrimmed.contains("|") else { break }
+                        index = lines.index(after: index)
+                        // A repeated delimiter inside the body is decoration, not a row.
+                        if delimiterColumns(of: rowLine) != nil { continue }
+                        rows.append(splitRow(rowTrimmed, columns: columns))
+                    }
+                    append(.table(headers: header, rows: rows), "")
+                    continue
+                }
             }
 
             paragraph.append(trimmed)
@@ -198,5 +234,57 @@ enum MarkdownParser {
             else { break }
         }
         return min(spaces / 2, 3)
+    }
+
+    // MARK: Tables
+
+    /// The column count of a table delimiter row (`|---|---|`, `:--|--:`), or nil
+    /// when the line is not one. Every cell must be dashes with optional alignment
+    /// colons, and at least one cell must exist.
+    static func delimiterColumns(of line: String) -> Int? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("-") else { return nil }
+        let cells = splitRow(trimmed)
+        guard !cells.isEmpty else { return nil }
+        for cell in cells {
+            let body = cell.trimmingCharacters(in: .whitespaces)
+            guard !body.isEmpty, body.contains("-"),
+                  body.allSatisfy({ $0 == "-" || $0 == ":" }) else { return nil }
+        }
+        return cells.count
+    }
+
+    /// Splits a table row into cells: the optional outer pipes dropped, cells split
+    /// on `|` (except `\|`, which becomes a literal pipe), each trimmed. Rows are
+    /// normalised to `columns` when given — short rows pad with empty cells, long
+    /// ones drop their tail, so the renderer never juggles ragged rows.
+    static func splitRow(_ line: String, columns: Int? = nil) -> [String] {
+        var body = line.trimmingCharacters(in: .whitespaces)
+        if body.hasPrefix("|") { body.removeFirst() }
+        if body.hasSuffix("|") { body.removeLast() }
+
+        var cells: [String] = []
+        var current = ""
+        for character in body {
+            if character == "|", !current.hasSuffix("\\") {
+                cells.append(current)
+                current = ""
+            } else {
+                current.append(character)
+            }
+        }
+        cells.append(current)
+
+        var result = cells.map {
+            $0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\\|", with: "|")
+        }
+        if let columns {
+            if result.count < columns {
+                result += Array(repeating: "", count: columns - result.count)
+            } else if result.count > columns {
+                result = Array(result.prefix(columns))
+            }
+        }
+        return result
     }
 }

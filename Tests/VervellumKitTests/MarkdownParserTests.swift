@@ -114,4 +114,79 @@ final class MarkdownParserTests: XCTestCase {
         let blocks = MarkdownParser.parse("# H\n\npara\n\n- item\n\n```\ncode\n```")
         XCTAssertEqual(Set(blocks.map(\.id)).count, blocks.count)
     }
+
+    // MARK: Tables
+
+    func testParsesATable() {
+        let markdown = "Intro.\n\n| Name | Value |\n| --- | ---: |\n| a | 1 |\n| b | 2 |\n\nOutro."
+        let blocks = MarkdownParser.parse(markdown)
+        XCTAssertEqual(blocks.count, 3)
+        guard case .table(let headers, let rows) = blocks[1].kind else {
+            return XCTFail("expected a table, got \(blocks[1].kind)")
+        }
+        XCTAssertEqual(headers, ["Name", "Value"])
+        XCTAssertEqual(rows, [["a", "1"], ["b", "2"]])
+        XCTAssertEqual(blocks[2].text, "Outro.")
+    }
+
+    /// A pipe in prose is not a table until a delimiter row confirms it.
+    func testPipesWithoutADelimiterStayProse() {
+        let blocks = MarkdownParser.parse("a | b\nfollow-up line")
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks[0].kind, .paragraph)
+    }
+
+    /// The delimiter and header must agree on the column count (CommonMark), so a
+    /// rule line ("---") cannot pair with a stray pipe above it: the pipe line
+    /// stays prose and the dashes parse as the rule they are.
+    func testMismatchedDelimiterColumnCountStaysProse() {
+        let blocks = MarkdownParser.parse("a | b\n---")
+        XCTAssertEqual(blocks.map(\.kind), [.paragraph, .rule])
+        XCTAssertEqual(blocks[0].text, "a | b")
+    }
+
+    /// A header with no delimiter yet is normal mid-stream input: emit it as a
+    /// paragraph now, and re-parse into a table when the delimiter arrives.
+    func testAHeaderStillStreamingIsAParagraph() {
+        let partial = MarkdownParser.parse("| Name | Value |")
+        XCTAssertEqual(partial.first?.kind, .paragraph)
+    }
+
+    func testEscapedPipesInsideCells() {
+        let markdown = "| Code | Meaning |\n| --- | --- |\n| `a \\| b` | either |"
+        guard case .table(let headers, let rows) = MarkdownParser.parse(markdown).first?.kind else {
+            return XCTFail("expected a table")
+        }
+        XCTAssertEqual(headers, ["Code", "Meaning"])
+        XCTAssertEqual(rows, [["`a | b`", "either"]])
+    }
+
+    /// Rows are normalised to the header's width: a short row pads, a long row
+    /// drops its tail, so renderers never see a ragged table.
+    func testRaggedRowsAreNormalised() {
+        let markdown = "| A | B |\n| --- | --- |\n| 1 |\n| 1 | 2 | 3 |"
+        guard case .table(_, let rows) = MarkdownParser.parse(markdown).first?.kind else {
+            return XCTFail("expected a table")
+        }
+        XCTAssertEqual(rows, [["1", ""], ["1", "2"]])
+    }
+
+    /// A repeated delimiter row inside the body is decoration, not a data row.
+    func testRepeatedDelimiterInsideTheBodyIsSkipped() {
+        let markdown = "| A |\n| --- |\n| 1 |\n| --- |\n| 2 |"
+        guard case .table(_, let rows) = MarkdownParser.parse(markdown).first?.kind else {
+            return XCTFail("expected a table")
+        }
+        XCTAssertEqual(rows, [["1"], ["2"]])
+    }
+
+    /// Rows without outer pipes are still rows.
+    func testTableWithoutOuterPipes() {
+        let markdown = "Name | Value\n--- | ---\na | 1"
+        guard case .table(let headers, let rows) = MarkdownParser.parse(markdown).first?.kind else {
+            return XCTFail("expected a table")
+        }
+        XCTAssertEqual(headers, ["Name", "Value"])
+        XCTAssertEqual(rows, [["a", "1"]])
+    }
 }

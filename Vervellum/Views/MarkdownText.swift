@@ -157,6 +157,9 @@ struct MarkdownBody: View {
         case .code(let language):
             CodeBlock(code: block.text, language: language, scale: scale)
 
+        case .table(let headers, let rows):
+            TableBlock(headers: headers, rows: rows, sources: sources, scale: scale)
+
         case .rule:
             Divider().overlay(PanelTheme.Palette.hairline)
         }
@@ -200,6 +203,47 @@ struct CodeBlock: View {
                     .textSelection(.enabled)
                     .padding(PanelTheme.Space.medium)
             }
+        }
+        .background(PanelTheme.Palette.cardFill, in:
+            RoundedRectangle(cornerRadius: PanelTheme.Radius.card, style: .continuous))
+    }
+}
+
+/// A pipe table, rendered as a real grid.
+///
+/// Cells go through `MarkdownText`, so emphasis and `[n]` citations work inside a
+/// table exactly as they do in prose. The grid sits in a horizontal ScrollView for
+/// the same reason code does: squashing a wide table into a 460-point panel makes
+/// it unreadable, and a table the model produced is usually worth its width.
+struct TableBlock: View {
+    let headers: [String]
+    let rows: [[String]]
+    let sources: [Source]
+    var scale: Double = 1.0
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .leading,
+                 horizontalSpacing: PanelTheme.Space.large,
+                 verticalSpacing: PanelTheme.Space.small) {
+                GridRow {
+                    ForEach(headers.indices, id: \.self) { column in
+                        MarkdownText(markdown: headers[column], sources: sources,
+                                     scale: scale, font: PanelTheme.Font.bodyEmphasis(scale))
+                    }
+                }
+                // A direct child of Grid (not wrapped in GridRow) spans all columns.
+                Divider().overlay(PanelTheme.Palette.hairline)
+                ForEach(rows.indices, id: \.self) { row in
+                    GridRow {
+                        ForEach(rows[row].indices, id: \.self) { column in
+                            MarkdownText(markdown: rows[row][column], sources: sources,
+                                         scale: scale)
+                        }
+                    }
+                }
+            }
+            .padding(PanelTheme.Space.medium)
         }
         .background(PanelTheme.Palette.cardFill, in:
             RoundedRectangle(cornerRadius: PanelTheme.Radius.card, style: .continuous))
