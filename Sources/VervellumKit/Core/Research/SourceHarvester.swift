@@ -49,7 +49,7 @@ enum SourceHarvester {
                 let lowered = key.lowercased()
                 if ignoredKeys.contains(lowered) { continue }
                 if linkKeys.contains(lowered), let text = item as? String {
-                    if let normalized = normalized(text) { found.insert(normalized) }
+                    if let normalized = normalized(text, trimmingPunctuation: false) { found.insert(normalized) }
                 } else {
                     collect(item, into: &found, depth: depth + 1)
                 }
@@ -83,11 +83,17 @@ enum SourceHarvester {
 
     private static let urlRegex = try? NSRegularExpression(pattern: #"https?://[^\s<>"'\\)\]}]+"#)
 
-    /// Trims trailing punctuation a URL picked up from prose, and rejects anything
-    /// that isn't an absolute http(s) URL with a host.
-    static func normalized(_ raw: String) -> String? {
+    /// Rejects anything that isn't an absolute http(s) URL with a host and, for a URL
+    /// lifted out of prose, trims the punctuation it picked up at the end of a sentence.
+    ///
+    /// A structured field — a search hit's `url` — is an address, not prose. A closing
+    /// parenthesis there is part of the path (`/wiki/Mercury_(planet)`), and trimming
+    /// it sends the reader to a page that does not exist, shows the model a link it
+    /// cannot have seen, and lets two different pages collapse into one number. Those
+    /// callers pass `trimmingPunctuation: false`.
+    static func normalized(_ raw: String, trimmingPunctuation: Bool = true) -> String? {
         var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        while let last = trimmed.last, ".,;:!?)]}>\"'".contains(last) {
+        while trimmingPunctuation, let last = trimmed.last, ".,;:!?)]}>\"'".contains(last) {
             trimmed.removeLast()
         }
         guard let components = URLComponents(string: trimmed),

@@ -64,6 +64,17 @@ final class SourceHarvesterTests: XCTestCase {
         XCTAssertEqual(SourceHarvester.normalized("https://example.com/a\""), "https://example.com/a")
     }
 
+    /// A structured field is an address, not prose: its closing parenthesis is part of
+    /// the path, and trimming it would point at a page that does not exist.
+    func testKeepsTheAddressOfAStructuredField() {
+        let planet = "https://en.wikipedia.org/wiki/Mercury_(planet)"
+        XCTAssertEqual(SourceHarvester.normalized(planet, trimmingPunctuation: false), planet)
+        XCTAssertEqual(SourceHarvester.normalized("https://example.com/a.", trimmingPunctuation: false),
+                       "https://example.com/a.")
+        XCTAssertNil(SourceHarvester.normalized("ftp://example.com/(x)", trimmingPunctuation: false))
+        XCTAssertEqual(SourceHarvester.urls(in: ["results": [["url": planet]]]), [planet])
+    }
+
     func testDeeplyNestedPayloadTerminates() {
         var nested: Any = ["url": "https://example.com/deep"]
         for _ in 0..<200 { nested = ["next": nested] }

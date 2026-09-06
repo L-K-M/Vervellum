@@ -21,6 +21,14 @@ final class EvidenceExtractorTests: XCTestCase {
         XCTAssertEqual(sources[1].domain, "b.example.com")
     }
 
+    /// Wikipedia's disambiguated titles end in a parenthesis; a source link that lost
+    /// it would open the wrong page.
+    func testKeepsParenthesesInAStructuredURL() {
+        let planet = "https://en.wikipedia.org/wiki/Mercury_(planet)"
+        let payload: [String: Any] = ["results": [["title": "Mercury (planet)", "url": planet]]]
+        XCTAssertEqual(EvidenceExtractor.sources(from: [payload]).first?.url, planet)
+    }
+
     /// Two searches routinely surface the same page; giving it two citation numbers
     /// would make the source list lie about how much evidence there is.
     func testCollapsesDuplicateURLs() {
