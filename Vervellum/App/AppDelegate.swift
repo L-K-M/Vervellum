@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 
 extension Notification.Name {
     /// Carries text that should be dropped into the composer, in `userInfo["text"]`.
@@ -31,6 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let summonHotkey = CarbonHotkey(identifier: 1)
     private let selectionHotkey = CarbonHotkey(identifier: 2)
     private var statusItem: NSStatusItem?
+    private var runningObserver: AnyCancellable?
+    /// Tracks the last run state so a completion — not the publisher's initial
+    /// emission — can be told apart from it.
+    private var wasRunning = false
 
     // MARK: Lifecycle
 
@@ -56,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installStatusItem()
         registerHotkeys()
         updateChecker.start()
+        observeRunningState()
 
         // First launch has no keys, so the panel is the only place the user can find
         // out what is missing — show it once rather than leaving a silent menu-bar icon.
@@ -250,6 +256,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image?.isTemplate = true
         item.menu = makeMenu()
         statusItem = item
+    }
+
+    /// Mirrors the run state in the menu bar, and closes the loop when the panel
+    /// was dismissed mid-run: the status item shows a busy glyph while research is
+    /// in flight, and a soft tick sounds when it finishes *with the panel closed*.
+    /// A user watching the panel needs no sound; a user who closed it mid-run does.
+    private func observeRunningState() {
+        runningObserver = engine.$isRunning
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRunning in
+                guard let self else { return }
+                let finishedWhileHidden = self.wasRunning && !isRunning
+                    && self.panelController?.isOpen == false
+                self.wasRunning = isRunning
+                let symbol = isRunning ? "hourglass" : "text.magnifyingglass"
+                self.statusItem?.button?.image = NSImage(
+                    systemSymbolName: symbol, accessibilityDescription: "Vervellum")
+                self.statusItem?.button?.image?.isTemplate = true
+                if finishedWhileHidden {
+                    NSSound(named: NSSound.Name("Tink"))?.play()
+                }
+            }
     }
 
     private func makeMenu() -> NSMenu {
