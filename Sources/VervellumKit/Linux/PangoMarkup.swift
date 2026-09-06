@@ -77,6 +77,8 @@ enum PangoMarkup {
                 // Not run through `inline`: inside a code block, markdown emphasis
                 // markers and bracketed numbers are literal text.
                 return "<tt>" + GTK.escape(block.text) + "</tt>"
+            case .table(let headers, let rows):
+                return table(headers, rows: rows)
             case .rule:
                 return "<span foreground=\"\(Colour.secondary)\">──────────</span>"
             }
@@ -156,6 +158,46 @@ enum PangoMarkup {
             if best == nil || marker.start < best!.start { best = marker }
         }
         return best
+    }
+
+    // MARK: Tables
+
+    /// A table as aligned monospace columns.
+    ///
+    /// Plain text, not `inline`: alignment needs the visible width of each cell,
+    /// and a markup tag (or an escaped entity) would count toward it. Citations in
+    /// cells therefore stay literal `[3]` markers here — the sources block below the
+    /// answer carries the actual links. Column width is capped so one verbose cell
+    /// cannot push the rest of the table off the window.
+    static func table(_ headers: [String], rows: [[String]]) -> String {
+        let maxColumnWidth = 40
+        let columns = headers.count
+        var widths = headers.map { min($0.count, maxColumnWidth) }
+        for row in rows {
+            for column in 0..<min(row.count, columns) {
+                widths[column] = max(widths[column], min(row[column].count, maxColumnWidth))
+            }
+        }
+
+        func cell(_ text: String, _ width: Int) -> String {
+            // padding(toLength:) truncates without an ellipsis when the text is
+            // longer than the column, so clip explicitly first.
+            let clipped = text.count > width
+                ? String(text.prefix(max(width - 1, 0))) + "…"
+                : text
+            // `count` is in Characters, which is close enough to display cells for
+            // the mono font Pango maps `tt` to; padding is cosmetic, not structural.
+            return clipped.padding(toLength: width, withPad: " ", startingAt: 0)
+        }
+        func render(_ fields: [String]) -> String {
+            (0..<columns).map { cell($0 < fields.count ? fields[$0] : "", widths[$0]) }
+                .joined(separator: "  ")
+        }
+
+        var lines = [render(headers)]
+        lines.append(widths.map { String(repeating: "─", count: $0) }.joined(separator: "  "))
+        lines.append(contentsOf: rows.map(render))
+        return "<tt>" + GTK.escape(lines.joined(separator: "\n")) + "</tt>"
     }
 
     // MARK: Turn sections
