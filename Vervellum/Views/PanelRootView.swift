@@ -115,7 +115,8 @@ struct PanelRootView: View {
                     if engine.thread.isEmpty && !showsHelp {
                         EmptyStateView(isConfigured: isConfigured,
                                        summonShortcut: preferences.summonHotkey.displayString,
-                                       onOpenSettings: onOpenSettings)
+                                       onOpenSettings: onOpenSettings,
+                                       onSeedComposer: { draft = $0 })
                             .padding(.top, PanelTheme.Space.section)
                     }
                     if showsHelp {
