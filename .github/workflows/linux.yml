@@ -55,8 +55,13 @@ jobs:
 
       - name: Validate the desktop entry
         run: |
-          sed 's/@VERSION@/0.0.0/g' packaging/debian/ch.lkmc.Vervellum.desktop > /tmp/entry.desktop
-          desktop-file-validate /tmp/entry.desktop
+          source_entry=packaging/debian/ch.lkmc.Vervellum.desktop
+          validation_dir=$(mktemp -d)
+          trap 'rm -rf "$validation_dir"' EXIT
+          # DBusActivatable validates the filename as well as its contents.
+          entry="$validation_dir/$(basename "$source_entry")"
+          sed 's/@VERSION@/0.0.0/g' "$source_entry" > "$entry"
+          desktop-file-validate "$entry"
 
       - name: Package
         run: packaging/build-deb.sh 0.0.0+ci
