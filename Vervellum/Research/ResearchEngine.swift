@@ -23,6 +23,8 @@ final class ResearchEngine: ObservableObject {
     private let preferences: CorePreferences
     private let secrets: SecretStore
     private let logSink: LogSink
+    private let makeRunner: (ResearchRunner.Environment, ResearchTrace) -> ResearchRunning
+    private let deliver: (@escaping () -> Void) -> Void
     private var task: Task<Void, Never>?
     private var runningTurnID: UUID?
 
@@ -38,13 +40,22 @@ final class ResearchEngine: ObservableObject {
     init(thread: ResearchThread = ResearchThread(),
          preferences: CorePreferences,
          secrets: SecretStore,
-         logSink: LogSink = OSLogSink()) {
+         logSink: LogSink = OSLogSink(),
+         makeRunner: @escaping (ResearchRunner.Environment, ResearchTrace) -> ResearchRunning = {
+             ResearchRunner(environment: $0, trace: $1)
+         },
+         deliver: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) },
+         after: @escaping (TimeInterval, @escaping () -> Void) -> Void = {
+             DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1)
+         }) {
         self.thread = thread
         self.preferences = preferences
         self.secrets = secrets
         self.logSink = logSink
+        self.makeRunner = makeRunner
+        self.deliver = deliver
         coalescer = SnapshotCoalescer(
-            after: { delay, work in DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work) },
+            after: after,
             publish: { [weak self] turn in self?.applyNow(turn) })
     }
 
@@ -105,22 +116,22 @@ final class ResearchEngine: ObservableObject {
         // would be a reference to a captured `var` in concurrently-executing code.
         let submitted = turn
         let history = thread.turns.filter { $0.id != id }
-        let runner = ResearchRunner(
-            environment: .init(preferences: preferences, secrets: secrets),
-            trace: ResearchTrace(sink: logSink))
+        let runner = makeRunner(.init(preferences: preferences, secrets: secrets),
+                                ResearchTrace(sink: logSink))
 
+        let deliver = self.deliver
         task = Task { [weak self] in
             // The runner reports from whatever thread it is running on, so every
             // snapshot is hopped onto the main queue in order. `async` is FIFO, so the
             // streamed chunks arrive in the order they were produced.
             let finished = await runner.run(submitted, mode: mode, history: history) { snapshot in
-                DispatchQueue.main.async { self?.apply(snapshot) }
+                deliver { self?.apply(snapshot) }
             }
             // The same queue as the snapshots, not `MainActor.run`. Both land on the
             // main thread, but mixing the two mechanisms means the completion could be
             // scheduled ahead of snapshots already queued — and the final turn would
             // then be overwritten by an earlier, partial one.
-            DispatchQueue.main.async { self?.finish(id, with: finished) }
+            deliver { self?.finish(id, with: finished) }
         }
     }
 

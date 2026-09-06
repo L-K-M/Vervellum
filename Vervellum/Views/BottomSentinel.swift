@@ -8,8 +8,7 @@ import AppKit
 /// is undone by the very next token — the panel fights the reader for the whole
 /// answer, which is the single most annoying thing a streaming UI can do.
 ///
-/// The mechanism is a zero-size NSView parked at the bottom of the scroll
-/// content. SwiftUI on macOS 14 has no scroll-position API, so the sentinel
+/// A background NSView observes the scroll content without depending on lazy rows. SwiftUI on macOS 14 has no scroll-position API, so the sentinel
 /// walks up to the enclosing `NSScrollView` and observes its clip view's bounds:
 /// any scroll — wheel, drag, keyboard, or a programmatic `scrollTo` — re-evaluates
 /// pinned-ness, as does the document growing (a new token) or the panel resizing.
@@ -35,6 +34,9 @@ struct BottomSentinel: NSViewRepresentable {
         private weak var scrollView: NSScrollView?
         private var observers: [NSObjectProtocol] = []
         private var lastPinned = true
+        private var attachmentGeneration = 0
+
+        private enum ChangeOrigin { case scroll, layout }
 
         init(onPinChanged: @escaping (Bool) -> Void) {
             self.onPinChanged = onPinChanged
@@ -59,6 +61,8 @@ struct BottomSentinel: NSViewRepresentable {
         private func attach() {
             observers.forEach { NotificationCenter.default.removeObserver($0) }
             observers = []
+            scrollView = nil
+            attachmentGeneration += 1
 
             var view = superview
             while view != nil, !(view is NSScrollView) { view = view?.superview }
@@ -73,7 +77,7 @@ struct BottomSentinel: NSViewRepresentable {
             // whatever it leaves visible is what the user is looking at.
             observers.append(center.addObserver(
                 forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
-            ) { [weak self] _ in self?.recompute(fromScroll: true) })
+            ) { [weak self] _ in self?.recompute(from: .scroll) })
             // The document growing is not. While pinned, a new token makes the
             // document taller than the visible area *before* the follow scroll
             // lands, and unpinning in that gap would close the follow gate one
@@ -81,13 +85,13 @@ struct BottomSentinel: NSViewRepresentable {
             observers.append(center.addObserver(
                 forName: NSView.frameDidChangeNotification, object: scrollView.documentView,
                 queue: .main
-            ) { [weak self] _ in self?.recompute(fromScroll: false) })
-            recompute(fromScroll: true)
+            ) { [weak self] _ in self?.recompute(from: .layout) })
+            recompute(from: .scroll)
         }
 
-        private func recompute(fromScroll: Bool) {
+        private func recompute(from origin: ChangeOrigin) {
             guard let scrollView else { return }
-            if !fromScroll, lastPinned { return }
+            if origin == .layout, lastPinned { return }
             let documentHeight = scrollView.documentView?.frame.height ?? 0
             let visibleBottom = scrollView.contentView.bounds.maxY
             let pinned = visibleBottom >= documentHeight - BottomSentinel.tolerance
@@ -96,8 +100,11 @@ struct BottomSentinel: NSViewRepresentable {
             // Bounds notifications can fire inside a SwiftUI layout pass, and writing
             // view state synchronously there trips "publishing changes from within
             // view updates". The value is unchanged one run-loop turn later.
-            let report = onPinChanged
-            DispatchQueue.main.async { report(pinned) }
+            let generation = attachmentGeneration
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.attachmentGeneration == generation else { return }
+                self.onPinChanged(pinned)
+            }
         }
     }
 }

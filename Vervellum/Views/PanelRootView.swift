@@ -96,19 +96,13 @@ struct PanelRootView: View {
             showsHistory = false
             showsHelp = false
             recallIndex = nil
-            // The redaction banner belongs to the seed that caused it; a later summon
-            // may edit or clear the draft, and a stale count beside new text misstates
-            // what was removed.
-            redactionNote = nil
         }
         // Opening Settings returns immediately, so refreshing there would sample the
         // state before the user had typed anything. The window tells us when it closes.
         .onReceive(NotificationCenter.default.publisher(for: .vervellumSettingsDidClose)) { _ in
             refreshConfiguredState()
-            // "Delete All" in Settings empties the library but not the engine's copy of
-            // the open thread, and the next change that thread published — a follow-up,
-            // a Stop — would write the deleted thread straight back. A stored thread
-            // that is no longer stored has been deleted; let it go.
+            // Delete All and history off/on erase stored threads. Release the open
+            // copy too; archive tombstones also reject any late runner snapshots.
             if store.isHistoryEnabled, !engine.thread.isEmpty,
                !store.library.threads.contains(where: { $0.id == engine.thread.id }) {
                 engine.startNewThread()
@@ -159,15 +153,13 @@ struct PanelRootView: View {
                     }
                     // A scroll anchor rather than scrolling to the last turn: the last
                     // turn's own id points at its *top*, so pinning to it would jump
-                    // backwards every time the answer grew. The sentinel it carries is
-                    // what reports whether the user is still at the bottom.
+                    // backwards every time the answer grew.
                     Color.clear.frame(height: 1).id(Self.bottomAnchor)
-                        .background(BottomSentinel { pinned in
-                            isPinnedToBottom = pinned
-                        })
                 }
                 .padding(.horizontal, PanelTheme.Space.gutter)
                 .padding(.vertical, PanelTheme.Space.large)
+                // Keep observation alive outside lazy children, but inside the scroll content.
+                .background(BottomSentinel { pinned in isPinnedToBottom = pinned })
             }
             .overlay(alignment: .bottom) {
                 if !isPinnedToBottom, engine.isRunning {
@@ -356,6 +348,7 @@ struct PanelRootView: View {
             onOpenSettings()
         case .copyLastAnswer:
             draft = ""
+            engine.flushProgress()
             guard let last = engine.thread.turns.last else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(last.transcript, forType: .string)

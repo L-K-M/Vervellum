@@ -250,9 +250,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Status item
 
+    private static let idleStatusSymbol = "text.magnifyingglass"
+    private static let busyStatusSymbol = "hourglass"
+
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "text.magnifyingglass",
+        item.button?.image = NSImage(systemSymbolName: Self.idleStatusSymbol,
                                      accessibilityDescription: "Vervellum")
         item.button?.image?.isTemplate = true
         item.menu = makeMenu()
@@ -266,9 +269,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isRunning in
                 guard let self else { return }
-                let symbol = isRunning ? "hourglass" : "text.magnifyingglass"
+                let symbol = isRunning ? Self.busyStatusSymbol : Self.idleStatusSymbol
                 self.statusItem?.button?.image = NSImage(
-                    systemSymbolName: symbol, accessibilityDescription: "Vervellum")
+                    systemSymbolName: symbol,
+                    accessibilityDescription: isRunning ? "Vervellum — researching" : "Vervellum")
                 self.statusItem?.button?.image?.isTemplate = true
             }
     }

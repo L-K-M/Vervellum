@@ -46,7 +46,7 @@ struct ProcessTrailView: View {
                 if isRunning {
                     // A ticking clock turns "is it stuck?" into information. A slow
                     // provider is common enough that the wait should be visible.
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                    TimelineView(.periodic(from: turn.askedAt, by: 1)) { context in
                         Text(Formatting.duration(context.date.timeIntervalSince(turn.askedAt)))
                             .font(PanelTheme.Font.caption)
                             .monospacedDigit()

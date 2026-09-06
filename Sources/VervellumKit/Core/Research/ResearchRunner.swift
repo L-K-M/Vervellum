@@ -25,7 +25,7 @@ import Foundation
 /// caller, because the two platforms answer it differently: macOS hops to the main
 /// dispatch queue, while a GTK application must use a GLib idle callback — its main
 /// loop is not the dispatch main queue, so a `MainActor` hop there would never run.
-final class ResearchRunner {
+final class ResearchRunner: ResearchRunning {
 
     /// Everything a run needs from the outside world, captured once so the settings
     /// cannot change halfway through a turn.

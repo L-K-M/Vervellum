@@ -361,12 +361,10 @@ final class LinuxPanel {
             let question = GTK.markupLabel(PangoMarkup.question(turn.question))
             GTK.addStyle(question, "question")
             GTK.append(box, question)
-            // The finished summary line is the "what each search did" the preference
-            // governs. A running turn's stage always shows, or the panel would look
-            // dead for the whole plan-and-search phase; and the planner's reason for
-            // not searching stays, because this is the only place it appears.
-            if !turn.stage.isTerminal || environment.preferences.showProcessTrail
-                || (turn.searches.isEmpty && !turn.reading.isEmpty) {
+            // Honor the same preference as macOS; the status bar still shows activity.
+            if environment.preferences.showProcessTrail
+                && (!turn.stage.isTerminal || !turn.searches.isEmpty
+                    || !turn.reading.isEmpty || turn.stage == .failed) {
                 GTK.append(box, GTK.markupLabel(PangoMarkup.trail(turn)))
             }
         }
