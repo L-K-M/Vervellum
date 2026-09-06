@@ -2,31 +2,43 @@
 
 A consolidated review of the codebase (pipeline, both front ends, packaging, CI,
 tests), written so a future contributor — human or LLM — can pick an item and go.
-Items are ordered by user impact within each section. File references point at the
-code as of `main` (6809080).
+Merges the original review with a second, independent pass (astra.md); items that
+overlap are consolidated, and everything both passes found is kept. File
+references point at the code as of `main`.
 
 ## In flight (PRs open, do not redo)
 
-Each branch is self-contained; merge order does not matter, except that #32
-(tables) touches `MarkdownParser` and everything else avoids it.
+Two independent passes produced overlapping PRs. Where two rows solve the same
+problem, pick one — the other should then be closed, not rebased on top.
 
 | PR | Branch | Scope |
 | --- | --- | --- |
-| #38 | `k3/fix-archive-test-inference` | CI: main was red on both platforms — Swift toolchain drift made `(raw as? UInt).map(Int.init)` ambiguous in ThreadArchiveTests, and the desktop-entry validation copied to a non-reverse-DNS filename, which desktop-file-utils 0.27+ rejects for a DBusActivatable entry. |
+| #3 | `astra2/swift62-test-compile` | CI fix: `(raw as? UInt).map(Int.init)` ambiguous on Swift 6.2 — the compile error that had main red. (Overlaps the test half of #38.) |
+| #38 | `k3/fix-archive-test-inference` | CI fix: same Swift 6.2 ambiguity **plus** the desktop-entry validation copying to a non-reverse-DNS filename, which desktop-file-utils 0.27+ rejects for a DBusActivatable entry. |
 | #22 | `k3/atx-heading-closing-sequence` | Bug: `# C#` rendered as "C" — trailing `#` stripped without the required preceding space. Core + tests. |
 | #23 | `k3/reject-fractional-citations` | Bug: `AssessmentParser` rounded a fractional source number (2.7) onto a real source (3). Core + tests. |
-| #24 | `k3/streaming-render-throttle` | Perf: macOS republished per token (O(answer²) parsing per turn); now coalesces prose-only updates to 10 Hz, mirroring `LinuxPanel`. `ResearchEngine`. |
+| #24 | `k3/streaming-render-throttle` | Perf: macOS republished per token; coalesces prose-only updates to 10 Hz, mirroring `LinuxPanel`. `ResearchEngine`. (Same problem as #44, different implementation.) |
+| #44 | `astra2/coalesced-snapshots` | Perf: same throttle as #24 as a shared, tested Core type (`SnapshotCoalescer`); also feeds `onThreadChanged` during the stream so a mid-run crash no longer loses the partial answer. |
 | #25 | `k3/ask-from-history` | Bug: asking while the history list was open ran the research invisibly behind it. `PanelRootView`. |
-| #31 | `k3/scroll-follow` | Bug/UX: every token scrolled to bottom even while the user read back. Adds `BottomSentinel` + "Latest" pill; follows only while pinned. |
-| #32 | `k3/markdown-tables` | Feature: pipe tables in `MarkdownParser` (delimiter-gated, `\|` escape, ragged rows normalised), `Grid` renderer on macOS, aligned `<tt>` in Pango. 8 tests. |
+| #31 | `k3/scroll-follow` | Bug/UX: every token scrolled to bottom even while the user read back. `BottomSentinel` + "Latest" pill; follows only while pinned. (Same problem as #42.) |
+| #42 | `astra2/pinned-autoscroll` | Bug/UX: same yank as #31, fixed with preference-probe geometry and hysteresis thresholds sized above coalesced-batch growth (no ordering assumption between geometry reports and scroll decisions). |
+| #32 | `k3/markdown-tables` | Feature: pipe tables in `MarkdownParser`, `Grid` renderer on macOS, aligned `<tt>` in Pango. 8 tests. |
 | #33 | `k3/turn-polish` | Feature: "Ask again" on completed turns; live elapsed clock in the process trail. |
 | #34 | `k3/empty-state-examples` | Feature: clickable example questions seed the composer. |
-| #35 | `k3/history-search-index` | Perf: history search lowercased every answer per keystroke; `ThreadSearchIndex` builds one haystack per thread on library change. Core + tests. |
+| #35 | `k3/history-search-index` | Perf: history search lowercased every answer per keystroke; `ThreadSearchIndex` builds one haystack per thread on library change. (Same problem as #39.) |
+| #39 | `astra2/history-search-perf` | Perf: same cost as #35, fixed allocation-free with `range(of:options:.caseInsensitive)` — no index structure to keep warm. Behavior pinned by tests. |
 | #36 | `k3/completion-signal` | Feature: menu-bar hourglass while running; soft sound when a run completes with the panel closed. |
+| #41 | `astra2/search-progress` | Feature: live "Searching the web · 2 of 3" in the running trail (both platforms) via `ResearchTurn.searchesCompleted`; first-ever `ResearchTurn` field addition, with the hand-written tolerant `init(from:)` that keeps every existing threads.json loading. |
+| #43 | `astra2/composer-fixes` | Bug: composer height computed against the unclamped width preference (wraps early on clamped panels) — now measured from the row. Also clears the redaction banner on panel hide. |
+| #45 | `astra2/queued-question` | Feature: the composer stays editable while a run is in flight; a submit mid-run queues the question (one slot, newest wins, chip + cancel), asked the moment the answer lands. macOS + Linux + engine. |
 
 Notes on verification: Core changes were tested locally on Linux (Swift 6.2.3,
-197 tests green). macOS view changes could not be compiled locally (no Mac);
-they are deliberately small and idiomatic.
+198+ tests green). macOS view changes could not be compiled locally (no Mac);
+they are deliberately small and idiomatic. Fork PRs (astra2/*) currently get
+**neither** the GLM review (workflow guard requires same-repo branches) nor CI
+(workflows need maintainer approval for first-time fork contributors) — approving
+one run of CI on them is worthwhile before merging the view-layer PRs
+(#42/#43/#45).
 
 ## Bugs not yet fixed
 
@@ -36,15 +48,21 @@ they are deliberately small and idiomatic.
    `delta.reasoning_content` first, sometimes for tens of seconds; the panel
    shows a blinking caret meanwhile. Fix: count reasoning deltas as progress —
    ideally render them as a collapsed, dimmed "thinking" trail (see D1). Touch
-   points: `streamText` parsing, `ResearchTurn` (a `thinking` field), both
-   front ends' trails. `completeJSON` should also tolerate `reasoning_content`
-   on non-streaming replies (content can arrive alongside it).
+   points: `streamText` parsing, `ResearchTurn` (a `thinking` field — decode it
+   tolerantly, see the standing constraint below), both front ends' trails.
+   `completeJSON` should also tolerate `reasoning_content` on non-streaming
+   replies (content can arrive alongside it).
 2. **B6 — Retrying an old failed turn leaves its "Try again" live forever.**
    `ResearchEngine.retry` on a non-last turn appends a new turn but the old
    failure row keeps offering retry, inviting duplicates. Mark the old turn
    retried, or hide the affordance once a newer turn exists for the same
    question.
-3. **G6-adjacent — `/direct` with an empty model reply.** `streamText` throws
+3. **B7 — Small nits worth a sweep.** `/copy` on an empty or failed last turn
+   copies a near-empty transcript without saying so; the history row's delete
+   button is nested inside the row button's label (works, fragile under
+   restyling); `Source.domain` re-parses `URLComponents` on every render of
+   every chip (cache it).
+4. **G6-adjacent — `/direct` with an empty model reply.** `streamText` throws
    "empty answer" for whitespace-only replies — fine — but a `/direct` answer
    that the provider truncates (`finish_reason: length`) fails the whole turn
    instead of keeping the partial. Decide whether partial-but-badged beats
@@ -53,9 +71,15 @@ they are deliberately small and idiomatic.
 ## Performance
 
 - **P2 — `TurnView.validation` recomputes per render.** Mostly covered by the
-  PR #24 throttle; if profiling still shows it, memoize per answer string.
+  throttle PRs (#24/#44); if profiling still shows it, memoize per answer
+  string.
 - **P3 — `ComposerView.height` builds a text stack per keystroke.** Bounded and
   small; only revisit if the composer ever handles large pastes.
+- **P4 — Non-streaming calls inherit the 10-minute wall budget.** `collect`'s
+  600 s deadline applies to the two small JSON calls (plan, assess) as well as
+  the streamed answer; a wedged gateway holds a turn for ten minutes before the
+  user learns anything. Give `completeJSON` a tighter budget (~120–180 s) with
+  the same safe-error surface.
 - A thread of ~50 turns re-lays-out eagerly on new turns (`LazyVStack` +
   `fixedSize` everywhere). Fine at 10 Hz; revisit only with evidence.
 
@@ -85,6 +109,10 @@ they are deliberately small and idiomatic.
   the grant, pressing the selection shortcut throws an alert every time until
   the user re-grants or disables the shortcut. Add a "just open the panel
   without the selection" escape (and remember it).
+- **G8 — Linux: a run outliving its window is invisible.** Escape closes the
+  window while research continues (correct), but nothing tells the user it
+  finished. A desktop notification on completion would close the loop; pairs
+  with #36's macOS signal.
 - **Pin the Linux CI image by digest for real.** `linux.yml`'s comment claims a
   digest pin, but the job references the mutable `swift:6.1-noble` tag — the
   drift that broke main (see PR #38) without a code change.
@@ -99,6 +127,20 @@ they are deliberately small and idiomatic.
   from the agent.
 - **F8 — Keyboard navigation in History.** ↑/↓ walk results, Return opens,
   ⌫ deletes. Spotlight muscle memory.
+- **F12 — Thread rename and per-turn delete.** Threads are titled by their
+  first question forever; a 60-character question is a poor library label, and
+  a wrong turn cannot be removed without losing the thread. Both are pure
+  document operations on `ResearchThread`/`ThreadLibrary`.
+- **F13 — ⌘R retries the failed turn.** The failure row has a "Try again"
+  button; the keyboard binding is unclaimed and matches muscle memory.
+  Coordinate with #33's "Ask again".
+- **F14 — `vervellum://ask?q=…` URL scheme.** One-line asks from Shortcuts,
+  Alfred, a browser bookmarklet. Small registration, large power-user surface;
+  non-sandboxed app, trivially available.
+- **F15 — `/clip` command.** Seed the composer from the clipboard *through the
+  same redaction path as the selection shortcut* — the safety machinery is
+  already built, the command catalogue is already extensible, and it is the
+  same "see what will leave the Mac" contract.
 - **D1 — "Watch it think".** Render `reasoning_content` dimmed and collapsible
   in the trail (depends on B5). Delightful *and* honest — real process instead
   of a spinner.
@@ -107,14 +149,27 @@ they are deliberately small and idiomatic.
 - **D4 — `/digest`.** Summarise the current thread's unsettled claims into one
   brief, `/direct`-style (no search). Uses the `unsettled` data already in
   `ResearchContext`; zero new infrastructure.
-- **D5 — Citation popover.** Hover an inline `[3]` → source title + snippet
-  popover instead of a bare tooltip. Anchoring from an AttributedString link is
-  fiddly; anchoring at the source-list row is nearly free.
+- **D5 — Citation popover, forward and reverse.** Hover an inline `[3]` →
+  source title + snippet popover instead of a bare tooltip (anchoring from an
+  AttributedString link is fiddly; anchoring at the source-list row is nearly
+  free). The reverse direction is the novel half: click a source row → the
+  sentences in the answer that cite it, via a reverse index that is a pure
+  function over data already in memory.
+- **D6 — Recent threads in the status menu.** The menu-bar icon is the app's
+  only persistent surface; five recent thread titles, click to reopen, makes
+  history reachable without summoning the panel. Pairs with #36's activity
+  icon.
 - **V2 — Verdict strip in the collapsed trail.** Echo the findings distribution
-  as tiny dots in the one-line trail summary; evidential health at a glance.
+  as a tiny stacked bar (GitHub-language-bar idiom) or dots in the one-line
+  trail summary; evidential health at a glance. Colorblind-safe because it
+  supplements, never replaces, the text.
 - **V3 — Source snippets without hover.** The "Search summary — not the full
   page" reveal is hover-only; keyboard/screen-reader users never see it. An
-  expand chevron fixes it.
+  expand chevron fixes it — or make the cited rows' snippet one always-visible,
+  truncating line.
+- **V4 — Per-query outcome in the trail.** A failed search shows nothing in the
+  expanded trail; a quiet ✓/✕ glyph per planned query would make the audit
+  trail complete (the runner already knows).
 - **F10 — Planning-stage shimmer.** The plan call is the longest silent gap;
   an indeterminate shimmer on the trail card sells aliveness while waiting.
 - **F11 — Custom summon accelerator on Linux.** `ShortcutInstaller` hardcodes
@@ -128,6 +183,9 @@ they are deliberately small and idiomatic.
   box.
 - F6 export and F8 history keys are small but easy to get subtly wrong without
   a Mac to try them on.
+- Per-thread reading-position memory (scroll offset persisted in the thread
+  document): research threads are usually reopened for the newest answer, which
+  sits at the bottom anyway.
 
 ## Standing constraints (do not regress)
 
@@ -138,3 +196,8 @@ they are deliberately small and idiomatic.
 - No `DispatchQueue.main`/`@MainActor` hops in Core (Linux runs GLib).
 - No redirect following, no provider error text in logs, keys in the Keychain
   only, context trimmed loudly (`contextTrimmed`), never silently.
+- New `ResearchTurn` fields must be decoded tolerantly (`decodeIfPresent` in
+  `init(from:)`) — Swift's synthesized decoder requires every key, so an
+  unhardened addition makes every existing threads.json (and its same-shaped
+  `.bak`) unreadable and silently resets the library. The round-trip test
+  guards `CodingKeys` against silent drops.
