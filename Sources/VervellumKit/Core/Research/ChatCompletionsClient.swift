@@ -167,6 +167,8 @@ final class ChatCompletionsClient {
                 guard event["usage"] is [String: Any] else { throw ResearchError.invalidResponse }
                 return nil
             }
+            // A later stop must not overwrite an earlier truncation or filter verdict.
+            guard finishReason == nil else { throw ResearchError.invalidResponse }
             if let value = first["finish_reason"], !(value is NSNull) {
                 guard let reason = value as? String else { throw ResearchError.invalidResponse }
                 finishReason = reason

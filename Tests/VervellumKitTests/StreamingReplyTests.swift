@@ -69,6 +69,13 @@ final class StreamingReplyTests: XCTestCase {
         XCTAssertEqual(reply.finishReason, "stop")
     }
 
+    func testAClosingReasonCannotBeOverwrittenByLaterChoices() throws {
+        var reply = ChatCompletionsClient.StreamingReply()
+        _ = try reply.apply(["choices": [["delta": [:], "finish_reason": "length"]]])
+        XCTAssertThrowsError(try reply.apply(["choices": [["delta": [:], "finish_reason": "stop"]]]))
+        XCTAssertEqual(reply.finishReason, "length")
+    }
+
     func testEveryNonNullErrorEnvelopeInterruptsTheReply() {
         for value: Any in [true, 42, ["error"]] {
             var reply = ChatCompletionsClient.StreamingReply()
