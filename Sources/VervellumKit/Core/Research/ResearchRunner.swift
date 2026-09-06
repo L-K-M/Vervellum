@@ -121,6 +121,16 @@ final class ResearchRunner {
                     turn.duration = Date().timeIntervalSince(turn.askedAt)
                 }
             }
+            // A partial answer is kept on purpose — a half-written answer with its
+            // sources is still worth showing — and it deserves the same scrutiny as a
+            // whole one. The validation after a successful stream is never reached on
+            // this path, and a literal URL the model wrote in paragraph two must carry
+            // its warning even if the user stopped in paragraph three.
+            update { turn in
+                if !turn.answer.isEmpty {
+                    turn.applyCitationValidation(sourceCount: turn.sources.count)
+                }
+            }
         }
         let finished = current ?? turn
         current = nil
@@ -323,6 +333,11 @@ final class ResearchRunner {
         ) { [weak self] chunk in
             self?.update { $0.answer += chunk }
         }
+        // The same check the research path makes after its answer. A Stop pressed
+        // mid-stream ends the stream rather than failing it, and without this the
+        // fragment would be completed, persisted and sent as history to every later
+        // turn in the thread.
+        try Task.checkCancellation()
         // Citations are meaningless here, but a model that emitted a URL anyway is
         // exactly the failure the badge needs to warn about.
         update { $0.applyCitationValidation(sourceCount: 0) }

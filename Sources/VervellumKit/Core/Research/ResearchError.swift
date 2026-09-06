@@ -31,6 +31,8 @@ struct ResearchError: LocalizedError, Equatable {
     static let invalidResponse = ResearchError(
         "The provider returned a response Vervellum could not read.")
     static let cancelled = ResearchError("Research cancelled.")
+    static let streamInterrupted = ResearchError(
+        "The model's provider reported an error part-way through the answer. Try again.")
 
     static func providerStatus(_ code: Int) -> ResearchError {
         ResearchError("The provider returned HTTP \(code). Check the endpoint, key, model and quota.")
