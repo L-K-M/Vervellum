@@ -39,15 +39,15 @@ The ten things I would fix first, in order.
 | # | What | Where | Status |
 |---|---|---|---|
 | 1 | Both CI workflows have been red since the first commit: the shared test target does not compile (`ambiguous use of 'init'`), and once it does, the Linux job fails `desktop-file-validate` on a filename rule | `Tests/…/ThreadArchiveTests.swift:148`, `.github/workflows/linux.yml` | **Fixed in PR #2** |
-| 2 | A stream that ends with an `error` frame, or that is cancelled mid-`/direct`, is recorded as a *complete* answer and then assessed and reused as thread context | `ChatCompletionsClient.streamText`, `ResearchRunner.answerDirectly` | PR planned |
-| 3 | Every OpenAI reasoning model (o-series, gpt-5 family) fails with an unexplained HTTP 400 because `temperature` is always sent | `ChatCompletionsClient` | PR planned |
-| 4 | Only z.ai's search tool names are accepted, so the "bring your own MCP search server" promise is false for Brave, Tavily, Exa, SearXNG | `SearchMCPClient.connect` | PR planned |
-| 5 | Citation validation runs over code, so `argv[0]` in a code block yields "The model referred to a source number that does not exist" and marks sources as cited | `CitationValidator`, `ResearchTurn.applyCitationValidation` | PR planned |
-| 6 | A failed assessment call throws away a complete, visible answer: the turn is marked failed and silently dropped from all later context | `ResearchRunner.execute` stage 5 | PR planned |
-| 7 | On Linux the window-manager close button destroys the GTK window while the held D-Bus service keeps the dangling pointer; the next shortcut press is a use-after-free | `LinuxPanel.init` | PR planned |
-| 8 | Pressing the summon hotkey while the panel is open but no longer key *hides* it instead of refocusing it; the composer is disabled for the whole run; auto-scroll drags a reader who scrolled up back to the bottom on every token | `PanelController.toggle`, `PanelRootView` | PR planned |
-| 9 | A markdown link written by the model (`[text](url)`) is rendered as a clickable link by `AttributedString(markdown:)`, which undercuts the number-only citation rule at the rendering layer | `MarkdownText.parseInline` | PR planned |
-| 10 | Per-token cost: every streamed chunk republishes the whole thread, re-parses the whole answer, re-validates every block and re-measures the composer | `ResearchEngine`, `MarkdownBody`, `PanelRootView` | PR planned |
+| 2 | A stream that ends with an `error` frame, or that is cancelled mid-`/direct`, is recorded as a *complete* answer and then assessed and reused as thread context | `ChatCompletionsClient.streamText`, `ResearchRunner.answerDirectly` | **PR #53** |
+| 3 | Every OpenAI reasoning model (o-series, gpt-5 family) fails with an unexplained HTTP 400 because `temperature` is always sent | `ChatCompletionsClient` | **PR #54** |
+| 4 | Only z.ai's search tool names are accepted, so the "bring your own MCP search server" promise is false for Brave, Tavily, Exa, SearXNG | `SearchMCPClient.connect` | **PR #55** |
+| 5 | Citation validation runs over code, so `argv[0]` in a code block yields "The model referred to a source number that does not exist" and marks sources as cited | `CitationValidator`, `ResearchTurn.applyCitationValidation` | **PR #56** |
+| 6 | A failed assessment call throws away a complete, visible answer: the turn is marked failed and silently dropped from all later context | `ResearchRunner.execute` stage 5 | **PR #57** |
+| 7 | On Linux the window-manager close button destroys the GTK window while the held D-Bus service keeps the dangling pointer; the next shortcut press is a use-after-free | `LinuxPanel.init` | **PR #59** |
+| 8 | Pressing the summon hotkey while the panel is open but no longer key *hides* it instead of refocusing it; the composer is disabled for the whole run; auto-scroll drags a reader who scrolled up back to the bottom on every token | `PanelController.toggle`, `PanelRootView` | B22 withdrawn after dispute (§11.2); B24 is #52 and B25 is #49/#31 by other authors, not duplicated |
+| 9 | A markdown link written by the model (`[text](url)`) is rendered as a clickable link by `AttributedString(markdown:)`, which undercuts the number-only citation rule at the rendering layer | `MarkdownText.parseInline` | **PR #67** |
+| 10 | Per-token cost: every streamed chunk republishes the whole thread, re-parses the whole answer, re-validates every block and re-measures the composer | `ResearchEngine`, `MarkdownBody`, `PanelRootView` | #51/#24 by other authors cover the coalescing; not duplicated (§11.5) |
 
 ---
 
@@ -641,30 +641,39 @@ on the source row, so it reads as a property of the evidence rather than a footn
 Each in its own branch and PR against `main`, smallest and most certain first.
 
 1. **`fix/ci-test-compile`** — B1, B2. *Open: PR #2, green on both platforms.*
-2. **`fix/streaming-robustness`** — B5, B6, B7, B8, B9, B21: error frames fail the
+2. **`fix/streaming-robustness`** *(PR #53, green)* — B5, B6, B7, B8, B9, B21: error frames fail the
    turn, cancellation is honoured after the loop and in `/direct`, `[DONE]` flushes,
    CR/BOM handled, partial answers validated, payloads sorted. Tests for each.
-3. **`fix/provider-compat`** — B11 (+Q6), B19, B10: retry once without optional
+3. **`fix/provider-compat`** *(PR #54, green)* — B11 (+Q6), B19, B10: retry once without optional
    parameters on 400, JSON mode, `<think>` stripping, better 400 message, gateway
    heuristic.
-4. **`fix/search-tool-resolution`** — B12/B48: resolve the search tool by shape, list
+4. **`fix/search-tool-resolution`** *(PR #55, green)* — B12/B48: resolve the search tool by shape, list
    advertised names in the error, README wording.
-5. **`fix/citations-in-code`** — B13/Q4: code-aware `CitationValidator`, prompt line,
+5. **`fix/citations-in-code`** *(PR #56, green)* — B13/Q4: code-aware `CitationValidator`, prompt line,
    tests.
-6. **`fix/assessment-failure`** — B14, B16, B17, B18, B20: an assessment failure
+6. **`fix/assessment-failure`** *(PR #57, green)* — B14, B16, B17, B18, B20: an assessment failure
    caveats instead of fails; lenient `sources`; verdict synonyms with a notice; retry
    mode; deterministic numbering.
-7. **`fix/history-citation-markers`** — B15/Q5.
-8. **`fix/linux-window-lifecycle`** — B33, B35, B37, B38, B39, B43: hide-on-close,
+7. **`fix/history-citation-markers`** *(PR #58, green)* — B15/Q5.
+8. **`fix/linux-window-lifecycle`** *(PR #59, green; also B52)* — B33, B35, B37, B38, B39, B43: hide-on-close,
    Return does not cancel, scroll to the newest turn, "Stopped", Retry, hint text.
-9. **`fix/panel-focus-and-links`** — B22, B23, B27, B28: refocus instead of hide,
-   strip model-written links, surface hotkey registration failure, honest hints.
-10. **`feat/streaming-perf`** — P1–P5: chunk coalescing, parsed-block cache,
-    memoised composer height, pinned auto-scroll with a "Latest" pill (B25).
-11. **`feat/live-composer-queue`** — B24/F3.
-12. **`feat/prompt-quality`** — Q1, Q2, Q3, Q7.
-13. **`feat/evidence-health`** — V4, V5, F12 (pills, bar, one-line summary).
-14. **`feat/visual-tokens`** — V1, V2, V3, V6, V7.
+9. **`fix/macos-thread-links-settings`** *(PR #67; macOS-only, compiled by CI)* — B23,
+   B70, B71: strip model-written links, keep a deleted thread deleted, open Settings
+   above the panel. B22 withdrawn (§11.2); B27 and B28 remain open (§11.1).
+10. **`feat/streaming-perf`** — *not opened*: other authors' #51/#24 (coalescing),
+    #49/#31 (pinned auto-scroll) and #50 (composer measurement) cover P1, P3 and P4;
+    P2 and P5 remain open (§11.5).
+11. **`feat/live-composer-queue`** — *not opened*: #52 by another author covers it.
+12. **`feat/prompt-quality`** *(PR #65, green)* — Q1, Q2, Q3, Q7.
+13. **`feat/evidence-health`** — V4, V5, F12 (pills, bar, one-line summary). *Not
+    opened*: macOS visual work needs a desktop to check; specified in ANALYSIS.md.
+14. **`feat/visual-tokens`** — V1, V2, V3, V6, V7. *Not opened*, same reason.
+
+Opened beyond the plan, from the second round (§11): **#60** `fix/thread-archive-safety`
+(B47, B62–B66), **#61** `fix/transcript-and-source-urls` (B60–B63), **#62**
+`fix/pango-emphasis-citations` (B54), **#63** `fix/deb-prerelease-version` (B53),
+**#64** `fix/non-streaming-timeout` (B65), **#66** `feat/linux-preferences` (B55),
+**#68** `fix/packaging-hygiene` (B3, B58).
 
 Deferred to the backlog with a design (see ANALYSIS.md): F1, F2, F5, F6, F7, F8, F9,
 F10, F11, U5, U7, V9, V10, D4, D5, B34, B36, B44.
@@ -686,3 +695,318 @@ F10, F11, U5, U7, V9, V10, D4, D5, B34, B36, B44.
   for a good reason; the latency is hidden behind reading anyway.
 - **Auto-fetching page text for every source.** Cost, latency and injection surface all
   scale with it; F2 is the on-demand version.
+
+---
+
+## 11. Round two: the completeness sweep, verification, and what changed
+
+After the first pass I ran five completeness critics (core, macOS, Linux + CI, tests,
+product ideas) that were handed the round-one list and asked only for what it missed,
+then put every finding — round one and round two — through two independent verifiers
+(a code tracer and a user-impact judge) and three idea judges. This section records
+what that produced. Numbering continues from §2.
+
+### 11.1 Findings the first pass missed
+
+**B52 · medium · Linux `toggle()` hides a buried window.** It tested only
+`gtk_widget_get_visible`; a visible window behind the editor is "up" to GTK and not to
+the user, so the shortcut cost two presses. **Fixed in #59** (hide only when active).
+
+**B53 · medium · A pre-release tag built a `.deb` that outranks the release.**
+`1.1.0-beta.1` reads as upstream `1.1.0` with Debian revision `beta.1`, which sorts
+*above* `1.1.0`; apt refused the stable package as a downgrade. Verified with
+`dpkg --compare-versions`. **Fixed in #63** (`1.1.0~beta.1`).
+
+**B54 · low · Bold or italic spanning a citation printed literal asterisks on Linux.**
+`PangoMarkup.inline` parsed emphasis per text span between citations, so `**Cost [2]:**`
+never matched. **Fixed in #62** (placeholder character, one emphasis pass).
+
+**B55 · low · `textScale` and `showProcessTrail` were shared preferences the GTK front
+end never read**, while PRIVACY.md said text scale lives in `settings.json` on Linux.
+**Fixed in #66.**
+
+**B56 · low · README promises Up/Down recall and searchable threads for both
+platforms**; the Linux build has neither. *Open:* mark them macOS in the feature list
+until Linux history (F10) lands.
+
+**B57 · low · `CICD.md` says three workflows; the table lists four.** *Open* (one word).
+
+**B58 · low · `release.yml` gave `contents: write` to the Debian build job.**
+**Fixed in #68** (job-level `contents: read`).
+
+**B59 · low · The Linux service can only be quit through an undocumented D-Bus action.**
+Close and the WM button hide; `quit` is in neither `--help` nor the `.desktop` actions.
+*Open:* `vervellum --quit`, a `[Desktop Action quit]`, and a line in README.
+
+**B60 · medium · Structured source URLs lost a trailing `)`.** `SourceHarvester.normalized`
+trims prose punctuation, and `EvidenceExtractor.hit(from:)` ran every `url` field
+through it, so `…/wiki/Mercury_(planet)` was recorded, shown to the model and linked
+without its parenthesis. **Fixed in #61** (`trimmingPunctuation:` flag).
+
+**B61 · medium · The transcript listed only the prose's citations**, so a verdict's
+`[3]` could point at nothing. **Fixed in #61.**
+
+**B62 · low · A cancelled turn's partial answer was copied as complete.** **Fixed in #61**
+("Stopped before the answer finished; what follows is incomplete.").
+
+**B63 · medium · The transcript discarded the whole answer whenever `failure` was set**,
+so `vervellum --ask` printed nothing of a paid-for answer after a late failure.
+**Fixed in #61** (the answer stays; the failure trails it).
+
+**B64 · low · After recovering from `.bak`, the next write rotated the corrupt primary
+over the only good copy.** **Fixed in #60** (rotate only a primary that decoded or was
+written by this process).
+
+**B65 · high · The 120 s idle timeout killed every non-streaming plan or assessment
+call that took longer than two minutes.** A non-streaming call is silent until the
+model finishes, so "idle" was the whole generation; a local model on a large evidence
+block hit it every time and the message blamed the connection. **Fixed in #64**
+(per-request `timeoutInterval`: the 600 s deadline for `completeJSON`, the idle timeout
+for streams; a distinct "did not answer in time" message).
+
+**B66 · low · A turn saved mid-run came back as running forever** after a crash or
+force-quit: a spinner nothing stops, no retry. One verifier corrected the round-one
+claim that the dead turn was sent as history — `ResearchContext` filters on
+`.complete`, so it is not. **Fixed in #60** (non-terminal turns load as failed with
+"Vervellum quit before this answer finished", partial answer kept).
+
+**B67 · low · Range citations (`[1-3]`, `[1–3]`) are neither rendered nor flagged.**
+The regex accepts only `,`/`;` separators, so a range is left as text and the turn
+reads as clean. *Open:* accept `\d+\s*[-–—]\s*\d+` and expand it (bounded), or flag it
+as `invalidCitation`.
+
+**B68 · low · Markdown tables are neither parsed nor forbidden.** A comparison answer
+renders as raw pipes. *Covered by another author's #32*; the prompt-side fallback
+("never use tables") is the cheap alternative.
+
+**B69 · low · The test `testUnterminatedEmphasisStaysInTheParagraph` cannot fail for the
+reason it states** (the block parser never touches emphasis); the real guard in
+`MarkdownText` is untested. *Open* (test gap). Likewise **the history-off and
+Delete-All tests never create a `.bak`**, so a backup left behind would pass. *Open.*
+
+**B70 · medium · Deleting the open thread did not touch the engine's copy**, so the next
+publish wrote it back to disk. **Fixed in #67.**
+
+**B71 · medium · Settings opened underneath the floating panel**; centred, it was almost
+entirely hidden. **Fixed in #67** (the panel is dismissed first without restoring
+activation; Settings restores the remembered app on close).
+
+**B72 · medium · Programmatic draft replacement bypasses `NSTextView`'s undo**, so the
+"undo puts the draft back" promise is false and the stale undo stack targets ranges
+that no longer exist. *Open:* replace through `shouldChangeText(in:replacementString:)`.
+
+**B73 · low · Opening a thread from history while research runs cancels the run
+silently.** *Open* (another author's #25 touches asking from history; check overlap).
+
+**B74 · low · The composer's height ignores the trailing empty line**, so Shift-Return
+at the end scrolls the first line away. *Open* (check #50 first).
+
+**B75 · low · The shortcut recorder accepts ⌘W, ⌘Q, ⌘C as the global hotkey**, which a
+Carbon hot key then steals from every app. *Open:* reject bare-⌘ editing chords.
+
+**B76 · low · The Providers pane reloads stored values on every tab selection**,
+discarding unsaved edits. *Open:* load once per presentation.
+
+**B77 · low · With "Show what each search did" off, a running macOS turn shows nothing
+for the whole plan-and-search phase.** *Open* on macOS; #66 keeps the stage line on
+Linux regardless of the preference.
+
+### 11.2 Disputes, corrections and withdrawals
+
+- **B22 (hotkey hides an open-but-not-key panel) — withdrawn.** A verifier showed that
+  PLAN §5.1, the §5.3 key table and the Shortcuts footnote all document "press again to
+  dismiss". Re-focusing instead is a product decision, not a bug; recorded as such in
+  ANALYSIS.md. The other half of the finding (a stale `appToRestoreOnClose` after the
+  user clicks through a third app) stands and is open.
+- **B35 (Return cancels a run on Linux) — kept, flagged.** One verifier called the
+  Return-equals-Ask binding a documented Linux choice. I kept the change in #59 because
+  the status line ("press Ask again to stop") and the button ("Stop") disagreed on the
+  same frame, and because a habitual Return losing a forty-second answer is the failure
+  PLAN §5.2 names. It is one `guard` to revert if the maintainer prefers the old model.
+- **B45 / B66 — corrected.** The dead turn is not sent to the model as history.
+- **B47 — narrowed.** Real, but the trigger is a newer build adding an enum case
+  without a version bump; #60 reads the version stamp before decoding, and #57 decodes
+  an unknown `TurnNotice` as `.unknown` instead of failing the document.
+- **Keychain re-prompt after every ad-hoc-signed update** (round one, macOS) — lowered
+  to a documentation gap: `KeychainStore` deliberately collapses a denied read to "no
+  key", and SECURITY.md should say so next to the Accessibility note.
+- **B12 severity** — one verifier argued the z.ai-only tool name was documented in the
+  code and the fix is a one-line doc change; I kept the shape-based resolver (#55)
+  because README, PLAN and the Settings footnote all promise a generic MCP server, and
+  AGENTS.md says the docs state what is implemented.
+
+### 11.3 Verification summary
+
+Every finding — 90 from round one, 26 from the sweep — was handed to two independent
+verifiers: a code tracer told to refute anything it could not re-derive from the source,
+and a user-impact judge told to refute anything unreachable or cosmetic. A finding was
+kept when at least one confirmed and none refuted, or both confirmed.
+
+| | Count |
+|---|---|
+| Findings verified | 116 |
+| Confirmed by both or unopposed | 105 |
+| Refuted or unresolved | 11 |
+| Severity raised by the verifiers | 3 |
+| Severity lowered | 14 |
+
+The eleven not confirmed, and what I did with each: B35 (Return cancels on Linux —
+kept, see 11.2); Q3, Q1 and Q2 (prompt language, dates and the assessment's context —
+refuted as "documented limitation" or "enhancement", which is what §7 called them; they
+shipped in #65 as prompt work, not as bug fixes); Q6 (`response_format` — a feature;
+shipped behind #54's retry so a gateway that rejects it costs one request); the `.bak`
+permissions claim (refuted on the facts: `copyItem` preserves the mode on both
+platforms — dropped); the Linux CI cache and the fabricated Debian changelog
+(optimisation and documented behaviour — dropped); B7 (`[DONE]` without a blank line —
+the code tracer confirmed the drop, the impact judge could not name a gateway that
+emits it; the two-line fix shipped in #53 anyway because the assembler is now tested);
+the read-only banner (real, low; carried in ANALYSIS.md A12); and B74 (composer trailing
+line — the verifiers showed `usedRect(for:)` does include the extra line fragment, so
+the premise was wrong — dropped).
+
+The three ideas judges (daily user, engineer bound by AGENTS.md, designer) scored all 89
+ideas from 1 to 10. The top of the table, with the mean: "Read the page" 9.3; let the
+reader scroll up while streaming 8.7; Test connection 8.7; per-search progress with
+live source arrival 8.3; appearance-adaptive accent and verdict colours 8.3; Verify this
+claim 8.3; search-backend adapter 8.3 (shipped, #55); coalesced snapshots 8.3 (#51/#24
+by other authors); composer-driven history filter 8.0; Reduce Motion 8.0; redact pasted
+text 7.7; stable source rows 7.7; Markdown export 7.7; tag the disconfirming search 7.7;
+`Equatable` turn views 7.7; research the clipboard 7.7. At the bottom, with agreement
+from all three: `/about` and `/coin` 2.0, localisation readiness 2.7 (right, but not
+now), the all-supported seal 3.0, tags 3.0, Notification Center banner 3.3, the
+empty-state illustration 3.3, source monograms 3.7. The full table is in ANALYSIS.md
+("Idea scores from the Fable judges").
+
+### 11.6 First-round findings that §2 did not itemise
+
+These came out of the same fourteen lenses as §2 and survived verification, but the
+first draft folded them into prose or left them out. Recorded here so nothing is lost;
+ANALYSIS.md carries each under a task.
+
+**macOS panel and views.** **B78 · medium** — the ordered-list marker is clamped to a
+16 pt frame, so `10.` (or `9.` above ~116 % text scale) does not fit (`MarkdownText.listRow`).
+**B79 · medium** — `tertiaryText` multiplies the already-translucent secondary colour by
+0.62, about 2:1 for the smallest text; use `.tertiaryLabelColor`. **B80 · low** — fixed
+verdict RGB colours are used as sentence colour, not only for glyphs, and fail light-mode
+contrast. **B81 · low** — the text-scale preference is ignored by the question, the claims
+table and captions (V3). **B82 · low** — submitting while the history list is open runs
+the research behind the list (`showsHistory` stays true). **B83 · low** — a turn cancelled
+during planning renders as a bare question with no status and no retry. **B84 · low** — a
+literal U+FFFC in the answer (common in PDF-derived snippets) shifts every citation chip
+after it. **B85 · low** — `[n]` inside inline code becomes a citation chip on macOS because
+masking runs before markdown parsing (#56 fixes the validator, not the renderer).
+**B86 · low** — a multi-source marker `[2, 5]` links only to source 2 and the tooltip the
+code builds is never rendered. **B87 · low** — the verdict label and its chips sit in a
+non-wrapping `HStack`; at 360 pt a finding with many sources compresses the label.
+**B88 · low** — the history search field never receives focus; typing goes into the
+composer (U5). **B89 · medium** — with dismiss-on-focus-loss on, opening Settings hid the
+panel and yanked activation to the remembered app, burying Settings — *fixed in #67*.
+**B90 · medium** — both `NSAlert` paths (update available, Accessibility prompt) activate
+Vervellum at an arbitrary moment and never hand activation back; the update alert's
+default button is Download. **B91 · medium** — `HotkeyRecorder` accepts Shift-only and
+Option-only chords, registering a global hotkey that steals every capital S system-wide.
+**B92 · low** — activation is restored with `.activateAllWindows`, which raises every
+window of the previous app. **B93 · low** — Settings opened from the panel had nothing to
+hand activation back to — *fixed in #67*. **B94 · low** — width and position changes in
+Settings do not reach an open panel. **B95 · low** — re-entering an open panel snaps a
+header-dragged panel back to its computed position. **B96 · low** — nothing observes
+display disconnect while the panel is open. **B97 · low** — `SelectedTextReader` blocks
+the main thread on a hung frontmost app for the AX messaging timeout, up to four times,
+before the panel appears; set `AXUIElementSetMessagingTimeout` and show first, seed later.
+**B98 · low** — the keychain ACL is tied to the ad-hoc signature's cdhash, so every update
+re-prompts for the stored keys and a denied prompt reads as "no key"; SECURITY.md should
+say so. **B99 · low** — read-only mode (a newer document on disk) is never surfaced in
+the UI.
+
+**Packaging, CI and documentation.** **B100 · medium** — the Linux binary's version is
+never stamped from the tag: `AppIdentity.version` falls back to `0.1.0` because the
+executable has no bundle, so a released `.deb` reports `0.1.0` forever from `--version`
+and the User-Agent; stamp it at build time. **B101 · medium** — SECURITY.md, PRIVACY.md,
+README and PLAN state the Linux key ladder as keyring → environment → file; the code
+tries the environment first. **B102 · low** — SECURITY.md says every outbound request
+goes through the one transport; the update check and download use a plain `URLSession`.
+**B103 · low** — `/help` on Linux advertises ⌘ shortcuts and Settings the GTK panel does
+not have; split the platform rows. **B104 · low** — the release workflow installs
+`desktop-file-utils` but never validates the entry; only `linux.yml` does, and it does
+not run for tags. **B105 · low** — `0.1.0` is hard-coded in README's install line and
+the build-deb examples outside the release-bump marker. **B106 · low** — ICON-CREDITS.md
+lists 19 SF Symbols; the app renders 32. **B107 · low** — PRIVACY.md describes the update
+User-Agent as the bundle identifier (it is name/version) and logging in macOS-only terms.
+**B108 · low** — the Linux secrets docs describe a 0600 key file the app never writes and
+whose format is undocumented; `backendDescription` hedges because nothing records which
+tier answered a read.
+
+### 11.4 Ideas the sweep added
+
+Judged with the round-one ideas (§11.5). The ones worth carrying forward:
+
+- **VoiceOver pass** — announce stage changes, mark section labels as headers, label the
+  composer, and never hide the only Delete control behind hover. (A28 in ANALYSIS.md
+  covers part of this.)
+- **Keyboard-complete thread** — Tab out of the composer to the answer's actions;
+  ⌥1–3 for follow-ups; ⌘E trail; ⌘R retry; ⌘⇧A all sources.
+- **⌘F find in the thread**, with highlighted matches and ⌘G/⌘⇧G.
+- **Network-aware failure states** — an offline gate before spending a call, and a
+  429 `Retry-After` countdown instead of "try again".
+- **App Intents** — "Research with Vervellum" and "Ask Vervellum" for Shortcuts and
+  Spotlight (the same seed-the-composer path as the URL scheme, F9).
+- **Print / Save as PDF / share sheet** for a turn.
+- **Research the clipboard** — a permission-free sibling of Research the Selection
+  through the same redaction path (A52).
+- **Persist the draft and the open thread across relaunch.**
+- **Diagnostics** — "Copy diagnostic report" in About and `vervellum --doctor` on Linux:
+  versions, endpoints (never keys), backend, last failure class.
+- **Claim ↔ prose linking** — hovering a finding highlights the sentences it grades.
+- **Library backup and restore** from Settings, with the version guard.
+- **A reading window** — open the thread in a normal resizable window for a long read.
+- **Localisation readiness** — a String Catalog and locale-aware dates before the
+  first translation.
+- **Token usage meter** per turn (`stream_options.include_usage`, behind a provider
+  capability).
+
+Judged as drops, and I agree: `/about` ASCII art and `/coin` (D10, D11 — cute, off
+thesis), the "all supported" seal (D9 — a badge for the absence of a finding invites
+trust the evidence did not earn), source-age tint (D3 — colour carrying a date is
+unreadable; the tooltip already has it), per-block fade-in (D8 — motion during
+reading), and the Notification Center banner (D5 — answer text on a lock screen).
+
+### 11.5 Overlap with other authors' pull requests
+
+Other reviewers worked the same repository in parallel; per the brief I did not read
+their branches. From the titles alone, #24/#51 (coalesced snapshots), #49/#31
+(pinned auto-scroll), #50 (composer measurement), #52 (queued question), #32 (tables),
+#27 (SSE framing), #26 (transcripts) and #28 (GTK close lifecycle) overlap P1, P3, P4,
+B24, B68, B7/B8, B60–B63 and B33 respectively. Where I had already opened a PR on the
+same defect (#53 vs #27, #61 vs #26, #59 vs #28) both exist; the maintainer should
+merge one and close the other. ANALYSIS.md records each pairing.
+
+---
+
+## 12. Pull requests opened by this review
+
+All against `main`, all green on both CI workflows unless noted, none merged.
+
+| PR | Branch | What |
+|---|---|---|
+| #2 | `fix/ci-test-compile` | B1, B2 — the test target compiles; the desktop entry validates under its real name |
+| #53 | `fix/streaming-robustness` | B5–B9, B21 — error frames fail the turn; cancellation honoured; `[DONE]` flushes; CR/BOM; partial answers validated |
+| #54 | `fix/provider-compat` | B10, B11, B19, Q6 — retry once without optional parameters on 400; JSON mode; `<think>` stripping |
+| #55 | `fix/search-tool-resolution` | B12, B48 — resolve the MCP search tool by shape |
+| #56 | `fix/citations-in-code` | B13, Q4 — code-aware `CitationValidator` |
+| #57 | `fix/assessment-failure` | B14, B16–B18, B20 — assessment failure caveats; lenient verdicts and sources; deterministic numbering |
+| #58 | `fix/history-citation-markers` | B15, Q5 |
+| #59 | `fix/linux-window-lifecycle` | B33, B35, B37–B39, B43, B52 |
+| #60 | `fix/thread-archive-safety` | B47, B64, B66 + Stripe keys and a bearer false positive in `SecretRedactor` |
+| #61 | `fix/transcript-and-source-urls` | B60–B63 |
+| #62 | `fix/pango-emphasis-citations` | B54 |
+| #63 | `fix/deb-prerelease-version` | B53 |
+| #64 | `fix/non-streaming-timeout` | B65 |
+| #65 | `feat/prompt-quality` | Q1, Q2, Q3, Q7 |
+| #66 | `feat/linux-preferences` | B55 |
+| #67 | `fix/macos-thread-links-settings` | B23, B70, B71 — macOS only; compiled by CI, not locally |
+| #68 | `fix/packaging-hygiene` | B3, B58 |
+
+Every Core and Linux change was built and its tests run on Swift 6.1 / Ubuntu 24.04
+before pushing (198 → 204 tests, 0 failures). The GLM review workflow is configured
+without its key and skips every PR, so no automated review arrived; steady state for
+each PR was green CI on both platforms with no comments.
