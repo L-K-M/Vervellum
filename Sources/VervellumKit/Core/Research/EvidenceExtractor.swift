@@ -207,7 +207,8 @@ enum EvidenceExtractor {
         -> (url: String, title: String, snippet: String, date: String?)? {
         var link: String?
         for key in linkKeys {
-            if let candidate = firstString(dictionary, key), let normalized = SourceHarvester.normalized(candidate) {
+            if let candidate = firstString(dictionary, key),
+               let normalized = SourceHarvester.normalized(candidate, trimmingPunctuation: false) {
                 link = normalized
                 break
             }

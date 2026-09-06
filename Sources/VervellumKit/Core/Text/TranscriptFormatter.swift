@@ -18,9 +18,21 @@ enum TranscriptFormatter {
     static func plainText(_ turn: ResearchTurn) -> String {
         var lines: [String] = [turn.question, ""]
 
-        if let failure = turn.failure {
+        // A failure after the answer streamed — the reply was cut off, the app quit
+        // before the checks ran — must not throw the answer away: it is on the turn,
+        // it is on screen, and the provider was paid for it. Only a turn with nothing
+        // to show is reduced to its failure; otherwise the failure trails the answer.
+        if let failure = turn.failure, turn.answer.isEmpty {
             lines.append("Failed: " + failure)
             return lines.joined(separator: "\n")
+        }
+
+        // A stopped run must say so. A truncated paragraph over an ordinary Sources
+        // section reads as the model simply stopping there, and nobody would know its
+        // claims were never checked.
+        if turn.stage == .cancelled {
+            lines.append("Stopped before the answer finished; what follows is incomplete.")
+            lines.append("")
         }
 
         lines.append(turn.answer)
@@ -37,8 +49,17 @@ enum TranscriptFormatter {
             }
         }
 
-        let cited = turn.citedSources(
+        // Everything the text above points at: the prose's citations, in the order
+        // they appear, then any source only a verdict cites. The assessor is shown the
+        // whole evidence block and routinely grades a claim against a source the prose
+        // never used, and a `[3]` on a claim with no `[3]` below it is exactly the
+        // dangling marker this section exists to prevent.
+        var cited = turn.citedSources(
             using: CitationValidator.validate(answer: turn.answer, sourceCount: turn.sources.count))
+        let verdictNumbers = Set(turn.findings.flatMap(\.sourceNumbers))
+        cited += turn.sources
+            .filter { verdictNumbers.contains($0.number) && !cited.contains($0) }
+            .sorted { $0.number < $1.number }
         if !cited.isEmpty {
             lines.append("")
             lines.append("Sources")
@@ -48,6 +69,11 @@ enum TranscriptFormatter {
         if !turn.limitations.isEmpty {
             lines.append("")
             lines.append("Limitations: " + turn.limitations)
+        }
+
+        if let failure = turn.failure {
+            lines.append("")
+            lines.append("Failed: " + failure)
         }
 
         for notice in turn.notices {
