@@ -291,14 +291,15 @@ final class ResearchRunner {
 
         // 5 — assess.
         update { $0.stage = .assessing }
-        let assessPayload: [String: Any] = [
-            "question": question,
-            "answer": answer,
-            "evidence": evidence,
-            "today": today,
-        ]
+        // Assembled like the answer's context, not hand-built: the assessment is a
+        // fresh call with no memory of writing the answer, so it gets the reading and
+        // the budgeted thread the answer was written against, or a follow-up's "it"
+        // and "the second one" are claims it cannot check.
+        let assessContext = ResearchContext.assemble(
+            question: question, history: history, today: today,
+            extra: ["answer": answer, "evidence": evidence, "reading": plan.reading])
         let assessObject = try await chat.completeJSON(
-            system: ResearchPrompts.assess, payload: assessPayload, label: "Assess")
+            system: ResearchPrompts.assess, payload: assessContext.payload, label: "Assess")
         let assessment = try AssessmentParser.parse(assessObject, sourceCount: sources.count)
         update { turn in
             turn.findings = assessment.findings
