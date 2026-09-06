@@ -26,6 +26,12 @@ final class ResearchEngine: ObservableObject {
     private var task: Task<Void, Never>?
     private var runningTurnID: UUID?
 
+    /// Answer-only updates are coalesced to this rate during streaming.
+    static let streamPublishInterval: TimeInterval = 0.1
+    private var lastStreamPublish = Date.distantPast
+    private var pendingSnapshot: ResearchTurn?
+    private var streamFlushScheduled = false
+
     /// Called whenever the thread changes, so the store can persist it.
     var onThreadChanged: ((ResearchThread) -> Void)?
 
@@ -68,6 +74,7 @@ final class ResearchEngine: ObservableObject {
             }
         }
         runningTurnID = nil
+        pendingSnapshot = nil
         isRunning = false
         publishChange()
     }
@@ -132,8 +139,51 @@ final class ResearchEngine: ObservableObject {
 
     private func apply(_ snapshot: ResearchTurn) {
         guard let index = thread.turns.firstIndex(where: { $0.id == snapshot.id }) else { return }
+
+        // A streamed answer publishes one snapshot per token, and each publish
+        // re-renders the thread — re-parsing the whole answer's markdown on every
+        // render, which is O(answer²) per turn. Coalesce updates that change only
+        // the prose (or the running clock) to ~10 Hz; anything structural — a new
+        // stage, sources, verdicts, a failure — publishes immediately, because those
+        // are the moments the user is waiting on. The Linux front end does the same
+        // split in `LinuxPanel.apply`.
+        var previous = thread.turns[index]
+        var incoming = snapshot
+        previous.answer = ""
+        previous.duration = nil
+        incoming.answer = ""
+        incoming.duration = nil
+        let proseOnly = previous == incoming
+
+        if proseOnly, !snapshot.stage.isTerminal,
+           Date().timeIntervalSince(lastStreamPublish) < Self.streamPublishInterval {
+            pendingSnapshot = snapshot
+            scheduleStreamFlush()
+            return
+        }
+        publish(snapshot, at: index)
+    }
+
+    private func publish(_ snapshot: ResearchTurn, at index: Int) {
+        lastStreamPublish = Date()
         thread.turns[index] = snapshot
         thread.updatedAt = Date()
+    }
+
+    /// Trailing-edge flush for coalesced snapshots. The snapshot is dropped unless
+    /// its turn is still the running one: `finish` publishes the terminal state
+    /// itself, and applying a stale partial *after* it would visibly regress the
+    /// answer to an earlier chunk.
+    private func scheduleStreamFlush() {
+        guard !streamFlushScheduled else { return }
+        streamFlushScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.streamPublishInterval) { [weak self] in
+            guard let self else { return }
+            self.streamFlushScheduled = false
+            guard let pending = self.pendingSnapshot, pending.id == self.runningTurnID else { return }
+            self.pendingSnapshot = nil
+            self.apply(pending)
+        }
     }
 
     private func update(_ id: UUID, _ body: (inout ResearchTurn) -> Void) {
