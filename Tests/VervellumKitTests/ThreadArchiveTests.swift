@@ -143,9 +143,12 @@ final class ThreadArchiveTests: XCTestCase {
         store.flush()
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         // Three-way cast: Foundation boxes this as `NSNumber` on Darwin but as a plain
-        // `UInt` in swift-corelibs-foundation, and this test runs on both.
+        // `UInt` in swift-corelibs-foundation, and this test runs on both. A closure
+        // rather than `map(Int.init)`: newer toolchains (Swift 6.2, current Xcode)
+        // find the bare initializer reference ambiguous, and CI turning red on a
+        // toolchain bump is exactly what this line is supposed to survive.
         let raw = attributes[.posixPermissions]
-        let permissions = (raw as? NSNumber)?.intValue ?? (raw as? UInt).map(Int.init) ?? (raw as? Int) ?? -1
+        let permissions = (raw as? NSNumber)?.intValue ?? (raw as? UInt).map { Int($0) } ?? (raw as? Int) ?? -1
         XCTAssertNotEqual(permissions, -1, "could not read the file's permissions")
         XCTAssertEqual(permissions & 0o077, 0)
     }
