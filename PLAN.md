@@ -367,6 +367,10 @@ The Command-modified shortcuts are handled by the panel window's
 Command-modified key never reaches `NSTextView`'s `doCommandBy(_:)`, so implementing
 them anywhere else leaves them silently dead.
 
+Copy and the Linux CLI include every source cited by either the answer or its
+findings. Failed or stopped research keeps its partial answer, sources, and caveats;
+incomplete turns are labelled so an exported answer cannot imply a finished check.
+
 Everything reachable from the header is also reachable by typing: `/direct`, `/new`,
 `/history`, `/settings`, `/copy`, `/help`. Slash parsing is deliberately strict — a
 leading slash is only a command when the word after it is one Vervellum knows, so
