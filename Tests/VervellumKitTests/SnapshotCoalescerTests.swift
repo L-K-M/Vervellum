@@ -28,8 +28,11 @@ final class SnapshotCoalescerTests: XCTestCase {
         var pendingCount: Int { entries.count }
     }
 
+    private let turnID = UUID()
+
     private func turn(answer: String, stage: ResearchStage = .answering) -> ResearchTurn {
-        var turn = ResearchTurn(question: "Q")
+        var turn = ResearchTurn(question: "Q", askedAt: Date(timeIntervalSince1970: 0))
+        turn.id = turnID
         turn.stage = stage
         turn.answer = answer
         return turn
@@ -149,6 +152,25 @@ final class SnapshotCoalescerTests: XCTestCase {
         after.stage = .answering
 
         XCTAssertFalse(SnapshotCoalescer.isStructural(after, relativeTo: before))
+    }
+
+    func testAllNonProseChangesAreStructural() {
+        var original = turn(answer: "a")
+        original.sources = [Source(number: 1, url: "https://one.example", title: "One", snippet: "old")]
+        original.findings = [Finding(claim: "X", verdict: .supported, reasoning: "old", sourceNumbers: [1])]
+
+        let changes: [(inout ResearchTurn) -> Void] = [
+            { $0.id = UUID() },
+            { $0.searchesCompleted += 1 },
+            { $0.sources[0].snippet = "new" },
+            { $0.findings[0].verdict = .contradicted },
+            { $0.model = "another model" },
+        ]
+        for change in changes {
+            var changed = original
+            change(&changed)
+            XCTAssertTrue(SnapshotCoalescer.isStructural(changed, relativeTo: original))
+        }
     }
 
     func testNoticesAndFailureAreStructural() {

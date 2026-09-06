@@ -195,6 +195,36 @@ final class ThreadArchiveTests: XCTestCase {
         XCTAssertFalse(onDisk.contains("should not persist"))
     }
 
+    func testDeletedThreadsCannotBeResurrectedByLateSnapshots() {
+        let store = ThreadArchive(fileURL: fileURL, debounce: 0)
+        let active = thread("active")
+        store.save(active)
+        store.delete(id: active.id)
+        store.save(active)
+        store.flush()
+        XCTAssertTrue(store.library.threads.isEmpty)
+
+        let next = thread("next")
+        store.save(next)
+        store.deleteAll()
+        store.save(next)
+        store.flush()
+        XCTAssertTrue(store.library.threads.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    func testReenablingHistoryDoesNotRestoreErasedActiveThreads() {
+        let store = ThreadArchive(fileURL: fileURL, debounce: 0)
+        let active = thread("active")
+        store.save(active)
+        store.isHistoryEnabled = false
+        store.isHistoryEnabled = true
+        store.save(active)
+        store.flush()
+        XCTAssertTrue(store.library.threads.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
     func testDeleteAllRemovesTheFile() {
         let store = ThreadArchive(fileURL: fileURL, debounce: 0)
         store.save(thread("gone"))
