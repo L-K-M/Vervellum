@@ -71,7 +71,8 @@ final class LinuxPanel {
         GTK.append(root, threadScroller)
         GTK.append(root, footer())
 
-        GTK.applyStylesheet(Self.stylesheet)
+        GTK.addStyle(threadBox, "thread")
+        GTK.applyStylesheet(Self.stylesheet(textScale: environment.preferences.textScale))
         wireComposer()
         render()
     }
@@ -360,7 +361,14 @@ final class LinuxPanel {
             let question = GTK.markupLabel(PangoMarkup.question(turn.question))
             GTK.addStyle(question, "question")
             GTK.append(box, question)
-            GTK.append(box, GTK.markupLabel(PangoMarkup.trail(turn)))
+            // The finished summary line is the "what each search did" the preference
+            // governs. A running turn's stage always shows, or the panel would look
+            // dead for the whole plan-and-search phase; and the planner's reason for
+            // not searching stays, because this is the only place it appears.
+            if !turn.stage.isTerminal || environment.preferences.showProcessTrail
+                || (turn.searches.isEmpty && !turn.reading.isEmpty) {
+                GTK.append(box, GTK.markupLabel(PangoMarkup.trail(turn)))
+            }
         }
 
         if let notices = PangoMarkup.notices(turn.notices) {
@@ -440,10 +448,22 @@ final class LinuxPanel {
             + "</span>"
     }
 
-    private static let stylesheet = """
-        .question { font-size: 1.05em; }
-        .composer { border: 1px solid alpha(currentColor, 0.2); border-radius: 8px; }
-        .status { opacity: 0.7; }
-        """
+    /// The panel's stylesheet, with the thread scaled by the shared `textScale`
+    /// preference.
+    ///
+    /// One rule on the thread container is enough: GTK's `em` is relative to the
+    /// parent's size, and every `size="small"` in the Pango markup is relative to its
+    /// label, so headings, trails and citations all scale together. The composer and
+    /// header keep the system size, as on macOS. The preference arrives clamped;
+    /// `String(format:)` writes the decimal point the CSS parser expects whatever the
+    /// user's locale.
+    static func stylesheet(textScale: Double) -> String {
+        return """
+            .thread { font-size: \(String(format: "%.2fem", textScale)); }
+            .question { font-size: 1.05em; }
+            .composer { border: 1px solid alpha(currentColor, 0.2); border-radius: 8px; }
+            .status { opacity: 0.7; }
+            """
+    }
 }
 #endif

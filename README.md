@@ -81,6 +81,10 @@ Configure it by editing `~/.config/vervellum/settings.json`:
 }
 ```
 
+The behaviour toggles are the same keys the macOS Settings window writes:
+`historyEnabled`, `showProcessTrail`, `submitOnReturn` (booleans) and `textScale`
+(0.85–1.4). The file is read at launch.
+
 Then store the keys in your login keyring, or export them:
 
 ```bash
