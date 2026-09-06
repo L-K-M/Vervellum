@@ -66,6 +66,9 @@ enforces rather than the prompt:
   and here are the two sources that failed to settle it" is strictly more useful than a
   bare verdict.
 
+Source numbers must be exact integers or integer strings. Boolean, fractional,
+non-finite, overflow, and out-of-range references are discarded and reported.
+
 That asymmetry is the point. It gives the model an honest place to put a claim it
 cannot support, so it is not forced to choose between fabricating support and staying
 silent. Collapsing "we found nothing" into "false" is the single most damaging thing a

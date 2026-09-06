@@ -72,6 +72,24 @@ enum AssessmentParser {
     static let maxFindings = 8
     static let maxFollowups = 3
 
+    private static let booleanEncoding = String(cString: NSNumber(value: true).objCType)
+
+    private static func sourceNumber(_ value: Any) -> Int? {
+        if let number = value as? NSNumber {
+            // JSON booleans use a distinct NSNumber encoding. `as? Bool` also
+            // accepts numeric 0/1, while `as? Int` turns true into source 1.
+            guard String(cString: number.objCType) != booleanEncoding else { return nil }
+            if let integer = value as? Int { return integer }
+
+            // Exact conversion rejects fractions, infinities, and overflow without
+            // trapping; rounded() would manufacture a source the model never cited.
+            return Int(exactly: number.doubleValue)
+        }
+
+        guard let text = value as? String else { return nil }
+        return Int(text.trimmingCharacters(in: .whitespaces))
+    }
+
     static func parse(_ object: [String: Any], sourceCount: Int) throws -> Assessment {
         guard let rawFindings = object["findings"] as? [Any] else {
             throw ResearchError("The model returned an incomplete assessment. Try again.")
@@ -96,21 +114,10 @@ enum AssessmentParser {
             let reasoning = (entry["reasoning"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-            // Accept numbers as Int or as numeric strings — providers differ on
-            // whether a JSON integer survives their own serialisation. The Double case
-            // is range-checked because `Int(_: Double)` *traps*, and this value comes
-            // straight from a model's JSON: a reply containing `1e308` would crash the
-            // app rather than fail the turn.
-            let claimed: [Int] = (entry["sources"] as? [Any] ?? []).compactMap { value in
-                if let number = value as? Int { return number }
-                // `Int(exactly:)` rather than a range check: `Double(Int.max)` rounds
-                // *up* to 2^63, so `number <= Double(Int.max)` still admits a value that
-                // `Int(_:)` then traps on.
-                if let number = value as? Double { return Int(exactly: number.rounded()) }
-                if let text = value as? String { return Int(text.trimmingCharacters(in: .whitespaces)) }
-                return nil
-            }
-            let valid = claimed.filter { $0 >= 1 && $0 <= sourceCount }
+            // Reject malformed references rather than rounding them into evidence.
+            // Compare with the raw count so failed conversions are reported too.
+            let claimed = entry["sources"] as? [Any] ?? []
+            let valid = claimed.compactMap(sourceNumber).filter { $0 >= 1 && $0 <= sourceCount }
             if valid.count != claimed.count { notices.insert(.invalidCitation) }
 
             if verdict.requiresSources && valid.isEmpty {
