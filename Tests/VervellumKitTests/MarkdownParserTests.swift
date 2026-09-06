@@ -32,6 +32,13 @@ final class MarkdownParserTests: XCTestCase {
         XCTAssertEqual(MarkdownParser.parse("## Title ##").first?.text, "Title")
     }
 
+    /// A trailing `#` is only a closing sequence when a space precedes it —
+    /// "# C#" is a heading reading "C#", not a heading "C" with a closer.
+    func testKeepsATrailingHashThatIsNotAClosingSequence() {
+        XCTAssertEqual(MarkdownParser.parse("# C#").first?.text, "C#")
+        XCTAssertEqual(MarkdownParser.parse("## Version 2#").first?.text, "Version 2#")
+    }
+
     func testParsesBulletsAndOrderedItems() {
         let blocks = MarkdownParser.parse("- one\n* two\n+ three\n1. first\n2) second")
         XCTAssertEqual(blocks.map(\.kind), [
