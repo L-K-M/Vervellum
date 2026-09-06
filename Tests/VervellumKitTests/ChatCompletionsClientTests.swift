@@ -106,6 +106,19 @@ final class ChatCompletionsClientTests: XCTestCase {
         XCTAssertNil(HTTPTransport.decodeFrame(["not json"]))
     }
 
+    /// A plan or an assessment sends nothing until the model has finished, so the idle
+    /// timeout that suits a stream would cut a slow local model off mid-generation.
+    func testANonStreamingRequestGetsTheFullDeadline() throws {
+        let url = try XCTUnwrap(URL(string: "https://example.com/v1/chat/completions"))
+        let structured = try HTTPTransport.request(url: url, payload: ["stream": false], headers: [:],
+                                                   acceptsEventStream: false)
+        XCTAssertEqual(structured.timeoutInterval, HTTPTransport.deadline)
+        let streamed = try HTTPTransport.request(url: url, payload: ["stream": true], headers: [:],
+                                                 acceptsEventStream: true)
+        XCTAssertEqual(streamed.timeoutInterval, HTTPTransport.idleTimeout)
+        XCTAssertLessThan(HTTPTransport.idleTimeout, HTTPTransport.deadline)
+    }
+
     func testDetectsAnEventStreamResponse() throws {
         let url = try XCTUnwrap(URL(string: "https://example.com"))
         let sse = try XCTUnwrap(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil,

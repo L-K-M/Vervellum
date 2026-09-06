@@ -57,6 +57,18 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     /// forever without ever tripping it.
     static let deadline: TimeInterval = 600
 
+    /// How long a request may go without a byte arriving before it is abandoned.
+    ///
+    /// An *idle* timeout on both platforms — Darwin documents it as the wait for
+    /// additional data, and FoundationNetworking rebuilds its timer on every chunk —
+    /// which is what a streamed answer wants: a token a second keeps it alive, and a
+    /// stall ends it. A non-streaming call is the opposite case. A plan or an
+    /// assessment sends nothing until the model has finished generating, so "idle"
+    /// there is the whole generation, and a local model working through a large
+    /// evidence block takes minutes. Those requests get `deadline` instead; see
+    /// `request(url:payload:headers:acceptsEventStream:)`.
+    static let idleTimeout: TimeInterval = 120
+
     // MARK: Session
 
     /// Built once in `init`, not lazily. `lazy` is not atomic, so two threads reaching
@@ -71,12 +83,11 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
 
     private static func makeSession(delegate: URLSessionDelegate) -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        // On Linux this is an *idle* timeout: the request timer is rebuilt on every
-        // chunk received, which is exactly the semantics a long-lived SSE stream wants.
+        // The idle timeout, overridden per request for non-streaming calls.
         // `timeoutIntervalForResource` is deliberately not set — it is stored but never
         // read by FoundationNetworking, so relying on it would be a timeout that
         // silently does nothing.
-        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForRequest = idleTimeout
         configuration.httpShouldSetCookies = false
         configuration.httpCookieAcceptPolicy = .never
         // Nothing here should be served from a cache: a stale plan or stale search
@@ -131,6 +142,12 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
                         acceptsEventStream: Bool) throws -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        // A call that does not stream is silent until the model has finished, so the
+        // idle timeout would cut it off after two minutes of ordinary generation and
+        // blame the connection. It gets the end-to-end budget instead; the streamed
+        // and MCP calls keep the idle timeout, where a stall really is a failure.
+        // FoundationNetworking honours a per-request interval too, once it is set.
+        request.timeoutInterval = acceptsEventStream ? idleTimeout : deadline
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(acceptsEventStream ? "application/json, text/event-stream" : "application/json",
                          forHTTPHeaderField: "Accept")
@@ -523,6 +540,9 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         if error is CancellationError { return .cancelled }
         let nsError = error as NSError
         if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled { return .cancelled }
+        // Named separately: "connection failed" invites a retry that will hit the
+        // same wall, when the remedy is a faster model or a shorter question.
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorTimedOut { return .timedOut }
         return .connectionFailed
     }
 

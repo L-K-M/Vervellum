@@ -28,6 +28,9 @@ struct ResearchError: LocalizedError, Equatable {
         "The provider's response exceeded Vervellum's size limit and was discarded.")
     static let connectionFailed = ResearchError(
         "The provider connection failed or timed out. Please try again.")
+    static let timedOut = ResearchError(
+        "The provider did not answer in time and the request was abandoned. "
+        + "A slow or local model may need a faster one, or a shorter question; otherwise try again.")
     static let invalidResponse = ResearchError(
         "The provider returned a response Vervellum could not read.")
     static let cancelled = ResearchError("Research cancelled.")
