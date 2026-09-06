@@ -12,6 +12,7 @@ Each branch is self-contained; merge order does not matter, except that #32
 
 | PR | Branch | Scope |
 | --- | --- | --- |
+| #38 | `k3/fix-archive-test-inference` | CI: main was red on both platforms — Swift toolchain drift made `(raw as? UInt).map(Int.init)` ambiguous in ThreadArchiveTests, and the desktop-entry validation copied to a non-reverse-DNS filename, which desktop-file-utils 0.27+ rejects for a DBusActivatable entry. |
 | #22 | `k3/atx-heading-closing-sequence` | Bug: `# C#` rendered as "C" — trailing `#` stripped without the required preceding space. Core + tests. |
 | #23 | `k3/reject-fractional-citations` | Bug: `AssessmentParser` rounded a fractional source number (2.7) onto a real source (3). Core + tests. |
 | #24 | `k3/streaming-render-throttle` | Perf: macOS republished per token (O(answer²) parsing per turn); now coalesces prose-only updates to 10 Hz, mirroring `LinuxPanel`. `ResearchEngine`. |
@@ -84,9 +85,9 @@ they are deliberately small and idiomatic.
   the grant, pressing the selection shortcut throws an alert every time until
   the user re-grants or disables the shortcut. Add a "just open the panel
   without the selection" escape (and remember it).
-- **Portability footgun:** `ThreadArchiveTests` trips Swift 6.2.3's stricter
-  inference (`(raw as? UInt).map(Int.init)` is ambiguous there; 6.0/6.1 accept
-  it). CI pins 6.1 today; when bumping, write `.map { Int($0) }`.
+- **Pin the Linux CI image by digest for real.** `linux.yml`'s comment claims a
+  digest pin, but the job references the mutable `swift:6.1-noble` tag — the
+  drift that broke main (see PR #38) without a code change.
 
 ## Features worth building
 
