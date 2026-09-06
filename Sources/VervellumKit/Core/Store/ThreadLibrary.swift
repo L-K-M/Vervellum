@@ -8,6 +8,9 @@ import Foundation
 /// data a future build would have understood.
 struct ThreadLibrary: Codable, Equatable {
 
+    /// Bump this whenever the document gains a field or an enum case an older build
+    /// could not decode. The stamp is the first thing an older build reads; a document
+    /// that fails to decode *without* a newer stamp is taken for corruption instead.
     static let currentVersion = 1
     /// How many threads are kept. Old research is the least valuable thing on the
     /// disk and the file is read wholesale at launch, so the list is bounded.
@@ -31,6 +34,28 @@ struct ThreadLibrary: Codable, Equatable {
 
     mutating func remove(id: UUID) {
         threads.removeAll { $0.id == id }
+    }
+
+    /// What a turn says when the app stopped before its answer did.
+    static let interruptedMessage = "Vervellum quit before this answer finished."
+
+    /// Marks every turn that was still running when the document was written as failed.
+    ///
+    /// A turn is saved when it is asked and again when it finishes; between the two the
+    /// file holds it as queued or answering. If the app crashed, was force-quit or the
+    /// machine restarted in that window, the turn would otherwise come back as running
+    /// forever: a spinner nothing will ever stop, no way to retry, and a dead question
+    /// sent to the model as history on the next follow-up. Whatever answer had arrived
+    /// is kept.
+    mutating func finishInterruptedTurns() {
+        for threadIndex in threads.indices {
+            for turnIndex in threads[threadIndex].turns.indices
+            where !threads[threadIndex].turns[turnIndex].stage.isTerminal {
+                threads[threadIndex].turns[turnIndex].stage = .failed
+                threads[threadIndex].turns[turnIndex].failure = Self.interruptedMessage
+                threads[threadIndex].turns[turnIndex].duration = nil
+            }
+        }
     }
 
     /// Threads whose title or any question matches `query`, newest first.

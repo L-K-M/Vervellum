@@ -173,5 +173,117 @@ final class ThreadArchiveTests: XCTestCase {
         store.deleteAll()
         XCTAssertTrue(store.library.threads.isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertNil(store.eraseFailure)
+    }
+
+    /// The realistic newer document is one this build cannot decode at all — a newer
+    /// build added an enum case or a field. That must read as "newer", not as
+    /// "corrupt": a corrupt file is recovered from the backup and then written over.
+    func testANewerDocumentThisBuildCannotDecodeIsStillReadOnly() throws {
+        let store = ThreadArchive(fileURL: fileURL, debounce: 0)
+        store.save(thread("from before"))
+        store.flush()
+        store.save(thread("also from before"))
+        store.flush()
+        let backupURL = fileURL.appendingPathExtension("bak")
+        let backupBefore = try Data(contentsOf: backupURL)
+
+        let future = #"{"version": 2, "threads": [{"stage": "teleporting"}]}"#
+        try future.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let reloaded = ThreadArchive(fileURL: fileURL, debounce: 0)
+        XCTAssertTrue(reloaded.isReadOnly)
+        // Nor is the backup shown in its place: an older snapshot presented as the
+        // history would only raise the question of where the newest threads went.
+        XCTAssertTrue(reloaded.library.threads.isEmpty)
+        reloaded.save(thread("should not persist"))
+        reloaded.flush()
+
+        XCTAssertEqual(try String(contentsOf: fileURL, encoding: .utf8), future)
+        XCTAssertEqual(try Data(contentsOf: backupURL), backupBefore)
+    }
+
+    /// A newer backup is just as untouchable: the first write would create a primary
+    /// and the second would rotate it over the backup.
+    func testANewerBackupIsAlsoReadOnly() throws {
+        let future = #"{"version": 3, "threads": []}"#
+        try future.write(to: fileURL.appendingPathExtension("bak"), atomically: true, encoding: .utf8)
+        let store = ThreadArchive(fileURL: fileURL, debounce: 0)
+        XCTAssertTrue(store.isReadOnly)
+    }
+
+    /// A turn saved mid-run — the app crashed or was killed before it finished — must
+    /// not come back as running forever.
+    func testAnInterruptedTurnComesBackFailedWithItsPartialAnswer() {
+        let store = ThreadArchive(fileURL: fileURL, debounce: 0)
+        var interrupted = ResearchThread()
+        var turn = ResearchTurn(question: "still going")
+        turn.stage = .answering
+        turn.answer = "Half of an"
+        interrupted.turns = [turn]
+        store.save(interrupted)
+        store.flush()
+
+        let reloaded = ThreadArchive(fileURL: fileURL, debounce: 0)
+        let loaded = reloaded.library.threads.first?.turns.first
+        XCTAssertEqual(loaded?.stage, .failed)
+        XCTAssertEqual(loaded?.failure, ThreadLibrary.interruptedMessage)
+        XCTAssertEqual(loaded?.answer, "Half of an")
+        XCTAssertNil(loaded?.duration)
+    }
+
+    /// After recovering from the backup, the corrupt primary must not be rotated over
+    /// the only good copy before the new write is known to have succeeded.
+    func testRecoveringFromTheBackupKeepsTheBackupIntact() throws {
+        let store = ThreadArchive(fileURL: fileURL, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+        try "{ not json".write(to: fileURL, atomically: true, encoding: .utf8)
+        let backupURL = fileURL.appendingPathExtension("bak")
+        let goodBackup = try Data(contentsOf: backupURL)
+
+        let recovered = ThreadArchive(fileURL: fileURL, debounce: 0)
+        XCTAssertEqual(recovered.library.threads.map(\.title), ["one"])
+        recovered.save(thread("three"))
+        recovered.flush()
+        XCTAssertEqual(try Data(contentsOf: backupURL), goodBackup, "the corrupt primary replaced the backup")
+
+        // The primary this process wrote is a good file again, so the next write
+        // rotates it as usual.
+        recovered.save(thread("four"))
+        recovered.flush()
+        let rotated = ThreadArchive(fileURL: backupURL, debounce: 0)
+        XCTAssertEqual(rotated.library.threads.map(\.title), ["three", "one"])
+    }
+
+    /// A file manager that cannot delete, standing in for a locked file or a folder
+    /// that lost its write permission.
+    private final class StubbornFileManager: FileManager {
+        override func removeItem(at URL: URL) throws {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+    }
+
+    /// "History off means the bytes are gone" is a promise; when the file system
+    /// breaks it, the archive has to say so rather than let the toggle claim success.
+    func testAFailedEraseIsReportedNotSwallowed() {
+        let store = ThreadArchive(fileURL: fileURL, fileManager: StubbornFileManager(), debounce: 0)
+        store.save(thread("stuck"))
+        store.flush()
+
+        store.deleteAll()
+        XCTAssertTrue(store.library.threads.isEmpty)
+        XCTAssertNotNil(store.eraseFailure)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+
+        store.save(thread("stuck again"))
+        store.flush()
+        store.isHistoryEnabled = false
+        XCTAssertNotNil(store.eraseFailure)
+        // Turning history back on is the user accepting the file; the complaint goes.
+        store.isHistoryEnabled = true
+        XCTAssertNil(store.eraseFailure)
     }
 }

@@ -23,11 +23,21 @@ final class SecretRedactorTests: XCTestCase {
         assertRedacted("xoxb-1234567890-abcdefghijkl", "xoxb-1234567890")
         assertRedacted("AIzaSyA1234567890abcdefghijklmnopqrstuv", "AIzaSy")
         assertRedacted("AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE")
+        // Stripe's shape, bare: no `=` and no `Bearer` for the other patterns to find.
+        // Assembled at run time so the source file does not itself look like a leak
+        // to a secret scanner — which is, after all, the point.
+        let stripeBody = String(repeating: "a1", count: 12)
+        assertRedacted("sk_live_" + stripeBody, stripeBody)
+        assertRedacted("rk_test_" + stripeBody, stripeBody)
     }
 
     func testRedactsAuthorizationHeaders() {
         assertRedacted("curl -H 'Authorization: Bearer abcdefghijklmnopqrst'", "abcdefghijklmnop")
         assertRedacted("Basic dXNlcjpwYXNzd29yZDEyMw==", "dXNlcjpwYXNz")
+        assertRedacted("Bearer abc123def456ghi789jkl", "abc123def456")
+        assertRedacted("token 0123456789abcdef", "0123456789abcdef")
+        // Inside a header even an all-letter value is a credential.
+        assertRedacted("authorization: bearer abcdefghijklmnopqrstuv", "abcdefghijklmnop")
     }
 
     /// The .env case: the single most likely thing to be selected in a terminal.
@@ -71,6 +81,10 @@ final class SecretRedactorTests: XCTestCase {
             "The access_key rotation policy is documented in the wiki.",
             "Why does the secret sharing scheme need a threshold?",
             "token_count = countTokens(text)",
+            "There is a basic misunderstanding of how the tax applies.",
+            "A basic well-established principle of contract law.",
+            "The token internationalization work is scheduled for later.",
+            "The sk_buffer_allocate_pages call is documented in the kernel tree.",
         ] {
             let result = SecretRedactor.redact(text)
             XCTAssertFalse(result.didRedact, "wrongly redacted: \(text) → \(result.text)")
