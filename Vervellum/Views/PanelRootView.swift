@@ -227,24 +227,18 @@ struct PanelRootView: View {
                              isEnabled: !engine.isRunning,
                              onSubmit: { submit(draft) },
                              onArrow: recall)
-                    // The composer's own width, measured from the row it actually sits
-                    // in rather than derived from the panel-width preference: the
-                    // preference is unclamped, but PanelPlacement clamps the real panel
-                    // on a small display or a Stage Manager slice — and a height
-                    // computed against a width that no longer exists wraps the field a
-                    // line too early. `composerRowWidth` is set from the background
-                    // geometry below; the preference-derived estimate only bridges the
-                    // first frame, before any layout has happened.
+                    // The composer's height for its content, laid out at the width the
+                    // row will actually give it: the measured row width minus what the
+                    // send button and its spacing take. Measured rather than derived
+                    // from the panel-width preference, which is unclamped while
+                    // PanelPlacement clamps the real panel on a small display or a
+                    // Stage Manager slice — a height computed against a width that no
+                    // longer exists wraps the field a line too early. The estimate only
+                    // bridges the first frame, before any layout has happened.
                     .frame(height: ComposerView.height(
                         for: draft,
                         width: (composerRowWidth ?? estimatedComposerRowWidth)
                             - Self.sendButtonReservation))
-                    .background(GeometryReader { geometry in
-                        Color.clear.onAppear { composerRowWidth = geometry.size.width }
-                            .onChange(of: geometry.size.width) { _, width in
-                                composerRowWidth = width
-                            }
-                    })
 
                 Button {
                     if engine.isRunning { engine.cancel() } else { submit(draft) }
@@ -265,6 +259,15 @@ struct PanelRootView: View {
                 .help(engine.isRunning ? "Stop the research (⌘.)" : "Ask")
                 .padding(.bottom, 3)
             }
+            // Measured on the row, not the composer: the composer's own width already
+            // excludes the send button, and subtracting the reservation from it too
+            // would under-estimate and wrap early — the very bug this fixes.
+            .background(GeometryReader { geometry in
+                Color.clear.onAppear { composerRowWidth = geometry.size.width }
+                    .onChange(of: geometry.size.width) { _, width in
+                        composerRowWidth = width
+                    }
+            })
         }
         .padding(.horizontal, PanelTheme.Space.medium)
         .padding(.vertical, PanelTheme.Space.small)
