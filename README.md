@@ -4,6 +4,8 @@ A hotkey-summoned research panel for macOS and Linux. It looks things up, then s
 
 **Latest release:** v<!-- version -->0.2.0<!-- /version --> · [Download](https://github.com/L-K-M/Vervellum/releases/latest)
 
+![Screenshot of Vervellum researching the claim that Julius Caesar's nose was three inches long](media-sources/screenshot.png)
+
 > [!IMPORTANT]
 > LLM Disclosure: Vervellum was built with substantial help from large language models.
 
