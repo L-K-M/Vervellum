@@ -53,8 +53,8 @@ One job in the **official Swift container for the target Ubuntu release**, not
 versions present at build time, so the container is what guarantees the package
 installs on 24.04; it pins the whole userland rather than just the compiler.
 
-The job builds the executable, runs `swift test`, validates the `.desktop` entry,
-packages the `.deb` — and then **installs it**. A package that builds but will not
+The job builds the executable, runs `swift test`, checks native-close/reopen under
+Xvfb, validates the `.desktop` entry, packages the `.deb` — and then **installs it**. A package that builds but will not
 install is the characteristic failure of hand-rolled `dpkg-deb` packaging, and ruling it
 out costs one step.
 

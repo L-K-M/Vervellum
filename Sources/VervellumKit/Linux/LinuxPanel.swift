@@ -50,15 +50,9 @@ final class LinuxPanel {
         self.environment = environment
 
         window = gtk_application_window_new(application)!
+        GTK.hideOnClose(window)
         gtk_window_set_title(vv_window(window), "Vervellum")
         gtk_window_set_default_size(vv_window(window), 560, 680)
-        // The window-manager close control must *hide*, exactly as the in-app Close
-        // button does. GTK's default destroys the window — but this process is a held
-        // D-Bus service that keeps running with the panel's pointer cached, and the
-        // next shortcut press would then call into a finalised object. That is a
-        // use-after-free at worst and a dead primary instance at best, with no way
-        // back in short of killing it.
-        gtk_window_set_hide_on_close(vv_window(window), 1)
 
         let root = GTK.verticalBox(spacing: 0)
         threadBox = GTK.verticalBox(spacing: 18)

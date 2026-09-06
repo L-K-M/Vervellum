@@ -146,6 +146,11 @@ enum GTK {
 
     // MARK: Layout
 
+    /// Keep borrowed widget pointers valid when the window manager closes the panel.
+    static func hideOnClose(_ window: Widget) {
+        gtk_window_set_hide_on_close(vv_window(window), 1)
+    }
+
     static func verticalBox(spacing: Int32 = 0) -> Widget { vv_vbox(spacing) }
     static func horizontalBox(spacing: Int32 = 0) -> Widget { vv_hbox(spacing) }
 

@@ -42,7 +42,7 @@ jobs:
           # libgtk-4-dev brings the headers pkg-config resolves for the CGtk target;
           # the rest are the packaging tools.
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            libgtk-4-dev pkg-config dpkg-dev binutils desktop-file-utils
+            libgtk-4-dev pkg-config dpkg-dev binutils desktop-file-utils xvfb xauth
 
       - name: Build
         run: swift build -c release --product vervellum
@@ -53,9 +53,16 @@ jobs:
       - name: Test the shared core
         run: swift test --parallel
 
-      # Validated under its real basename: for a DBusActivatable entry the *filename*
-      # must be the reverse-DNS application id, and desktop-file-validate rejects
-      # `entry.desktop` outright before it looks at the contents.
+      # Native close must retain the window that the next shortcut will reuse.
+      - name: Test the GTK window lifecycle
+        env:
+          VERVELLUM_REQUIRE_DISPLAY: '1'
+          GSETTINGS_BACKEND: memory
+          GTK_A11Y: none
+          GSK_RENDERER: cairo
+        run: xvfb-run --auto-servernum swift test --skip-build --filter LinuxPanelLifecycleTests
+
+      # D-Bus validation checks the filename as well as the contents.
       - name: Validate the desktop entry
         run: |
           mkdir -p /tmp/desktop
