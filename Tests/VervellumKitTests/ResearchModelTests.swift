@@ -71,6 +71,80 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertEqual(library.search("rust").map(\.id), [newer.id, older.id])
     }
 
+    // MARK: Search progress
+
+    /// A document written before `searchesCompleted` existed must still load: the
+    /// counter is 0 ("nothing reported yet"), not a decode failure that would drop the
+    /// user's whole library to the empty state. The fixture is the exact shape the
+    /// previous build's encoder wrote — every old key present, only the new one absent.
+    func testDecodesATurnWrittenBeforeSearchProgressExisted() throws {
+        let json = """
+        {"id": "1B4E2C5A-0000-0000-0000-000000000001",
+         "question": "Q",
+         "askedAt": "2026-01-01T00:00:00Z",
+         "stage": "complete",
+         "reading": "",
+         "searches": [],
+         "sources": [],
+         "answer": "A",
+         "findings": [],
+         "limitations": "",
+         "followups": [],
+         "notices": [],
+         "duration": 3,
+         "model": "m"}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let turn = try decoder.decode(ResearchTurn.self, from: Data(json.utf8))
+        XCTAssertEqual(turn.searchesCompleted, 0)
+        XCTAssertEqual(turn.answer, "A")
+    }
+
+    func testSearchProgressRoundTripsThroughCodable() throws {
+        var turn = ResearchTurn(question: "Q")
+        turn.searches = [PlannedSearch(purpose: "a", argumentsJSON: "{\"q\":\"a\"}"),
+                         PlannedSearch(purpose: "b", argumentsJSON: "{\"q\":\"b\"}")]
+        turn.searchesCompleted = 1
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(ResearchTurn.self, from: encoder.encode(turn))
+        XCTAssertEqual(decoded.searchesCompleted, 1)
+    }
+
+    func testRunningProgressCountsSearchesAttempted() {
+        var turn = ResearchTurn(question: "Q")
+        turn.stage = .searching
+        turn.searches = [PlannedSearch(purpose: "a", argumentsJSON: "{\"q\":\"a\"}"),
+                         PlannedSearch(purpose: "b", argumentsJSON: "{\"q\":\"b\"}"),
+                         PlannedSearch(purpose: "c", argumentsJSON: "{\"q\":\"c\"}")]
+
+        turn.searchesCompleted = 2
+        XCTAssertEqual(turn.runningProgressLabel, "Searching the web · 2 of 3")
+
+        // Nothing has finished yet: the first search is in flight, not zero of them done.
+        turn.searchesCompleted = 0
+        XCTAssertEqual(turn.runningProgressLabel, "Searching the web · 1 of 3")
+
+        // A count past the end (a turn re-run mid-stage, a corrupted document) clamps
+        // rather than reading "4 of 3".
+        turn.searchesCompleted = 9
+        XCTAssertEqual(turn.runningProgressLabel, "Searching the web · 3 of 3")
+    }
+
+    func testRunningProgressFallsBackToTheStageLabel() {
+        var turn = ResearchTurn(question: "Q")
+        turn.stage = .planning
+        XCTAssertEqual(turn.runningProgressLabel, ResearchStage.planning.label)
+
+        // No planned searches to count: the bare label, not "0 of 0".
+        turn.stage = .searching
+        XCTAssertEqual(turn.runningProgressLabel, "Searching the web")
+    }
+
     // MARK: Verdicts
 
     /// The asymmetry is the point: it forces the model into the honest buckets when

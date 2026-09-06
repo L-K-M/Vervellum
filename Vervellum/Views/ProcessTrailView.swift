@@ -118,14 +118,10 @@ struct ProcessTrailView: View {
         return parts.joined(separator: " · ")
     }
 
+    /// The live line while a turn runs. Search progress comes from the turn itself —
+    /// see `ResearchTurn.runningProgressLabel` — so both platforms show the same ticks.
     private var runningLine: String {
-        switch turn.stage {
-        case .searching where !turn.searches.isEmpty:
-            return "Searching the web · \(turn.searches.count) "
-                + "quer\(turn.searches.count == 1 ? "y" : "ies")"
-        default:
-            return turn.stage.label
-        }
+        turn.runningProgressLabel
     }
 
     // MARK: Detail

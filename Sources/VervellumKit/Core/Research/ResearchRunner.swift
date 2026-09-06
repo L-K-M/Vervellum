@@ -255,6 +255,9 @@ final class ResearchRunner {
                 trace.warn("Search \(index + 1) failed: \(error.message)")
                 searchFailures.append(error.message)
             }
+            // Counted whether the attempt succeeded or failed: "2 of 3" means two
+            // attempts are done, and a failed attempt is done.
+            update { $0.searchesCompleted = index + 1 }
         }
 
         let harvested = EvidenceExtractor.sources(from: rawResults)
