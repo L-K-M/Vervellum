@@ -2,7 +2,7 @@ import Foundation
 
 /// Shared citation placement; each renderer supplies its own styling and links.
 struct CitationMask {
-    static let placeholder: Character = "\u{FFFC}"
+    static let placeholder: Character = "\u{E000}"
 
     let text: String
     let sourceIndices: [[Int]]
@@ -15,7 +15,8 @@ struct CitationMask {
         for span in validation.spans {
             switch span {
             case .text(let value):
-                masked += value
+                // Raw placeholders must never steal a later citation's position.
+                masked += value.replacingOccurrences(of: String(Self.placeholder), with: "")
             case .citation(let indices, _):
                 masked.append(Self.placeholder)
                 citations.append(indices)

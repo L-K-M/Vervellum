@@ -11,7 +11,7 @@ import SwiftUI
 /// * Substituting *after* means finding `[3]` inside an already-parsed
 ///   `AttributedString`, where an emphasis run may have split it in two.
 ///
-/// So each citation is replaced with a single U+FFFC OBJECT REPLACEMENT CHARACTER
+/// So each citation is replaced with the shared private-use placeholder
 /// before parsing — one character, no markdown meaning, impossible to split — and
 /// the placeholders are swapped for styled links afterwards, in order.
 struct MarkdownText: View {
@@ -45,6 +45,11 @@ enum CitationText {
     static func render(_ markdown: String, sources: [Source], scale: Double = 1) -> AttributedString {
         let (masked, citations) = Self.mask(markdown, sources: sources)
         var result = Self.parseInline(masked)
+        // Markdown can consume text inside link destinations. Preserve every citation
+        // position by falling back to literal text rather than shifting later chips.
+        if result.characters.filter({ $0 == placeholder }).count != citations.count {
+            result = AttributedString(masked)
+        }
         // A link the model wrote is exactly what the citation rule forbids: evidence
         // is cited by number, and a URL in the prose is flagged, never followed. The
         // markdown parser turns `[text](url)` into a clickable run, so the attribute

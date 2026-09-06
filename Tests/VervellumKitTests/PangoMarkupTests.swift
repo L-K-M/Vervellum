@@ -11,6 +11,16 @@ final class PangoMarkupTests: XCTestCase {
         Source(number: 2, url: "https://two.example.com", title: "Two", snippet: ""),
     ]
 
+    func testTablesKeepLongCellsAndActionableCitations() {
+        let cell = String(repeating: "evidence ", count: 20) + "[2]"
+        let markdown = "| Claim | Detail |\n| --- | --- |\n| <tag> | \(cell) |"
+        let markup = PangoMarkup.answer(markdown, sources: sources)
+        XCTAssertTrue(markup.contains(String(repeating: "evidence ", count: 20)))
+        XCTAssertTrue(markup.contains("&lt;tag&gt;"))
+        XCTAssertTrue(markup.contains("<a href=\"https://two.example.com\">"))
+        XCTAssertFalse(markup.contains("…"))
+    }
+
     func testRendersACitationAsALink() {
         let markup = PangoMarkup.inline("As shown [1].", sources: sources)
         XCTAssertTrue(markup.contains("<a href=\"https://one.example.com\">"))

@@ -78,7 +78,7 @@ enum PangoMarkup {
                 // markers and bracketed numbers are literal text.
                 return "<tt>" + GTK.escape(block.text) + "</tt>"
             case .table(let headers, let rows):
-                return table(headers, rows: rows)
+                return table(headers, rows: rows, sources: sources)
             case .rule:
                 return "<span foreground=\"\(Colour.secondary)\">──────────</span>"
             }
@@ -95,40 +95,23 @@ enum PangoMarkup {
     /// writes — with its opening marker in one piece and its closing marker in
     /// another, and both would be printed as literal asterisks.
     static func inline(_ text: String, sources: [Source]) -> String {
-        let validation = CitationValidator.validate(answer: text, sourceCount: sources.count)
-        var citations: [String] = []
-        var flattened = ""
-        for span in validation.spans {
-            switch span {
-            case .text(let value):
-                // A placeholder that arrives in the answer itself is dropped, so it
-                // cannot be read back as a citation.
-                flattened += value.replacingOccurrences(of: String(placeholder), with: "")
-            case .citation(let indices, let raw):
-                let cited = indices.compactMap { sources.indices.contains($0) ? sources[$0] : nil }
-                if let first = cited.first {
-                    let label = cited.map { String($0.number) }.joined(separator: ",")
-                    citations.append("<a href=\"\(GTK.escape(first.url))\">"
-                                     + "<span size=\"small\" font_family=\"monospace\">[\(label)]</span></a>")
-                } else {
-                    citations.append(GTK.escape(raw))
-                }
-                flattened.append(placeholder)
-            }
+        let mask = CitationMask(text, sourceCount: sources.count)
+        let citations = mask.sourceIndices.map { indices -> String in
+            let cited = indices.map { sources[$0] }
+            guard let first = cited.first else { return "" }
+            let label = cited.map { String($0.number) }.joined(separator: ",")
+            return "<a href=\"\(GTK.escape(first.url))\">"
+                + "<span size=\"small\" font_family=\"monospace\">[\(label)]</span></a>"
         }
 
         var result = ""
         var pending = citations.makeIterator()
-        for piece in emphasis(flattened).split(separator: placeholder, omittingEmptySubsequences: false) {
+        for piece in emphasis(mask.text).split(separator: CitationMask.placeholder, omittingEmptySubsequences: false) {
             result += piece
             if let citation = pending.next() { result += citation }
         }
         return result
     }
-
-    /// Stands in for a citation while emphasis is parsed. A private-use character:
-    /// no markdown marker, and nothing `g_markup_escape_text` touches.
-    private static let placeholder: Character = "\u{E000}"
 
     /// The inline markdown Pango can express: bold, italic and code.
     ///
@@ -185,42 +168,18 @@ enum PangoMarkup {
 
     // MARK: Tables
 
-    /// A table as aligned monospace columns.
-    ///
-    /// Plain text, not `inline`: alignment needs the visible width of each cell,
-    /// and a markup tag (or an escaped entity) would count toward it. Citations in
-    /// cells therefore stay literal `[3]` markers here — the sources block below the
-    /// answer carries the actual links. Column width is capped so one verbose cell
-    /// cannot push the rest of the table off the window.
-    static func table(_ headers: [String], rows: [[String]]) -> String {
-        let maxColumnWidth = 40
-        let columns = headers.count
-        var widths = headers.map { min($0.count, maxColumnWidth) }
-        for row in rows {
-            for column in 0..<min(row.count, columns) {
-                widths[column] = max(widths[column], min(row[column].count, maxColumnWidth))
-            }
+    /// Labeled rows wrap without truncating evidence or disabling cell citations.
+    private static func table(_ headers: [String], rows: [[String]], sources: [Source]) -> String {
+        guard !rows.isEmpty else {
+            return headers.map { inline($0, sources: sources) }.joined(separator: " · ")
         }
-
-        func cell(_ text: String, _ width: Int) -> String {
-            // padding(toLength:) truncates without an ellipsis when the text is
-            // longer than the column, so clip explicitly first.
-            let clipped = text.count > width
-                ? String(text.prefix(max(width - 1, 0))) + "…"
-                : text
-            // `count` is in Characters, which is close enough to display cells for
-            // the mono font Pango maps `tt` to; padding is cosmetic, not structural.
-            return clipped.padding(toLength: width, withPad: " ", startingAt: 0)
-        }
-        func render(_ fields: [String]) -> String {
-            (0..<columns).map { cell($0 < fields.count ? fields[$0] : "", widths[$0]) }
-                .joined(separator: "  ")
-        }
-
-        var lines = [render(headers)]
-        lines.append(widths.map { String(repeating: "─", count: $0) }.joined(separator: "  "))
-        lines.append(contentsOf: rows.map(render))
-        return "<tt>" + GTK.escape(lines.joined(separator: "\n")) + "</tt>"
+        return rows.map { row in
+            headers.indices.map { column in
+                let value = row.indices.contains(column) ? row[column] : ""
+                return "<b>" + inline(headers[column], sources: sources) + ":</b> "
+                    + inline(value, sources: sources)
+            }.joined(separator: "\n")
+        }.joined(separator: "\n\n")
     }
 
     // MARK: Turn sections
