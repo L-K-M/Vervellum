@@ -64,6 +64,60 @@ final class ChatCompletionsClientTests: XCTestCase {
         XCTAssertNil(ChatCompletionsClient.outermostObject(in: "no braces here"))
     }
 
+    /// A reasoning model served through a gateway that leaks its scratchpad puts a
+    /// `<think>` block before the object — and that block often quotes the expected
+    /// shape with literal ellipses, which is balanced and unparseable.
+    func testStripsAReasoningBlockBeforeTheObject() {
+        let text = "<think>I should return {\"reading\": ..., \"searches\": [...]} with two "
+            + "queries.</think>\n{\"reading\": \"r\", \"searches\": []}"
+        XCTAssertEqual(ChatCompletionsClient.decodeJSONObject(from: text)?["reading"] as? String, "r")
+        let upper = "<THINK>\nbraces { everywhere }\n</THINK>{\"ok\": true}"
+        XCTAssertEqual(ChatCompletionsClient.decodeJSONObject(from: upper)?["ok"] as? Bool, true)
+    }
+
+    /// Even without a tag, a preamble that quotes the schema must not win over the real
+    /// object that follows it.
+    func testSkipsAnUnparseableBalancedRunAndTakesTheNext() {
+        let text = "The shape is {\"findings\": [...]} — here it is: {\"findings\": [], \"limitations\": \"\"}"
+        XCTAssertNotNil(ChatCompletionsClient.decodeJSONObject(from: text)?["findings"])
+    }
+
+    // MARK: Request shape
+
+    /// The two optional fields not every endpoint accepts, and nothing else, come and go
+    /// together: a rejected request is retried without exactly these.
+    func testOptionalParametersAreAddedOnlyWhenAsked() {
+        let with = ChatCompletionsClient.requestBody(model: "m", system: "s", userContent: "u",
+                                                     stream: false, optionalParameters: true)
+        XCTAssertEqual(with["temperature"] as? Double, 0.2)
+        XCTAssertEqual((with["response_format"] as? [String: String])?["type"], "json_object")
+        XCTAssertEqual(with["stream"] as? Bool, false)
+
+        let without = ChatCompletionsClient.requestBody(model: "m", system: "s", userContent: "u",
+                                                        stream: false, optionalParameters: false)
+        XCTAssertNil(without["temperature"])
+        XCTAssertNil(without["response_format"])
+        XCTAssertEqual(without["model"] as? String, "m")
+        XCTAssertEqual((without["messages"] as? [[String: String]])?.count, 2)
+    }
+
+    /// JSON mode is a non-streaming affair; the streamed answer only ever carries the
+    /// temperature.
+    func testTheStreamedCallNeverAsksForJSONMode() {
+        let streamed = ChatCompletionsClient.requestBody(model: "m", system: "s", userContent: "u",
+                                                         stream: true, optionalParameters: true)
+        XCTAssertEqual(streamed["temperature"] as? Double, 0.4)
+        XCTAssertNil(streamed["response_format"])
+        XCTAssertEqual(streamed["stream"] as? Bool, true)
+    }
+
+    /// The same inputs must produce the same prompt bytes.
+    func testUserContentIsEncodedWithSortedKeys() {
+        let payload: [String: Any] = ["question": "q", "evidence": [1], "today": "2026-09-06"]
+        XCTAssertEqual(ChatCompletionsClient.encodeUserContent(payload),
+                       #"{"evidence":[1],"question":"q","today":"2026-09-06"}"#)
+    }
+
     // MARK: Response shaping
 
     func testExtractsTheMessageContent() throws {

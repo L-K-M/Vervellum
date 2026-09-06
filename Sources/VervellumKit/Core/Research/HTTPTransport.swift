@@ -529,6 +529,9 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         if http.statusCode == 429 {
             throw ResearchError("The provider is rate-limiting Vervellum (HTTP 429). Wait a moment and retry.")
         }
+        if http.statusCode == 400 {
+            throw ResearchError.badRequest
+        }
         if (300..<400).contains(http.statusCode) {
             // Refusing a redirect does not fail the task — `URLSession` completes it
             // successfully with the 3xx response — so this branch is the only thing that
