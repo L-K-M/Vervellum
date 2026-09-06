@@ -44,6 +44,13 @@ enum CitationValidator {
         pattern: #"\[\s*\d{1,3}(?:\s*[,;]\s*\d{1,3})*\s*\]"#)
 
     /// Parses `answer` against a source list of `sourceCount` entries.
+    ///
+    /// Code is not prose: a bracketed number inside a fenced block or a backtick span
+    /// (`argv[0]`, `items[1]`) is an index, not a citation, and both renderers already
+    /// show code literally. Reading it as a citation here would accuse the model of
+    /// inventing source `[0]`, mark source 1 as "cited" by a code sample, and — for a
+    /// backtick span — render a chip in the middle of the code. So markers inside code
+    /// are left as text, and the validator, the renderers and the transcript agree.
     static func validate(answer: String, sourceCount: Int) -> Result {
         var spans: [Span] = []
         var cited: Set<Int> = []
@@ -55,10 +62,12 @@ enum CitationValidator {
         }
 
         let full = NSRange(answer.startIndex..<answer.endIndex, in: answer)
+        let code = codeRanges(in: answer)
         var cursor = answer.startIndex
 
         for match in regex.matches(in: answer, range: full) {
             guard let range = Range(match.range, in: answer) else { continue }
+            if code.contains(where: { $0.overlaps(range) }) { continue }
             if cursor < range.lowerBound {
                 spans.append(.text(String(answer[cursor..<range.lowerBound])))
             }
@@ -96,5 +105,68 @@ enum CitationValidator {
                       citedSourceIndices: cited.sorted(),
                       outOfRangeCitations: outOfRange,
                       literalURLs: SourceHarvester.bareURLs(in: answer))
+    }
+
+    // MARK: Code
+
+    /// The ranges of `text` that are code: fenced blocks (``` or ~~~, to the closing
+    /// fence or to the end when it has not arrived yet) and inline backtick spans.
+    ///
+    /// Deliberately the same block rule `MarkdownParser` applies, so what the validator
+    /// skips is exactly what the renderers show literally. An unterminated fence is
+    /// the normal case mid-stream, and everything after it is code until the closer
+    /// arrives — which is also what the renderer draws.
+    static func codeRanges(in text: String) -> [Range<String.Index>] {
+        var ranges: [Range<String.Index>] = []
+        var fenceStart: String.Index?
+        var lineStart = text.startIndex
+
+        while lineStart < text.endIndex {
+            let lineEnd = text[lineStart...].firstIndex(of: "\n") ?? text.endIndex
+            let line = text[lineStart..<lineEnd]
+            let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                if let start = fenceStart {
+                    ranges.append(start..<lineEnd)
+                    fenceStart = nil
+                } else {
+                    fenceStart = lineStart
+                }
+            } else if fenceStart == nil {
+                ranges.append(contentsOf: inlineCodeRanges(in: line))
+            }
+            lineStart = lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex
+        }
+        if let start = fenceStart { ranges.append(start..<text.endIndex) }
+        return ranges
+    }
+
+    /// Backtick spans within one line: a run of *n* backticks opens a span that the
+    /// next run of exactly *n* closes, which is how markdown lets a span contain a
+    /// backtick. A run with no closer is a literal backtick, not the start of a span
+    /// that swallows the rest of the line — mid-stream, that closer may simply not
+    /// have arrived, and the prose after it must still be validated.
+    private static func inlineCodeRanges(in line: Substring) -> [Range<String.Index>] {
+        var ranges: [Range<String.Index>] = []
+        var index = line.startIndex
+        while index < line.endIndex {
+            guard line[index] == "`" else { index = line.index(after: index); continue }
+            let runEnd = line[index...].firstIndex(where: { $0 != "`" }) ?? line.endIndex
+            let length = line.distance(from: index, to: runEnd)
+            var search = runEnd
+            var closer: Range<String.Index>?
+            while search < line.endIndex, closer == nil {
+                guard line[search] == "`" else { search = line.index(after: search); continue }
+                let candidateEnd = line[search...].firstIndex(where: { $0 != "`" }) ?? line.endIndex
+                if line.distance(from: search, to: candidateEnd) == length {
+                    closer = search..<candidateEnd
+                }
+                search = candidateEnd
+            }
+            guard let closer else { index = runEnd; continue }
+            ranges.append(index..<closer.upperBound)
+            index = closer.upperBound
+        }
+        return ranges
     }
 }

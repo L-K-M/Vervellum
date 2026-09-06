@@ -93,7 +93,9 @@ enum ResearchPrompts {
         square brackets: [1], or [2, 5] for several. Every statement that rests on a \
         source must carry that source's number. Any statement you make without a \
         source must be visibly framed as inference, background, or general knowledge — \
-        so a reader can tell instantly which parts the evidence actually backs.
+        so a reader can tell instantly which parts the evidence actually backs. A \
+        bracketed number inside code, fenced or inline, is code and is not read as a \
+        citation: put the citation in the sentence before the code, never inside it.
 
         Where sources conflict, say so and attribute each side to its number. Do not \
         average them into a false consensus. Where a search summary is too thin to \
