@@ -153,11 +153,15 @@ enum MarkdownParser {
         // "#hashtag" is not a heading; ATX headings require a space after the hashes.
         guard index < line.endIndex, line[index] == " " else { return nil }
         let text = String(line[index...]).trimmingCharacters(in: .whitespaces)
-        // Trailing hashes are a closing sequence in ATX, not content.
-        let cleaned = text.hasSuffix("#")
-            ? String(text.reversed().drop(while: { $0 == "#" }).reversed())
-                .trimmingCharacters(in: .whitespaces)
-            : text
+        // Trailing hashes are a closing sequence in ATX only when a space precedes
+        // them — "# C#" is a heading reading "C#", not a heading "C" with a
+        // closer. A run that *is* the whole text ("## #") is content, not a closer.
+        var cleaned = text
+        if cleaned.hasSuffix("#"),
+           let lastNonHash = cleaned.lastIndex(where: { $0 != "#" }),
+           cleaned[lastNonHash].isWhitespace {
+            cleaned = String(cleaned[...lastNonHash]).trimmingCharacters(in: .whitespaces)
+        }
         return (min(level, 3), cleaned)
     }
 
