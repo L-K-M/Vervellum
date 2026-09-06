@@ -43,6 +43,16 @@ struct ProcessTrailView: View {
                     .font(PanelTheme.Font.caption)
                     .foregroundStyle(PanelTheme.Palette.secondaryText)
                     .lineLimit(1)
+                if isRunning {
+                    // A ticking clock turns "is it stuck?" into information. A slow
+                    // provider is common enough that the wait should be visible.
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(Formatting.duration(context.date.timeIntervalSince(turn.askedAt)))
+                            .font(PanelTheme.Font.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                    }
+                }
                 Spacer(minLength: 0)
                 if !isRunning {
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")

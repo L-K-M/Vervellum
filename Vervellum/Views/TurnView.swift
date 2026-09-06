@@ -105,6 +105,19 @@ struct TurnView: View {
             .foregroundStyle(PanelTheme.Palette.tertiaryText)
             .help("Copy the answer with its sources")
 
+            // Retry is not only for failures: a completed answer is worth re-running
+            // after a settings change, or when the sources felt thin. `retry` on a
+            // non-last turn re-asks at the end of the thread, where it belongs.
+            if turn.stage == .complete {
+                Button(action: onRetry) {
+                    Label("Ask again", systemImage: "arrow.clockwise")
+                        .font(PanelTheme.Font.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                .help("Research this question again")
+            }
+
             if !turn.model.isEmpty {
                 Text(turn.model)
                     .font(.system(size: 10))
