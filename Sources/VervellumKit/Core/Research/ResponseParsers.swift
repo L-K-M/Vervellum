@@ -72,6 +72,24 @@ enum AssessmentParser {
     static let maxFindings = 8
     static let maxFollowups = 3
 
+    private static let booleanEncoding = String(cString: NSNumber(value: true).objCType)
+
+    private static func sourceNumber(_ value: Any) -> Int? {
+        if let number = value as? NSNumber {
+            // JSON booleans use a distinct NSNumber encoding. `as? Bool` also
+            // accepts numeric 0/1, while `as? Int` turns true into source 1.
+            guard String(cString: number.objCType) != booleanEncoding else { return nil }
+            if let integer = value as? Int { return integer }
+
+            // Exact conversion rejects fractions, infinities, and overflow without
+            // trapping; rounded() would manufacture a source the model never cited.
+            return Int(exactly: number.doubleValue)
+        }
+
+        guard let text = value as? String else { return nil }
+        return Int(text.trimmingCharacters(in: .whitespaces))
+    }
+
     static func parse(_ object: [String: Any], sourceCount: Int) throws -> Assessment {
         guard let rawFindings = object["findings"] as? [Any] else {
             throw ResearchError("The model returned an incomplete assessment. Try again.")
@@ -101,9 +119,12 @@ enum AssessmentParser {
             let reasoning = (entry["reasoning"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-            let claimed = Self.sourceNumbers(from: entry["sources"])
-            let valid = claimed.filter { $0 >= 1 && $0 <= sourceCount }
-            if valid.count != claimed.count { notices.insert(.invalidCitation) }
+            // Malformed references must not be reinterpreted as different sources.
+            let claimed = entry["sources"] as? [Any] ?? []
+            let valid = claimed.compactMap(sourceNumber).filter { $0 >= 1 && $0 <= sourceCount }
+            if valid.count != claimed.count || (entry["sources"] != nil && !(entry["sources"] is [Any])) {
+                notices.insert(.invalidCitation)
+            }
 
             if verdict.requiresSources && valid.isEmpty {
                 notices.insert(.uncitedVerdictDropped)
@@ -163,30 +184,4 @@ enum AssessmentParser {
         }
     }
 
-    /// Reads the cited source numbers in every shape a model has been seen to write
-    /// them: `[1, 3]`, `1`, `"1, 3"`, `"[1]"`, `["[1]", "2-3"]`. A finding that cited
-    /// something must not be dropped as *uncited* because of punctuation.
-    static func sourceNumbers(from value: Any?) -> [Int] {
-        switch value {
-        case let list as [Any]:
-            return list.flatMap { sourceNumbers(from: $0) }
-        case let number as Int:
-            return [number]
-        case let number as Double:
-            // `Int(exactly:)` rather than a range check: `Double(Int.max)` rounds *up*
-            // to 2^63, so `number <= Double(Int.max)` would still admit a value that
-            // `Int(_:)` then traps on — and this value comes straight from a model's
-            // JSON, so `1e308` is a reply, not a hypothetical.
-            return Int(exactly: number.rounded()).map { [$0] } ?? []
-        case let text as String:
-            // Every run of digits, so "1, 3", "[1]" and "1 and 3" all yield numbers.
-            // Runs longer than three digits are not citations (there are at most 24
-            // sources) and are skipped rather than parsed into something enormous.
-            return text.split(whereSeparator: { !$0.isNumber })
-                .filter { $0.count <= 3 }
-                .compactMap { Int($0) }
-        default:
-            return []
-        }
-    }
 }

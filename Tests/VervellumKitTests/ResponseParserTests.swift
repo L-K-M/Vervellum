@@ -155,31 +155,15 @@ final class AssessmentParserTests: XCTestCase {
 /// The shapes a model actually writes, read the way the prompt meant them.
 final class LenientAssessmentFieldTests: XCTestCase {
 
-    func testReadsSourceNumbersInEveryShape() {
-        XCTAssertEqual(AssessmentParser.sourceNumbers(from: [1, 3]), [1, 3])
-        XCTAssertEqual(AssessmentParser.sourceNumbers(from: "1, 3"), [1, 3])
-        XCTAssertEqual(AssessmentParser.sourceNumbers(from: "[1]"), [1])
-        XCTAssertEqual(AssessmentParser.sourceNumbers(from: "1 and 3"), [1, 3])
-        XCTAssertEqual(AssessmentParser.sourceNumbers(from: 2), [2])
-        XCTAssertEqual(AssessmentParser.sourceNumbers(from: 2.0), [2])
-        XCTAssertEqual(AssessmentParser.sourceNumbers(from: ["[1]", "2-3"]), [1, 2, 3])
-        XCTAssertEqual(AssessmentParser.sourceNumbers(from: nil), [])
-    }
-
-    /// A model's JSON can say `1e308`; that must be a dropped number, not a trap.
-    func testRefusesNumbersThatDoNotFitOrCannotBeCitations() {
-        XCTAssertEqual(AssessmentParser.sourceNumbers(from: 1e308), [])
-        XCTAssertEqual(AssessmentParser.sourceNumbers(from: "see 1234"), [])
-    }
-
-    /// The bug this guards against: a *supported* verdict that cited "1, 2" as a string
-    /// was dropped with "A verdict that cited no source was discarded" — blaming the
-    /// model for a citation it made.
-    func testAStringOfSourcesKeepsAnEvidentialVerdict() throws {
-        let entries: [[String: Any]] = [["claim": "X", "verdict": "supported", "sources": "1, 2"]]
-        let assessment = try AssessmentParser.parse(["findings": entries], sourceCount: 2)
-        XCTAssertEqual(assessment.findings.first?.sourceNumbers, [1, 2])
-        XCTAssertFalse(assessment.notices.contains(.uncitedVerdictDropped))
+    func testMalformedSourceShapesCannotCreateEvidentialVerdicts() throws {
+        let malformed: [Any] = ["1, 2", 2, ["1.2"], ["1e2"], ["[1]"], ["2-3"], [[1]]]
+        for sources in malformed {
+            let entries: [[String: Any]] = [["claim": "X", "verdict": "supported", "sources": sources]]
+            let assessment = try AssessmentParser.parse(["findings": entries], sourceCount: 3)
+            XCTAssertTrue(assessment.findings.isEmpty)
+            XCTAssertTrue(assessment.notices.contains(.invalidCitation))
+            XCTAssertTrue(assessment.notices.contains(.uncitedVerdictDropped))
+        }
     }
 
     func testReadsVerdictSynonymsAndPadding() {
