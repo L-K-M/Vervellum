@@ -1,7 +1,7 @@
 # Astra review
 
 Baseline: `5be8eab` on `main`. A01–A40 were recorded before implementation;
-A41 surfaced during baseline test execution.
+A41 surfaced during local baseline testing; A42 surfaced in upstream CI.
 
 Scope: shared pipeline, transport, evidence and citation handling, persistence,
 macOS panel/composer/settings, GTK/CLI, packaging, tests, and product documentation.
@@ -473,6 +473,14 @@ resolve the overloaded initializer, so the baseline test suite does not compile.
 Use `.map { Int($0) }`; verify the existing permission assertion and the full suite
 on the documented minimum toolchain. This was found while preparing regression tests.
 
+### A42 — Preserve the desktop filename during CI validation · P2/S · reproduced
+
+Linux CI generates `/tmp/entry.desktop`, but `DBusActivatable=true` requires a
+reverse-DNS basename. The validator rejects valid metadata and stops packaging.
+Keep the shipped basename inside an isolated temporary directory. The old command
+failed locally and in CI; the corrected command passes. This prerequisite and A41
+are both required before the full Linux job can pass.
+
 ## Original recommended implementation order
 
 1. A02: strict assessment source numbers; small, portable, testable trust fix.
@@ -487,32 +495,37 @@ Keep independent patches in independent branches. Record shipped/pending work by
 when consolidating into `ANALYSIS.md`; remove implemented entries from the actionable
 backlog only while retaining their PR pointers and remaining validation requirements.
 
-## Implementation record — PRs remain open
+## Implementation record — upstream PRs remain open
 
-| Finding | PR | Branch | Result |
+| Finding | PR | Branch | Local result |
 |---|---|---|---|
-| A41 | [#4](https://github.com/L-K-M/Vervellum/pull/4) | `astra/test-portability` | Existing suite compiles; 198 tests pass. |
-| A02 | [#5](https://github.com/L-K-M/Vervellum/pull/5) | `astra/exact-citations` | Exact references; 204 tests pass. |
-| A03 | [#6](https://github.com/L-K-M/Vervellum/pull/6) | `astra/evidence-transcripts` | Complete source lists and honest partial exports; 203 tests pass. |
-| A21 | [#7](https://github.com/L-K-M/Vervellum/pull/7) | `astra/sse-lines` | Linear CR/LF/CRLF/BOM framing; 209 tests pass. |
-| A08 | [#8](https://github.com/L-K-M/Vervellum/pull/8) | `astra/private-diagnostics` | Arbitrary result keys stay out of logs; 203 tests pass. |
-| A16 | [#11](https://github.com/L-K-M/Vervellum/pull/11) | `astra/gtk-close` | Native close retains the GTK window; 199 tests pass under Xvfb. |
+| A41, A42 | [#21](https://github.com/L-K-M/Vervellum/pull/21) | `astra/test-portability` | Test compilation and desktop validation repaired; 198 tests pass. |
+| A02 | [#30](https://github.com/L-K-M/Vervellum/pull/30) | `astra/exact-citations` | Exact references; 204 tests pass. |
+| A03 | [#26](https://github.com/L-K-M/Vervellum/pull/26) | `astra/evidence-transcripts` | Complete source lists and honest partial exports; 203 tests pass. |
+| A21 | [#27](https://github.com/L-K-M/Vervellum/pull/27) | `astra/sse-lines` | Linear CR/LF/CRLF/BOM framing; 209 tests pass. |
+| A08 | [#29](https://github.com/L-K-M/Vervellum/pull/29) | `astra/private-diagnostics` | Arbitrary result keys stay out of logs; 203 tests pass. |
+| A16 | [#28](https://github.com/L-K-M/Vervellum/pull/28) | `astra/gtk-close` | Native close retains the GTK window; 199 tests pass under Xvfb. |
 
-Every fix had a failing regression assertion before its implementation; A41 had the
-existing suite's compiler failure. Each feature branch includes the same one-line
-A41 prerequisite; merge #4 first. The five independent fixes combine without
-conflicts and pass **226 tests**, including GTK close/reopen under Xvfb.
+The original fork-backed PRs #4/#5/#6/#7/#8/#11 were replaced by
+#21/#30/#26/#27/#29/#28. A42 was first isolated in #37, then consolidated into #21:
+either baseline repair alone leaves CI failing. Merge #21 first; each feature
+branch contains the same prerequisite commits. No code PR was merged.
 
-Validation used Swift 6.0.3 and GTK 4.8.3 in a local Debian 12 sysroot. The SSE
-large-input debug fixture took 0.886s before and 0.036s after; this is not a UI
-benchmark. macOS, GNOME Wayland, real-desktop layout, release packaging, and remote
-CI remain unverified here. #11 adds an Xvfb CI step; headless local tests skip that
-one test unless a display is provided.
+Each fix followed an observed regression failure. The five independent fixes
+combined without conflicts and passed **226 tests**, including GTK close/reopen
+under Xvfb, on Swift 6.0.3/GTK 4.8.3 in a Debian 12 sysroot. The SSE large-input
+debug fixture took 0.886s before and 0.036s after; this is not a UI benchmark.
 
-No PR was merged. GitHub access is read-only for the upstream repository, so the
-branches are on a fork. GLM checks report **SKIPPED** because fork reviews are gated
-out; no review feedback arrived. This is review unavailability, not two successful
-review rounds. Direct publication of `ANALYSIS.md` to upstream `main` is blocked by
-the same permission limit. Upstream macOS/Linux CI reports `action_required` for
-fork execution and needs maintainer approval. Both documents are supplied in
-[the documentation PR](https://github.com/L-K-M/Vervellum/pull/1).
+All six current upstream code PRs pass macOS build/tests and Ubuntu
+build/tests/package/install CI. #28 also passes its Xvfb lifecycle check.
+GNOME Wayland, full-screen placement, real-desktop layout, Accessibility selection,
+and IME behavior still need manual QA; a hosted Mac build is not that QA.
+
+GLM was attempted twice per migrated code PR. Both attempts skipped the actual
+review because `ZAI_API_KEY` is not configured. The workflow reports success despite
+that skipped step; it is not approval. No review or inline feedback arrived. This
+is the reviewer-unavailable exit condition, not two completed model reviews.
+
+Push access is now available. The actionable queue is consolidated separately into
+`ANALYSIS.md` on `main`, preserving prior analysis and identifying pending work so
+future agents do not duplicate it. This file preserves the original findings.
