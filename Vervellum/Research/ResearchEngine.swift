@@ -26,6 +26,12 @@ final class ResearchEngine: ObservableObject {
     private var task: Task<Void, Never>?
     private var runningTurnID: UUID?
 
+    /// Rate-limits the streamed snapshots before they republish the thread. See
+    /// `SnapshotCoalescer` for the rule; optional because it can only be built in
+    /// `init` (its publish closure needs `self`), and every use is a `?.` rather than
+    /// an implicit unwrap.
+    private var coalescer: SnapshotCoalescer?
+
     /// Called whenever the thread changes, so the store can persist it.
     var onThreadChanged: ((ResearchThread) -> Void)?
 
@@ -37,6 +43,9 @@ final class ResearchEngine: ObservableObject {
         self.preferences = preferences
         self.secrets = secrets
         self.logSink = logSink
+        coalescer = SnapshotCoalescer(publish: { [weak self] turn in
+            self?.applyNow(turn)
+        })
     }
 
     // MARK: Thread control
@@ -130,10 +139,22 @@ final class ResearchEngine: ObservableObject {
 
     // MARK: Turn mutation
 
+    /// A snapshot from the running turn. Runs on the main queue (see `ask`), which is
+    /// the queue the coalescer is documented to live on.
     private func apply(_ snapshot: ResearchTurn) {
+        coalescer?.receive(snapshot)
+    }
+
+    /// Publishes a snapshot directly — the coalescer's flush path and `finish`'s final
+    /// turn both land here.
+    private func applyNow(_ snapshot: ResearchTurn) {
         guard let index = thread.turns.firstIndex(where: { $0.id == snapshot.id }) else { return }
         thread.turns[index] = snapshot
         thread.updatedAt = Date()
+        // Published here rather than only at ask/finish so the debounced archive keeps
+        // receiving the growing answer: a crash mid-stream used to lose everything the
+        // run had produced so far, because nothing called save between the two.
+        publishChange()
     }
 
     private func update(_ id: UUID, _ body: (inout ResearchTurn) -> Void) {
@@ -143,7 +164,11 @@ final class ResearchEngine: ObservableObject {
     }
 
     private func finish(_ id: UUID, with turn: ResearchTurn) {
-        apply(turn)
+        // The finished turn is the whole truth; any coalesced snapshot still waiting is
+        // older by definition, and a scheduled flush firing after this would otherwise
+        // repaint the turn as mid-answer.
+        coalescer?.discardPending()
+        applyNow(turn)
         if runningTurnID == id {
             runningTurnID = nil
             isRunning = false
