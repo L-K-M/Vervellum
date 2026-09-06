@@ -232,6 +232,8 @@ implements four messages — `initialize`, `notifications/initialized`, `tools/l
   later request must echo in `MCP-Protocol-Version`;
 - it may open a **session** by returning `Mcp-Session-Id` on *any* response;
 - a response may arrive as **JSON or as an SSE stream**, chosen per request;
+  SSE lines are scanned once per byte, preserving empty lines across LF, CRLF, and
+  CR boundaries, including split UTF-8 and a leading byte-order mark;
 - `notifications/initialized` carries no `id`, so its acknowledgement is an empty
   `202` — not an error, though it looks like one;
 - the gateway in front of the MCP server has its **own error envelope**

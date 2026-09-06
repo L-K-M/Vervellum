@@ -417,8 +417,19 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         var buffer: [UInt8] = []
         buffer.reserveCapacity(4096)
         var consumed = 0
-        var checkedForBOM = false
+        var followsCarriageReturn = false
+        var isFirstLine = true
         let started = Date()
+
+        func emitLine() throws -> Bool {
+            var line = String(decoding: buffer, as: UTF8.self)
+            buffer.removeAll(keepingCapacity: true)
+            if isFirstLine {
+                isFirstLine = false
+                if line.hasPrefix(SSELine.byteOrderMark) { line.removeFirst() }
+            }
+            return try handle(line)
+        }
 
         for try await chunk in body {
             // A wall-clock deadline as well as a size cap. The session's timeout is an
@@ -431,33 +442,32 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
             }
             consumed += chunk.count
             guard consumed <= limit else { throw ResearchError.responseTooLarge }
-            buffer.append(contentsOf: chunk)
 
-            // Decided once, and only once three bytes are in hand: a first chunk shorter
-            // than the mark must not be mistaken for its absence.
-            if !checkedForBOM, buffer.count >= 3 {
-                checkedForBOM = true
-                if buffer[0] == 0xEF, buffer[1] == 0xBB, buffer[2] == 0xBF { buffer.removeFirst(3) }
-            }
+            // Visit each byte once and keep only the unfinished line. Prefix removal
+            // per newline repeatedly copied the rest of a large chunk.
+            for byte in chunk {
+                if followsCarriageReturn, byte == SSELine.lineFeed {
+                    followsCarriageReturn = false
+                    continue
+                }
+                followsCarriageReturn = byte == SSELine.carriageReturn
 
-            while let terminator = buffer.firstIndex(where: { $0 == 0x0A || $0 == 0x0D }) {
-                // A CR that is the last byte in hand may be the first half of a CRLF whose
-                // LF is still in flight. Wait for the next chunk rather than dispatching
-                // the line now and a spurious empty line — an SSE event boundary — later.
-                if buffer[terminator] == 0x0D, terminator == buffer.count - 1 { break }
-                let line = Array(buffer[..<terminator])
-                var end = terminator + 1
-                if buffer[terminator] == 0x0D, buffer[end] == 0x0A { end += 1 }   // CRLF
-                buffer.removeFirst(end)
-                guard try handle(String(decoding: line, as: UTF8.self)) else { return }
+                // SSE permits CR, LF, and CRLF, even across separate chunks.
+                if byte == SSELine.carriageReturn || byte == SSELine.lineFeed {
+                    guard try emitLine() else { return }
+                } else {
+                    buffer.append(byte)
+                }
             }
         }
-        // A final line with no trailing newline is still a line; a trailing lone CR was
-        // a terminator waiting for an LF that never came.
-        if buffer.last == 0x0D { buffer.removeLast() }
-        if !buffer.isEmpty {
-            _ = try handle(String(decoding: buffer, as: UTF8.self))
-        }
+        // A final line with no trailing newline is still a line.
+        if !buffer.isEmpty { _ = try emitLine() }
+    }
+
+    private enum SSELine {
+        static let carriageReturn: UInt8 = 0x0D
+        static let lineFeed: UInt8 = 0x0A
+        static let byteOrderMark = "\u{FEFF}"
     }
 
     /// Whether an SSE frame is the response being waited for.
