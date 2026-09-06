@@ -23,6 +23,11 @@ jobs:
     name: Build the Debian package
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # The workflow token is contents:write for the release job below. This job only
+    # reads the repository and uploads an artifact, which needs no token scope at
+    # all, so it drops the write half rather than carry it through a build.
+    permissions:
+      contents: read
     # The official Swift image for the target Ubuntu release. A .deb links against the
     # library versions present at build time, so building on anything newer produces a
     # package that will not install on 24.04.
