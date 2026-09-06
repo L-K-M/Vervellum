@@ -137,3 +137,18 @@ final class EvidenceExtractorTests: XCTestCase {
         XCTAssertEqual(EvidenceExtractor.sources(from: [payload], startingAt: 5).first?.number, 5)
     }
 }
+
+/// Two people with the same server response must see the same source numbers.
+final class EvidenceNumberingTests: XCTestCase {
+
+    func testNumberingFollowsSortedKeysNotDictionaryOrder() {
+        let result: [String: Any] = [
+            "results": [["url": "https://b.example.com/", "title": "B"]],
+            "related": [["url": "https://a.example.com/", "title": "A"]],
+        ]
+        let numbered = (0..<20).map { _ in EvidenceExtractor.sources(from: [result]).map(\.url) }
+        XCTAssertEqual(Set(numbered.map { $0.joined(separator: " ") }).count, 1, "numbering varied between runs")
+        // "related" sorts before "results".
+        XCTAssertEqual(numbered[0], ["https://a.example.com/", "https://b.example.com/"])
+    }
+}

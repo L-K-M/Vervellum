@@ -173,6 +173,22 @@ enum TurnNotice: String, Codable, Equatable {
     case noEvidence
     /// A verdict was dropped because it named no source.
     case uncitedVerdictDropped
+    /// A finding was dropped because its verdict was not one of the five words.
+    case unreadableVerdictDropped
+    /// The assessment call failed, so the answer's claims were never checked.
+    case assessmentUnavailable
+    /// A notice written by a newer build that this one does not know. Kept rather than
+    /// failing the whole document: a `notices` array that refused to decode used to make
+    /// an older build start from an empty library and overwrite the newer file.
+    case unknown
+
+    /// Decodes leniently: an unfamiliar raw value becomes `.unknown` instead of an
+    /// error. Adding a case above therefore no longer needs a `ThreadLibrary` version
+    /// bump for builds from this one on; removing or renaming one still does.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TurnNotice(rawValue: raw) ?? .unknown
+    }
 
     var message: String {
         switch self {
@@ -189,6 +205,13 @@ enum TurnNotice: String, Codable, Equatable {
             return "Answered without web evidence. Nothing here is source-backed."
         case .uncitedVerdictDropped:
             return "A verdict that cited no source was discarded."
+        case .unreadableVerdictDropped:
+            return "A finding whose verdict Vervellum could not read was discarded."
+        case .assessmentUnavailable:
+            return "The answer's claims could not be checked, because the assessment call failed. "
+                + "Nothing below the answer has been verified."
+        case .unknown:
+            return "This turn carries a note recorded by a newer version of Vervellum."
         }
     }
 }

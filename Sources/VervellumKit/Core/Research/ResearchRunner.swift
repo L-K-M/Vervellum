@@ -207,7 +207,16 @@ final class ResearchRunner {
         // The reading stays on the turn, because it is where the planner says why.
         if plan.searches.isEmpty {
             trace.log("Plan asked for no searches; answering without evidence")
-            update { $0.addNotice(.noEvidence) }
+            update { turn in
+                turn.addNotice(.noEvidence)
+                // The reading is also the discriminator between "the planner chose not
+                // to search" and "/direct" (see `wasAskedDirectly`): a planner that
+                // returned an empty list and no reading would otherwise make Retry
+                // re-ask in direct mode, skipping the planner the user never opted out of.
+                if turn.reading.isEmpty {
+                    turn.reading = "The planner decided this question needs no web evidence."
+                }
+            }
             try await answerDirectly(chat: chat, question: question, history: history, today: today)
             return
         }
@@ -297,9 +306,23 @@ final class ResearchRunner {
             "evidence": evidence,
             "today": today,
         ]
-        let assessObject = try await chat.completeJSON(
-            system: ResearchPrompts.assess, payload: assessPayload, label: "Assess")
-        let assessment = try AssessmentParser.parse(assessObject, sourceCount: sources.count)
+        // A failure here — a reply the parser cannot read, an output limit smaller
+        // than eight findings, a transient 5xx — must not fail the turn. The answer has
+        // streamed, been validated and been read; marking it failed would label it
+        // wrong, drop it from every later turn's context (which keeps `.complete` turns
+        // only), and blame the question for an assessment that was cut off. So the turn
+        // completes without findings and says, in a notice, that nothing was checked.
+        // Cancellation still propagates: a Stop is a Stop.
+        let assessment: AssessmentParser.Assessment
+        do {
+            let assessObject = try await chat.completeJSON(
+                system: ResearchPrompts.assess, payload: assessPayload, label: "Assess")
+            assessment = try AssessmentParser.parse(assessObject, sourceCount: sources.count)
+        } catch let error as ResearchError where error != ResearchError.cancelled && !Task.isCancelled {
+            trace.warn("Assessment unavailable: \(error.message)")
+            update { $0.addNotice(.assessmentUnavailable) }
+            return
+        }
         update { turn in
             turn.findings = assessment.findings
             turn.limitations = assessment.limitations

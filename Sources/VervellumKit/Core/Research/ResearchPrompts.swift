@@ -135,6 +135,7 @@ enum ResearchPrompts {
         Return {"findings": [{"claim": "...", "verdict": "...", "reasoning": "...", \
         "sources": [1, 2]}], "limitations": "...", "followups": ["..."]}
         - "claim": the claim in your own words, one sentence.
+        - "sources": a JSON array of integers, e.g. [1, 3] — never a string.
         - "reasoning": why the evidence does or does not settle it, and what the \
         source's limitations are, in at most two sentences.
         - "limitations": what this research could NOT establish and why, in at most \

@@ -88,28 +88,20 @@ enum AssessmentParser {
             if findings.count >= maxFindings { break }
             guard let entry = entry as? [String: Any],
                   let claim = (entry["claim"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !claim.isEmpty,
-                  let verdictName = entry["verdict"] as? String,
-                  let verdict = Verdict(rawValue: verdictName.lowercased())
+                  !claim.isEmpty
             else { continue }
+            // A claim with no readable verdict is dropped — but not silently. A reply
+            // whose verdicts all used a synonym the table below does not know would
+            // otherwise yield an empty table with nothing telling the user why.
+            guard let verdict = Self.verdict(from: entry["verdict"]) else {
+                notices.insert(.unreadableVerdictDropped)
+                continue
+            }
 
             let reasoning = (entry["reasoning"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-            // Accept numbers as Int or as numeric strings — providers differ on
-            // whether a JSON integer survives their own serialisation. The Double case
-            // is range-checked because `Int(_: Double)` *traps*, and this value comes
-            // straight from a model's JSON: a reply containing `1e308` would crash the
-            // app rather than fail the turn.
-            let claimed: [Int] = (entry["sources"] as? [Any] ?? []).compactMap { value in
-                if let number = value as? Int { return number }
-                // `Int(exactly:)` rather than a range check: `Double(Int.max)` rounds
-                // *up* to 2^63, so `number <= Double(Int.max)` still admits a value that
-                // `Int(_:)` then traps on.
-                if let number = value as? Double { return Int(exactly: number.rounded()) }
-                if let text = value as? String { return Int(text.trimmingCharacters(in: .whitespaces)) }
-                return nil
-            }
+            let claimed = Self.sourceNumbers(from: entry["sources"])
             let valid = claimed.filter { $0 >= 1 && $0 <= sourceCount }
             if valid.count != claimed.count { notices.insert(.invalidCitation) }
 
@@ -138,5 +130,63 @@ enum AssessmentParser {
                           limitations: limitations,
                           followups: Array(followups),
                           notices: notices.sorted { $0.rawValue < $1.rawValue })
+    }
+
+    // MARK: Lenient fields
+
+    /// Reads a verdict the way models actually write one: any case, padded with
+    /// whitespace, or one of a few unambiguous synonyms. "Not established" is the
+    /// app's own label for `insufficient` and models echo it; "refuted" is plainly
+    /// `contradicted`. Deliberately absent: "unsupported", which some models use for
+    /// "no evidence either way" and others for "false" — mapping it to `contradicted`
+    /// would collapse *not established* into *false*, the one thing this app must never
+    /// do, so it is left unreadable and reported.
+    static func verdict(from value: Any?) -> Verdict? {
+        guard let text = value as? String else { return nil }
+        let key = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            .replacingOccurrences(of: "_", with: " ").replacingOccurrences(of: "-", with: " ")
+        if let exact = Verdict(rawValue: key) { return exact }
+        switch key {
+        case "not established", "unestablished", "unverified", "unclear", "uncertain",
+             "unknown", "inconclusive", "insufficient evidence", "not enough evidence":
+            return .insufficient
+        case "refuted", "false", "incorrect", "disputed", "contradicts", "contradicted by evidence":
+            return .contradicted
+        case "partial", "partially supported", "partly supported", "mixed evidence":
+            return .mixed
+        case "confirmed", "true", "correct", "verified", "well supported", "fully supported":
+            return .supported
+        case "subjective", "value judgement", "value judgment", "preference":
+            return .opinion
+        default:
+            return nil
+        }
+    }
+
+    /// Reads the cited source numbers in every shape a model has been seen to write
+    /// them: `[1, 3]`, `1`, `"1, 3"`, `"[1]"`, `["[1]", "2-3"]`. A finding that cited
+    /// something must not be dropped as *uncited* because of punctuation.
+    static func sourceNumbers(from value: Any?) -> [Int] {
+        switch value {
+        case let list as [Any]:
+            return list.flatMap { sourceNumbers(from: $0) }
+        case let number as Int:
+            return [number]
+        case let number as Double:
+            // `Int(exactly:)` rather than a range check: `Double(Int.max)` rounds *up*
+            // to 2^63, so `number <= Double(Int.max)` would still admit a value that
+            // `Int(_:)` then traps on — and this value comes straight from a model's
+            // JSON, so `1e308` is a reply, not a hypothetical.
+            return Int(exactly: number.rounded()).map { [$0] } ?? []
+        case let text as String:
+            // Every run of digits, so "1, 3", "[1]" and "1 and 3" all yield numbers.
+            // Runs longer than three digits are not citations (there are at most 24
+            // sources) and are skipped rather than parsed into something enormous.
+            return text.split(whereSeparator: { !$0.isNumber })
+                .filter { $0.count <= 3 }
+                .compactMap { Int($0) }
+        default:
+            return []
+        }
     }
 }

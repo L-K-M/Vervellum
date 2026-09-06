@@ -70,11 +70,17 @@ enum EvidenceExtractor {
                 // link mentioned inside a summary into a source of its own.
                 consumed = Set((titleKeys + snippetKeys + dateKeys).map { $0.lowercased() })
             }
-            for (key, item) in dictionary {
+            // Sorted, not in dictionary order: Swift randomises that per process, and a
+            // result with hits under two keys would otherwise number its sources
+            // differently on every launch. The model cites whatever numbering it was
+            // shown, so a thread stays consistent either way — but two people with the
+            // same response would get different lists, and a fixture could not assert
+            // a number.
+            for key in dictionary.keys.sorted() {
                 let lowered = key.lowercased()
                 if ignoredLinkKeys.contains(lowered) || linkKeys.contains(lowered)
                     || consumed.contains(lowered) { continue }
-                collect(item, into: &hits, seen: &seen, depth: depth + 1)
+                collect(dictionary[key], into: &hits, seen: &seen, depth: depth + 1)
             }
         case let array as [Any]:
             for item in array { collect(item, into: &hits, seen: &seen, depth: depth + 1) }

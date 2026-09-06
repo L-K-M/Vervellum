@@ -183,3 +183,20 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertEqual(Formatting.duration(-1), "—")
     }
 }
+
+/// A stored document from a newer build must stay readable by an older one.
+final class TurnNoticeDecodingTests: XCTestCase {
+
+    func testAnUnknownNoticeDecodesRatherThanFailingTheDocument() throws {
+        let data = Data(#"["contextTrimmed", "somethingFromTheFuture"]"#.utf8)
+        let notices = try JSONDecoder().decode([TurnNotice].self, from: data)
+        XCTAssertEqual(notices, [.contextTrimmed, .unknown])
+        XCTAssertFalse(TurnNotice.unknown.message.isEmpty)
+    }
+
+    func testKnownNoticesRoundTrip() throws {
+        let original: [TurnNotice] = [.noEvidence, .assessmentUnavailable, .unreadableVerdictDropped]
+        let data = try JSONEncoder().encode(original)
+        XCTAssertEqual(try JSONDecoder().decode([TurnNotice].self, from: data), original)
+    }
+}
