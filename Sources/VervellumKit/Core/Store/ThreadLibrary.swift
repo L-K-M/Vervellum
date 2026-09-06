@@ -8,10 +8,9 @@ import Foundation
 /// data a future build would have understood.
 struct ThreadLibrary: Codable, Equatable {
 
-    /// Bump this whenever the document gains a field or an enum case an older build
-    /// could not decode. The stamp is the first thing an older build reads; a document
-    /// that fails to decode *without* a newer stamp is taken for corruption instead.
-    static let currentVersion = 1
+    /// Version 2 adds tolerant notices. Future readers preflight this stamp; releases
+    /// predating that protection cannot safely open this schema, even with a bump.
+    static let currentVersion = 2
     /// How many threads are kept. Old research is the least valuable thing on the
     /// disk and the file is read wholesale at launch, so the list is bounded.
     static let maxThreads = 200
@@ -41,8 +40,8 @@ struct ThreadLibrary: Codable, Equatable {
 
     /// Marks every turn that was still running when the document was written as failed.
     ///
-    /// Active turns are checkpointed, so the file may hold queued or answering work. If the app crashed, was force-quit or the
-    /// machine restarted in that window, the turn would otherwise come back as running
+    /// Active turns are checkpointed, so the file may hold queued or answering work.
+    /// After a crash, force-quit or restart, the turn would otherwise come back as running
     /// forever: a spinner nothing will ever stop, no way to retry, and a dead question
     /// sent to the model as history on the next follow-up. Whatever answer had arrived
     /// is kept.

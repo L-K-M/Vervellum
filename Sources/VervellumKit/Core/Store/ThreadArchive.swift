@@ -44,7 +44,12 @@ final class ThreadArchive {
             // Turning history *on* stores nothing yet: writing here would create a file
             // holding an empty library before the user has any threads. The next
             // `save(_:)` writes it.
-            guard !isHistoryEnabled else { eraseFailure = nil; onChange?(); return }
+            guard !isHistoryEnabled else {
+                // Enabling history is not proof that a failed deletion succeeded.
+                if eraseFailure != nil { recordingFailure { try eraseEverything() } }
+                onChange?()
+                return
+            }
             // Forget in memory as well as on disk. Erasing only the file would leave
             // every thread loaded, so switching history back on would write them all out
             // again — the user's "delete this" would have been a no-op.
@@ -79,7 +84,7 @@ final class ThreadArchive {
         // The file is read for its *version* even when history is off, and only adopted
         // when it is on. Skipping the read entirely would leave `isReadOnly` false, so a
         // user who launches with history disabled and then enables it would write an
-        // empty v1 document straight over a newer build's file — exactly the loss this
+        // empty document straight over a newer build's file — exactly the loss this
         // flag exists to prevent.
         let onDisk = Self.load(from: fileURL, fileManager: fileManager)
         isReadOnly = onDisk.newerVersion != nil
@@ -130,7 +135,7 @@ final class ThreadArchive {
     /// The deletion runs *on the write queue*. Deleting off-queue would race a debounced
     /// write that is already running, and the file the user just erased would reappear a
     /// fraction of a second later.
-    func eraseEverything() throws {
+    private func eraseEverything() throws {
         var failure: Error?
         queue.sync {
             pendingSave?.cancel()
@@ -180,7 +185,9 @@ final class ThreadArchive {
 
     private func scheduleSave() {
         guard isHistoryEnabled, !isReadOnly, eraseFailure == nil else { return }
-        let snapshot = library
+        var document = library
+        document.version = ThreadLibrary.currentVersion
+        let snapshot = document
         queue.async { [weak self] in
             guard let self else { return }
             self.pendingSnapshot = snapshot

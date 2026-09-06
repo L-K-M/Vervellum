@@ -66,6 +66,17 @@ final class ThreadLibraryTests: XCTestCase {
 
 final class ThreadArchiveTests: XCTestCase {
 
+    func testWritesStampTheExpandedNoticeSchema() throws {
+        try Data(#"{"version":1,"threads":[]}"#.utf8).write(to: fileURL)
+        let archive = ThreadArchive(fileURL: fileURL)
+        archive.save(thread("Updated"))
+        archive.flush()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let document = try decoder.decode(ThreadLibrary.self, from: Data(contentsOf: fileURL))
+        XCTAssertEqual(document.version, 2, "New notice cases need an explicit schema stamp")
+    }
+
     func testRecoveredCheckpointsValidateTheirRetainedProse() {
         var turn = ResearchTurn(question: "Interrupted")
         turn.stage = .answering
@@ -262,7 +273,7 @@ final class ThreadArchiveTests: XCTestCase {
         let backupURL = fileURL.appendingPathExtension("bak")
         let backupBefore = try Data(contentsOf: backupURL)
 
-        let future = #"{"version": 2, "threads": [{"stage": "teleporting"}]}"#
+        let future = "{\"version\": \(ThreadLibrary.currentVersion + 1), \"threads\": [{\"stage\": \"teleporting\"}]}"
         try future.write(to: fileURL, atomically: true, encoding: .utf8)
 
         let reloaded = ThreadArchive(fileURL: fileURL, debounce: 0)
@@ -316,6 +327,36 @@ final class ThreadArchiveTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: fileURL), before)
     }
 
+    func testResolvedErasureAllowsOnlyNewHistory() {
+        let manager = StubbornFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("old"))
+        store.flush()
+        store.isHistoryEnabled = false
+        XCTAssertNotNil(store.eraseFailure)
+
+        manager.removal = .allowed
+        store.isHistoryEnabled = true
+        XCTAssertNil(store.eraseFailure)
+        store.save(thread("new"))
+        store.flush()
+        XCTAssertEqual(ThreadArchive(fileURL: fileURL).library.threads.map(\.title), ["new"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.appendingPathExtension("bak").path))
+    }
+
+    func testReenablingHistoryCannotClearAnUnresolvedEraseFailure() throws {
+        let store = ThreadArchive(fileURL: fileURL, fileManager: StubbornFileManager(), debounce: 0)
+        store.save(thread("before"))
+        store.flush()
+        let before = try Data(contentsOf: fileURL)
+        store.isHistoryEnabled = false
+        store.isHistoryEnabled = true
+        store.save(thread("after"))
+        store.flush()
+        XCTAssertNotNil(store.eraseFailure)
+        XCTAssertEqual(try Data(contentsOf: fileURL), before)
+    }
+
     /// A turn saved mid-run — the app crashed or was killed before it finished — must
     /// not come back as running forever.
     func testAnInterruptedTurnComesBackFailedWithItsPartialAnswer() {
@@ -365,8 +406,12 @@ final class ThreadArchiveTests: XCTestCase {
     /// A file manager that cannot delete, standing in for a locked file or a folder
     /// that lost its write permission.
     private final class StubbornFileManager: FileManager {
+        enum Removal { case allowed, denied }
+        var removal = Removal.denied
+
         override func removeItem(at URL: URL) throws {
-            throw CocoaError(.fileWriteNoPermission)
+            guard removal == .allowed else { throw CocoaError(.fileWriteNoPermission) }
+            try super.removeItem(at: URL)
         }
     }
 
@@ -386,8 +431,8 @@ final class ThreadArchiveTests: XCTestCase {
         store.flush()
         store.isHistoryEnabled = false
         XCTAssertNotNil(store.eraseFailure)
-        // Turning history back on is the user accepting the file; the complaint goes.
+        // The toggle cannot prove deletion succeeded; keep the warning and write block.
         store.isHistoryEnabled = true
-        XCTAssertNil(store.eraseFailure)
+        XCTAssertNotNil(store.eraseFailure)
     }
 }
