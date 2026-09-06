@@ -4,9 +4,10 @@ import Dispatch
 /// Loads and saves the thread library as JSON, on every platform.
 ///
 /// Writes are **atomic** and **debounced**, keeping one `.bak` of the previous good
-/// file: a research turn mutates the document on every streamed chunk, so writing
-/// straight through would hammer the disk, and writing non-atomically would leave a
-/// truncated file if the app were killed mid-answer.
+/// file: the front ends save a thread whenever it changes — when a question is asked,
+/// when its turn finishes, and on dismissal — so writing straight through would hammer
+/// the disk, and writing non-atomically would leave a truncated file if the app were
+/// killed mid-write.
 ///
 /// The debounce runs on a **private serial queue**, not the main queue. That is not an
 /// optimisation — `DispatchQueue.main` is only drained on Linux if something calls
@@ -28,6 +29,12 @@ final class ThreadArchive {
     /// understands. In that case the archive never writes.
     let isReadOnly: Bool
 
+    /// Why the last erase left the file in place, in words fit for the interface; nil
+    /// once an erase succeeds. "History off means the bytes are gone" is a promise
+    /// Settings makes, and when the file system breaks it the user has to be told
+    /// rather than shown a toggle that says off.
+    private(set) var eraseFailure: String?
+
     /// When false, nothing is written and nothing is remembered.
     var isHistoryEnabled: Bool {
         didSet {
@@ -35,12 +42,12 @@ final class ThreadArchive {
             // Turning history *on* stores nothing yet: writing here would create a file
             // holding an empty library before the user has any threads. The next
             // `save(_:)` writes it.
-            guard !isHistoryEnabled else { onChange?(); return }
+            guard !isHistoryEnabled else { eraseFailure = nil; onChange?(); return }
             // Forget in memory as well as on disk. Erasing only the file would leave
             // every thread loaded, so switching history back on would write them all out
             // again — the user's "delete this" would have been a no-op.
             library.threads.removeAll()
-            try? eraseEverything()
+            recordingFailure { try eraseEverything() }
             onChange?()
         }
     }
@@ -54,6 +61,10 @@ final class ThreadArchive {
     /// synchronise.
     private var pendingSave: DispatchWorkItem?
     private var hasPendingChanges = false
+    /// Whether the primary file is the "previous good copy" the `.bak` rotation
+    /// promises: it decoded at launch, or this process has since written it. Set once
+    /// in `init` and afterwards only on `queue`, where every write runs.
+    private var primaryIsTrustworthy: Bool
 
     init(fileURL: URL,
          fileManager: FileManager = .default,
@@ -70,14 +81,13 @@ final class ThreadArchive {
         // empty v1 document straight over a newer build's file — exactly the loss this
         // flag exists to prevent.
         let onDisk = Self.load(from: fileURL, fileManager: fileManager)
-        isReadOnly = (onDisk?.version ?? ThreadLibrary.currentVersion) > ThreadLibrary.currentVersion
-        library = historyEnabled ? (onDisk ?? ThreadLibrary()) : ThreadLibrary()
-        if isReadOnly {
-            // `onDisk?.version`, not `library.version`: with history disabled the
-            // in-memory library is a fresh document and would report the wrong number.
+        isReadOnly = onDisk.newerVersion != nil
+        library = historyEnabled ? (onDisk.library ?? ThreadLibrary()) : ThreadLibrary()
+        primaryIsTrustworthy = onDisk.primaryDecoded
+        if let newer = onDisk.newerVersion {
             // Built as one string first: `.utf8` binds tighter than `+`, so applying it
             // to the last literal of a concatenation is a type error, not a byte view.
-            let warning = "vervellum warning: threads file is version \(onDisk?.version ?? -1) "
+            let warning = "vervellum warning: threads file is version \(newer) "
                 + "but this build understands \(ThreadLibrary.currentVersion) — history is "
                 + "read-only so the newer file isn't downgraded.\n"
             FileHandle.standardError.write(Data(warning.utf8))
@@ -101,7 +111,7 @@ final class ThreadArchive {
 
     func deleteAll() {
         library.threads.removeAll()
-        try? eraseEverything()
+        recordingFailure { try eraseEverything() }
         onChange?()
     }
 
@@ -128,6 +138,22 @@ final class ThreadArchive {
         // Reported, not swallowed. "History off means the bytes are gone" is a promise
         // the interface makes; if the file is still there the user has to be told.
         if let failure { throw failure }
+    }
+
+    /// Runs an erase and keeps its outcome in `eraseFailure`, so a front end that
+    /// cannot throw through a toggle binding still has something to show.
+    private func recordingFailure(_ erase: () throws -> Void) {
+        do {
+            try erase()
+            eraseFailure = nil
+        } catch {
+            // Vervellum's own words, not the file manager's: the message is shown in
+            // Settings, and the path is the one thing the user needs to go and fix.
+            eraseFailure = "Could not delete \(fileURL.lastPathComponent) in "
+                + "\(fileURL.deletingLastPathComponent().path). The file may be locked "
+                + "or the folder read-only; nothing new will be written to it."
+            FileHandle.standardError.write(Data("vervellum warning: \(eraseFailure ?? "")\n".utf8))
+        }
     }
 
     /// Writes any pending change before returning. Called at termination and on
@@ -178,12 +204,17 @@ final class ThreadArchive {
             if currentContents() == data { return }
 
             // Rotate the previous good file, so a failure during the write still leaves
-            // one recoverable copy — and only now, when the contents really differ.
-            if fileManager.fileExists(atPath: fileURL.path) {
+            // one recoverable copy — only now, when the contents really differ, and only
+            // when the primary *is* a good file. After a launch that recovered from
+            // `.bak`, the primary is the corrupt one; copying it over the backup before
+            // the new write is known to have succeeded would, if that write then failed
+            // for the same reason (a full disk, say), leave nothing readable at all.
+            if primaryIsTrustworthy, fileManager.fileExists(atPath: fileURL.path) {
                 try? fileManager.removeItem(at: backupURL)
                 try? fileManager.copyItem(at: fileURL, to: backupURL)
             }
             try data.write(to: fileURL, options: [.atomic])
+            primaryIsTrustworthy = true
             // Research questions are personal. Keep the file owner-only rather than
             // inheriting the umask.
             try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
@@ -192,19 +223,47 @@ final class ThreadArchive {
         }
     }
 
-    private static func load(from url: URL, fileManager: FileManager) -> ThreadLibrary? {
+    /// Just the stamp, decoded before anything else: it is the one field every version
+    /// of the document shares.
+    private struct VersionStamp: Decodable { let version: Int }
+
+    private struct Loaded {
+        var library: ThreadLibrary?
+        /// The version claimed by a file this build must not touch.
+        var newerVersion: Int?
+        /// Whether the primary file decoded, as opposed to the backup standing in for it.
+        var primaryDecoded = false
+    }
+
+    private static func load(from url: URL, fileManager: FileManager) -> Loaded {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
+        var loaded = Loaded()
         for candidate in [url, url.appendingPathExtension("bak")] {
             guard let data = fileManager.contents(atPath: candidate.path) else { continue }
-            if let library = try? decoder.decode(ThreadLibrary.self, from: data) {
-                if candidate != url {
-                    FileHandle.standardError.write(Data(
-                        "vervellum warning: threads file was unreadable; recovered the .bak copy.\n".utf8))
-                }
-                return library
+            // The stamp is read on its own first, and a newer one ends the search. A
+            // newer build's document may hold an enum case or a field this build cannot
+            // decode; if that failure were taken for corruption, the file would be
+            // "recovered" from the backup and then rotated out and written over — the
+            // exact loss the stamp exists to prevent. Nor is the backup adopted then:
+            // showing an older snapshot as the history, read-only, would only raise the
+            // question of where the newest threads went.
+            if let stamp = try? decoder.decode(VersionStamp.self, from: data),
+               stamp.version > ThreadLibrary.currentVersion {
+                loaded.newerVersion = stamp.version
+                break
             }
+            guard var library = try? decoder.decode(ThreadLibrary.self, from: data) else { continue }
+            library.finishInterruptedTurns()
+            if candidate == url {
+                loaded.primaryDecoded = true
+            } else {
+                FileHandle.standardError.write(Data(
+                    "vervellum warning: threads file was unreadable; recovered the .bak copy.\n".utf8))
+            }
+            loaded.library = library
+            break
         }
-        return nil
+        return loaded
     }
 }
