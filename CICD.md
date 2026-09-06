@@ -1,6 +1,6 @@
 # CI/CD
 
-Vervellum ships three GitHub Actions workflows. CI runs on every pull request and on
+Vervellum uses GitHub Actions for builds, releases, and optional review. CI runs on every pull request and on
 pushes to `main`; releases are produced by pushing a version tag. Everything works with
 **no secrets configured** — the only optional secret is the automated reviewer's key.
 
@@ -9,7 +9,8 @@ pushes to `main`; releases are produced by pushing a version tag. Everything wor
 | `.github/workflows/ci.yml` | PRs, pushes to `main`, manual dispatch | Build and test on macOS. |
 | `.github/workflows/linux.yml` | PRs, pushes to `main`, manual dispatch | Build, test and package on Ubuntu. |
 | `.github/workflows/release.yml` | Pushing a `v*` tag | Build both platforms, publish a GitHub Release with a `.dmg`, a `.zip` and a `.deb`, and verify what was published. |
-| `.github/workflows/zai-code-review.yml` | PRs from this repository | Automated code review. |
+| `.github/workflows/glm-review.yml` | PRs from this repository | Starts automated review. |
+| `.github/workflows/zai-code-review.yml` | Reusable workflow | Implements automated review. |
 
 Every third-party action is pinned to an **immutable commit SHA**, with the version in
 a trailing comment. A mutable tag like `@v4` can be repointed at tampered code after
@@ -51,12 +52,12 @@ On failure the `.xcresult` bundle is uploaded as an artifact.
 One job in the **official Swift container for the target Ubuntu release**, not
 `swift-actions/setup-swift` on a bare runner. A `.deb` links against the library
 versions present at build time, so the container is what guarantees the package
-installs on 24.04; it pins the whole userland rather than just the compiler.
+targets 24.04. The `swift:6.1-noble` image tag is still mutable, not digest-pinned.
 
-The job builds the executable, runs `swift test`, checks native-close/reopen under
-Xvfb, validates the `.desktop` entry, packages the `.deb` — and then **installs it**. A package that builds but will not
-install is the characteristic failure of hand-rolled `dpkg-deb` packaging, and ruling it
-out costs one step.
+The job builds the executable, runs shared tests and loopback provider fixtures,
+checks native-close/reopen under Xvfb, validates the desktop entry, and packages
+and installs the `.deb`. Loopback tests use Python's standard library, temporary
+XDG directories, and fake keys; no external provider or user state is used.
 
 `swift test` here runs the *same files* as the macOS suite, from
 `Tests/VervellumKitTests/`. That is the mechanism that stops the two platforms drifting:
@@ -126,7 +127,8 @@ Runs on `pull_request_target`, which exposes repository secrets and a write-capa
 token. That is why the job is gated on
 `github.event.pull_request.head.repo.full_name == github.repository`: **it must never
 run for a branch from an untrusted fork.** That condition is a security control, not
-boilerplate. The job is skipped entirely when `ZAI_API_KEY` is not configured.
+boilerplate. Without `ZAI_API_KEY`, the workflow reports success but performs no
+review. That is reviewer unavailability, not approval.
 
 `CLAUDE.md` describes how to work with the review rounds this produces, including when
 to declare steady state and stop.
@@ -141,6 +143,8 @@ xcodebuild -project Vervellum.xcodeproj -scheme Vervellum \
 # Linux
 swift build -c release --product vervellum
 swift test --parallel
+python3 Tests/Integration/provider_fixtures.py .build/release/vervellum
+xvfb-run --auto-servernum swift test --skip-build --filter LinuxPanelLifecycleTests
 packaging/build-deb.sh 0.1.0
 ```
 

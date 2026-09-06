@@ -10,14 +10,12 @@ Vervellum server: the app talks only to the endpoints you configure and to GitHu
 
 Vervellum makes network requests in exactly three cases, each with a fixed purpose.
 
-- **Research.** When you ask a question, Vervellum sends it — together with the earlier
-  turns in that thread and the search results it retrieved — to the two endpoints you
-  entered in Settings ▸ Providers: an OpenAI-compatible model endpoint, and a web-search
-  server. Nothing is sent until you press Return. These are third-party services chosen
-  by you, and what they do with the request is governed by their policies, not this
-  one. Vervellum has no way to recall what was sent.
-- **Search queries.** The queries themselves are written by the model from your
-  question and sent to the search server. They are shown to you in the panel's process
+- **Research.** Requested research sends your question, earlier thread context, and
+  retrieved evidence to your configured model endpoint. `/direct` uses that endpoint
+  without searching. Provider handling is governed by its own policy; Vervellum cannot
+  recall what was sent.
+- **Search queries.** Model-written queries derived from your question and context
+  go to your configured search server. They are shown to you in the panel's process
   trail before the answer arrives.
 - **Update checks.** Vervellum asks GitHub's public releases API whether a newer version
   exists — on launch and about once a day while automatic checks are enabled (they can
@@ -34,15 +32,19 @@ your IP address.
 - **Threads.** Questions, answers, verdicts and source lists are stored as JSON,
   readable only by your account — in Vervellum's Application Support folder on macOS,
   and under `$XDG_DATA_HOME` (usually `~/.local/share/vervellum`) on Linux. Turning
-  history off **deletes** the file rather than hiding it, and "Delete all…" removes it
-  immediately.
+  history off or choosing "Delete all…" deletes the primary and backup files,
+  including when launched with history disabled. Failed deletion is reported and
+  blocks further writes until resolved. Active runs are checkpointed while history
+  is enabled. Newer history schemas stay untouched at launch; explicit deletion
+  still removes them. Deletion cannot remove copies in external backups.
 - **Preferences.** Panel position, size, text scale, shortcuts and behaviour toggles
   live in Vervellum's application preferences on macOS, and in
   `~/.config/vervellum/settings.json` on Linux.
-- **API keys.** In your login Keychain on macOS. On Linux, in your login keyring when
-  one is available; otherwise read from `VERVELLUM_MODEL_KEY` and `VERVELLUM_SEARCH_KEY`,
-  or from a mode-0600 file — the app says which. In every case they are never written to
-  preferences, never included in a stored thread, and never written to a log.
+- **API keys.** In your login Keychain on macOS. On Linux, explicit
+  `VERVELLUM_MODEL_KEY` and `VERVELLUM_SEARCH_KEY` override reads; otherwise the keyring
+  is tried before the mode-0600 file. Writes prefer the keyring, then the file. In every case they are never written to
+  preferences, never included as configuration in a stored thread, and never logged.
+  Typed or pasted secrets are still ordinary user text; review what you send.
 
 ## The selection shortcut (macOS only)
 
@@ -64,8 +66,8 @@ ad-hoc signed, the grant is reset by every update. Vervellum says so when that h
 
 Vervellum writes diagnostic lines to the unified system log under its own subsystem:
 stage names, durations, counts and sizes, tagged with a short per-run identifier.
-Questions, answers, search queries, retrieved content, API keys and provider error text
-are deliberately excluded. Result diagnostics print only known schema field names and
+Questions, answers, search queries, retrieved content, API keys, provider-controlled
+tool names, and provider error text are deliberately excluded. Result diagnostics print only known schema field names and
 aggregate counts; arbitrary field names are omitted because they can contain secrets.
 
 ## The keyboard shortcut on Linux

@@ -36,11 +36,11 @@ searches, so it — not the model — owns the source list. The answer prompt fo
 URLs, domains and markdown links outright, and requires evidence to be referenced as
 `[1]` or `[2, 5]`.
 
-That makes a fabricated link *structurally impossible* rather than merely discouraged:
-there is no syntax in which the model could express one. A number is either in range
-or it is not, and `CitationValidator` decides that in constant time. Any URL that
-appears anyway is a prompt violation the validator flags on sight, and the turn is
-badged accordingly.
+Only numbered citations can become actionable answer links. Both renderers remove
+model-origin link behavior, then resolve valid numbers through the retrieved source
+list. Literal URLs are flagged; invalid numbers remain text. Shared placeholder
+masking preserves citation placement, including through incomplete markdown.
+This establishes provenance, not whether the cited evidence supports the claim.
 
 It is also more robust than the obvious alternative — allow-listing the URLs the
 search returned and string-matching what the model wrote. A model that reformats a
@@ -66,7 +66,7 @@ enforces rather than the prompt:
   and here are the two sources that failed to settle it" is strictly more useful than a
   bare verdict.
 
-Source numbers must be exact integers or integer strings. Boolean, fractional,
+Source numbers must be an array of exact integers or integer strings. Boolean, fractional,
 non-finite, overflow, and out-of-range references are discarded and reported.
 
 That asymmetry is the point. It gives the model an honest place to put a claim it
@@ -220,6 +220,12 @@ honest. Run in parallel, the table would quietly disagree with the paragraph abo
 and a reader would have no way to tell which one to believe. The user is reading the
 streamed answer while stage 4 runs, so the latency that matters is already hidden.
 
+If assessment fails, the completed answer remains with an `assessmentUnavailable`
+notice. That qualification also travels with follow-up history. Missing or unknown
+finish reasons, malformed SSE data, and provider error envelopes instead leave the
+answer incomplete; only `finish_reason: stop` completes a model reply. Retained prose
+is citation-validated after cancellation, failure, and checkpoint recovery.
+
 **Why searches are sequential.** The MCP session is stateful — one JSON-RPC id
 sequence over one connection is the only shape the server documents. Four searches at
 about a second each is well inside the user's patience, and a failed search is logged
@@ -243,18 +249,28 @@ implements four messages — `initialize`, `notifications/initialized`, `tools/l
   (`{"success": false, "code": N}`) returned with HTTP 200, so a request can fail
   before it ever reaches the protocol layer.
 
-The tool's real `inputSchema` is fetched rather than assumed: the model writes its
-query arguments against that schema, and the arguments are checked back against it
-before the request goes out.
+Known web-search tool names are preferred. Otherwise, selection requires one tool
+explicitly advertising web search with a string query field. Arbitrary single tools
+and ambiguous matches are rejected; provider-controlled names never enter diagnostics.
+The model sees the actual input schema; required and unknown argument names are
+checked before calling the tool. This is not full JSON Schema validation.
+
+A model request rejected with HTTP 400 is retried once without optional temperature
+and JSON-mode fields. That fallback is remembered for the current turn's client.
+Non-streaming calls allow 600 seconds of inactivity; streams allow 120 seconds.
+Byte-reader deadline checks are not an absolute end-to-end timer.
 
 ### 3.2 Context budget
 
-Every provider has a context limit, and the failure mode when you exceed it is not an
-error — it is a silently truncated prompt and a confidently wrong answer. So Vervellum
-decides what to drop itself: whole turns, from the oldest end, never a sentence cut in
-half. And it **says so**, with a `contextTrimmed` notice on the turn.
+All model stages share a 110,000-byte serialized UTF-8 context ceiling; evidence has
+its own 70,000-byte ceiling. These are not tokenizer guarantees. Historic answers
+are shortened explicitly, then whole older turns are omitted as needed; both produce
+a `contextTrimmed` notice. Evidence drops a suffix and reports it, preserving numbering.
+Obsolete citation markers are removed from historic answers and finding claims.
 
-Silent truncation is the thing `ResearchContext` exists to prevent.
+If fixed context still exceeds the ceiling, the request fails locally rather than
+silently truncating the current question, answer, or evidence. Assessment failure
+therefore retains the answer with an explicit limitation.
 
 ---
 
@@ -270,13 +286,12 @@ all retrieved content, and all earlier thread content, to be **untrusted data, n
 instructions**, and says explicitly what such text tends to look like.
 
 Prompting is a mitigation, not a guarantee — which is exactly why the citation rule in
-§1.1 is structural rather than instructional. Even a fully injected model cannot
-produce a link Vervellum did not fetch, because there is no way to write one.
+§1.1 is structural rather than instructional. Model-written URLs cannot become
+actionable answer links; source support still requires inspection.
 
 ### 4.2 Credential handling
 
-Every outbound request carries an API key, so the transport is built around three
-rules:
+Provider requests share a transport built around three credential-protection rules:
 
 1. **Redirects are never followed.** `URLSession` re-sends headers — including
    `Authorization` — to a redirect target by default. A provider, or anything that can
@@ -491,7 +506,7 @@ The shared core (`Sources/VervellumKit/Core/`) and the Linux front end are laid 
 - `Model/` — `Preferences` (the macOS-only settings, forwarding the shared ones to
   `CorePreferences`) and `HotkeyBinding`.
 - `Store/` — `ThreadStore`, an `ObservableObject` shell over Core's `ThreadArchive`
-  (atomic, debounced JSON with one `.bak`).
+  (atomic checkpointed JSON with one `.bak`).
 - `Security/` — `KeychainStore`, the macOS `SecretStore`. `SecretRedactor` is shared.
 - `Selection/` — `SelectedTextReader` (the Accessibility path).
 - `Hotkeys/` — `CarbonHotkey`, `KeyCodes`.
@@ -507,6 +522,19 @@ slash-command parsing, preference clamping, and the version comparison.
 
 ---
 
+### History durability
+
+Both front ends submit active snapshots. The first pending checkpoint keeps its
+one-second deadline, so continuous prose cannot postpone persistence indefinitely.
+macOS coalesces prose publication at 10 Hz; Linux keeps its model current and throttles
+rendering at the same rate. Structural classification is shared. Core chooses no UI
+queue. Dismissal flushes pending work; Stop rejects late callbacks.
+
+Schema 2 uses tolerant notice decoding and checks both primary and backup versions
+before adoption. Erasure is serialized with writes, failures block persistence, and
+session-only tombstones reject snapshots of deleted threads. Older released readers
+lack this protection: downgrades with the same history file are unsupported.
+
 ## 7. Testing
 
 Unit tests cover the pure logic listed above, plus the store's crash-safety
@@ -518,7 +546,13 @@ it).
 the test host does not register global shortcuts, add a status item, or read the real
 user's preferences.
 
-What cannot be unit-tested and is verified by hand in a real GUI session: panel
+Loopback CLI fixtures exercise the real transport: complete research, optional-field
+fallback, repeated rejection, premature EOF, malformed/error frames, whole-response
+fallback, failed assessment, redirect refusal, and oversized context. GTK native-close
+is tested under Xvfb; macOS tests inspect citation link attributes and control runner
+callbacks and UI timers to reproduce Stop races without sleeps.
+
+Still requiring a real desktop session: panel
 placement over a full-screen app, the activation handoff, multi-display re-summon,
 Liquid Glass rendering, the Accessibility selection path, and IME composition in the
 composer.
@@ -545,6 +579,9 @@ composer.
 - **Linux keys are weaker than a Keychain** whenever no keyring is running. The app
   says which tier it is on rather than implying otherwise.
 - **Redaction cannot see shapeless secrets.** See §4.3.
+
+Current consolidation decisions and remaining verification limits:
+[PR-REVIEW.md](PR-REVIEW.md). Earlier proposals remain in [ANALYSIS.md](ANALYSIS.md).
 
 ## 9. Backlog
 

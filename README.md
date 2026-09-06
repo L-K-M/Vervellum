@@ -19,13 +19,12 @@ its own claims against that same evidence.
 Most floating LLM panels answer straight from the model's weights. Vervellum instead
 runs the searches and answers based on current sources.
 
-- **The model cannot invent a link.** Vervellum runs the searches, so it owns the
-  numbered source list. The answer can only point at evidence as `[1]` or `[2, 5]`;
-  there is simply no way for the model to write a URL.
-- **Every claim gets a verdict.** A second pass grades the answer's claims against
-  the same evidence: *supported*, *contradicted*, *mixed*, *not established*, or
-  *opinion*. A verdict that cites no source is thrown out, and you're told when
-  that happens.
+- **Only retrieved citations become links.** Vervellum owns the numbered source
+  list. Answers cite `[1]` or `[2, 5]`; model-written URLs stay non-actionable and
+  are flagged. A real citation still does not prove a claim.
+- **Claims get a separate assessment.** Findings are *supported*, *contradicted*,
+  *mixed*, *not established*, or *opinion*. The first three require citations.
+  Failed assessments retain the answer with a warning, not a verified verdict.
 - **Finding nothing is a result.** *Not established* is a normal outcome, not an
   error state. It gives the model a place to put a claim the evidence doesn't
   support.
@@ -42,7 +41,8 @@ runs the searches and answers based on current sources.
   over another app's full-screen window without switching Spaces.
 - **Threaded.** Follow-up questions carry the thread's context, including which
   earlier claims were left unsettled. Threads are searchable, and it's up to you
-  whether they're kept at all.
+  whether they're kept at all. Active turns are checkpointed; interrupted work
+  reopens as incomplete, with its partial answer retained.
 - **Keyboard-first.** `Return` asks, `Esc` clears then closes, `↑`/`↓` walk back
   through earlier questions, `/` opens commands. Everything in the header is also a
   command.
@@ -51,7 +51,9 @@ runs the searches and answers based on current sources.
 - **`/direct`** answers with no search at all, and is clearly badged as unsourced.
 - **Bring your own providers.** An OpenAI-compatible Chat Completions endpoint and
   an HTTP MCP web-search server. Recognized tools include z.ai, Brave, Tavily, Exa
-  and SearXNG. Keys live in your Keychain on macOS.
+  and SearXNG. Unknown or ambiguous non-search tools are rejected. Model replies
+  must finish with `finish_reason: stop`; malformed or unfinished replies remain
+  incomplete. Keys live in your Keychain on macOS.
 - **Native.** SwiftUI and AppKit, Liquid Glass on macOS 26, no dependencies.
 
 ## Getting started
@@ -104,6 +106,10 @@ session bus.
 > (`gtk_window_move` and `set_keep_above` don't exist in GTK4 at all). The
 > shortcut, the pipeline, and the evidence UI all work; window placement is up to
 > the compositor.
+
+History now uses schema 2. **Do not downgrade with the same history file:** older
+releases can mistake new notices for corruption and overwrite it. Back up history
+before downgrading. See [SECURITY.md](SECURITY.md).
 
 ## Build & Run
 
@@ -161,9 +167,8 @@ without it.
 Your question, the thread, and the search results go to the two providers you
 configure, and nowhere else. There's no account system and no telemetry or
 analytics. Threads and preferences stay on your machine. API keys live in the
-Keychain on macOS, and on Linux in your login keyring; if no keyring is running,
-an environment variable or a mode-0600 file works instead, and the app tells you
-which. Text captured by the macOS selection shortcut is scanned for
+Keychain on macOS. Linux reads explicit environment keys first, then the keyring,
+then an unencrypted mode-0600 file. Text captured by the macOS selection shortcut is scanned for
 credential-shaped values before it reaches the composer, and you're told how many
 were removed. See [PRIVACY.md](PRIVACY.md).
 

@@ -1,4 +1,14 @@
-# Vervellum — consolidated work queue
+# Vervellum — review archive
+
+**Current status:** [PR-REVIEW.md](PR-REVIEW.md) records the decisions for all 42
+original PRs and supersedes every pending/in-flight table below. Consult it before
+implementing an older proposal; many findings below are now fixed or superseded.
+
+## Historical analysis, before PR #69
+
+The remaining text preserves earlier findings, identifiers, and acceptance criteria.
+Its code descriptions, test counts, and PR statuses describe those snapshots, not the
+current implementation.
 
 Combines the prior cumulative `main` analysis (`0ce3a2d`) with the
 [Astra review](https://github.com/L-K-M/Vervellum/blob/4b35bba4554a7a975e8eb9f4755689b943120563/astra.md).
@@ -24,7 +34,7 @@ in A61 and in `fable.md` §11.2.
 `Core/` means `Sources/VervellumKit/Core/`; `Linux/` means
 `Sources/VervellumKit/Linux/`. Visual hypotheses require desktop verification.
 
-## Implemented, awaiting review and merge
+## Historical pending-PR inventory
 
 ### Astra patches
 
