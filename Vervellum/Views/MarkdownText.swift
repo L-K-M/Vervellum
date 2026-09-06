@@ -25,9 +25,6 @@ struct MarkdownText: View {
     /// body size.
     var font: Font?
 
-    /// A stand-in that markdown parsing cannot interpret or split.
-    private static let placeholder: Character = "\u{FFFC}"
-
     var body: some View {
         Text(attributed)
             .font(font ?? PanelTheme.Font.body(scale))
@@ -37,6 +34,15 @@ struct MarkdownText: View {
     }
 
     private var attributed: AttributedString {
+        CitationText.render(markdown, sources: sources, scale: scale)
+    }
+}
+
+/// AppKit-side serialization, separate from the view so link attributes are testable.
+enum CitationText {
+    private static let placeholder = CitationMask.placeholder
+
+    static func render(_ markdown: String, sources: [Source], scale: Double = 1) -> AttributedString {
         let (masked, citations) = Self.mask(markdown, sources: sources)
         var result = Self.parseInline(masked)
         // A link the model wrote is exactly what the citation rule forbids: evidence
@@ -54,35 +60,19 @@ struct MarkdownText: View {
     private struct MaskedCitation {
         var label: String
         var url: URL?
-        var tooltip: String
     }
 
     /// Replaces every valid citation marker with a placeholder character, returning
     /// the masked text and the citations in the order they appeared.
     private static func mask(_ text: String, sources: [Source]) -> (String, [MaskedCitation]) {
-        let validation = CitationValidator.validate(answer: text, sourceCount: sources.count)
-        var masked = ""
-        var citations: [MaskedCitation] = []
-
-        for span in validation.spans {
-            switch span {
-            case .text(let value):
-                masked += value
-            case .citation(let indices, let raw):
-                let cited = indices.compactMap { sources.indices.contains($0) ? sources[$0] : nil }
-                guard !cited.isEmpty else { masked += raw; continue }
-                masked.append(placeholder)
-                citations.append(MaskedCitation(
-                    label: cited.map { String($0.number) }.joined(separator: ","),
-                    // A marker naming several sources can only link to one; the first
-                    // is the one the model put first. The others stay reachable in the
-                    // source list, and the tooltip names them all.
-                    url: URL(string: cited[0].url),
-                    tooltip: cited.map { "[\($0.number)] \($0.title) — \($0.domain)" }
-                        .joined(separator: "\n")))
-            }
+        let mask = CitationMask(text, sourceCount: sources.count)
+        let citations = mask.sourceIndices.map { indices -> MaskedCitation in
+            let cited = indices.map { sources[$0] }
+            // A grouped marker opens its first source; all remain in the source list.
+            return MaskedCitation(label: cited.map { String($0.number) }.joined(separator: ","),
+                                  url: cited.first.flatMap { URL(string: $0.url) })
         }
-        return (masked, citations)
+        return (mask.text, citations)
     }
 
     // MARK: Inline parsing
