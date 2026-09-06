@@ -15,13 +15,36 @@ import Foundation
 /// The endpoint is untrusted: it is whatever URL the user pasted. So the JSON path
 /// re-parses defensively and every failure becomes a `ResearchError` naming the
 /// likely fix, rather than a decoding trace the user cannot act on.
-struct ChatCompletionsClient {
+///
+/// ## Optional request parameters
+///
+/// Two parameters improve the calls but are not universally accepted: a low
+/// `temperature` (OpenAI's reasoning models reject any value but their default with
+/// HTTP 400) and `response_format: json_object` for the two structured stages (some
+/// gateways return 400 for a field they do not know). A rejected parameter must never
+/// make a model unusable, so on the first HTTP 400 for a request that carried them the
+/// call is retried once without them — safe, because a 400 arrives before any streamed
+/// content — and the outcome is remembered for the rest of the turn. That memory is
+/// why this is a class: a runner builds one client per turn and makes three calls
+/// through it, and paying the rejected request three times would be silly.
+final class ChatCompletionsClient {
 
     let url: URL
     let model: String
     let apiKey: String?
     let trace: ResearchTrace
-    var transport: HTTPTransport = .shared
+    let transport: HTTPTransport
+
+    /// Whether the endpoint has, so far, accepted the optional parameters.
+    private var sendsOptionalParameters = true
+
+    init(url: URL, model: String, apiKey: String?, trace: ResearchTrace, transport: HTTPTransport = .shared) {
+        self.url = url
+        self.model = model
+        self.apiKey = apiKey
+        self.trace = trace
+        self.transport = transport
+    }
 
     private var headers: [String: String] {
         guard let apiKey, !apiKey.isEmpty else { return [:] }
@@ -36,22 +59,15 @@ struct ChatCompletionsClient {
         guard let userContent = Self.encodeUserContent(payload)
         else { throw ResearchError("Vervellum could not encode the request context.") }
 
-        let body: [String: Any] = [
-            "model": model,
-            "stream": false,
-            // Deterministic-ish: these two calls are extraction and adjudication, not
-            // composition, and sampling variance there shows up as flaky validation.
-            "temperature": 0.2,
-            "messages": [
-                ["role": "system", "content": system],
-                ["role": "user", "content": userContent],
-            ],
-        ]
-        // `"stream": false` above, so do not advertise SSE — see HTTPTransport.request.
-        let request = try HTTPTransport.request(url: url, payload: body, headers: headers,
-                                                acceptsEventStream: false)
-        let (_, response) = try await trace.stage(label) {
-            try await transport.sendJSON(request)
+        let response = try await withOptionalParameters(label: label) { optional in
+            let body = Self.requestBody(model: self.model, system: system, userContent: userContent,
+                                        stream: false, optionalParameters: optional)
+            // `"stream": false` above, so do not advertise SSE — see HTTPTransport.request.
+            let request = try HTTPTransport.request(url: self.url, payload: body, headers: self.headers,
+                                                    acceptsEventStream: false)
+            return try await self.trace.stage(label) {
+                try await self.transport.sendJSON(request)
+            }.body
         }
         let text = try Self.messageContent(from: response)
         guard let object = Self.decodeJSONObject(from: text) else {
@@ -78,35 +94,31 @@ struct ChatCompletionsClient {
         guard let userContent = Self.encodeUserContent(payload)
         else { throw ResearchError("Vervellum could not encode the request context.") }
 
-        let body: [String: Any] = [
-            "model": model,
-            "stream": true,
-            "temperature": 0.4,
-            "messages": [
-                ["role": "system", "content": system],
-                ["role": "user", "content": userContent],
-            ],
-        ]
-        let request = try HTTPTransport.request(url: url, payload: body, headers: headers,
-                                                acceptsEventStream: true)
-
         trace.log("\(label) started")
         let began = Date()
-        var reply = StreamingReply()
-
-        do {
-            for try await event in transport.streamJSONEvents(request) {
-                try Task.checkCancellation()
-                if let chunk = try reply.apply(event) { onDelta(chunk) }
+        // The retry is safe here too: a 400 is delivered as the response head, before
+        // the first frame, so no delta has reached the caller when it is thrown.
+        let reply = try await withOptionalParameters(label: label) { optional in
+            let body = Self.requestBody(model: self.model, system: system, userContent: userContent,
+                                        stream: true, optionalParameters: optional)
+            let request = try HTTPTransport.request(url: self.url, payload: body, headers: self.headers,
+                                                    acceptsEventStream: true)
+            var reply = StreamingReply()
+            do {
+                for try await event in self.transport.streamJSONEvents(request) {
+                    try Task.checkCancellation()
+                    if let chunk = try reply.apply(event) { onDelta(chunk) }
+                }
+            } catch let error as ResearchError {
+                self.trace.warn(String(format: "%@ failed after %.2fs: %@", label,
+                                       Date().timeIntervalSince(began), error.message))
+                throw error
+            } catch is CancellationError {
+                throw ResearchError.cancelled
+            } catch {
+                throw ResearchError.connectionFailed
             }
-        } catch let error as ResearchError {
-            trace.warn(String(format: "%@ failed after %.2fs: %@", label,
-                              Date().timeIntervalSince(began), error.message))
-            throw error
-        } catch is CancellationError {
-            throw ResearchError.cancelled
-        } catch {
-            throw ResearchError.connectionFailed
+            return reply
         }
 
         // Checked again *after* the loop, not only inside it. Cancelling the consuming
@@ -163,6 +175,48 @@ struct ChatCompletionsClient {
 
     // MARK: Request shaping
 
+    /// Runs `attempt` with the optional parameters, and once more without them if the
+    /// provider answered HTTP 400 — see the type's documentation.
+    private func withOptionalParameters<T>(label: String,
+                                           _ attempt: (_ optional: Bool) async throws -> T) async throws -> T {
+        guard sendsOptionalParameters else { return try await attempt(false) }
+        do {
+            return try await attempt(true)
+        } catch let error as ResearchError where error == .badRequest {
+            sendsOptionalParameters = false
+            trace.log("\(label): the provider rejected the request; retrying without optional parameters")
+            return try await attempt(false)
+        }
+    }
+
+    /// The request body for one call.
+    ///
+    /// `optionalParameters` adds the two fields not every endpoint accepts: a low
+    /// temperature — these calls are extraction and adjudication, not composition, and
+    /// sampling variance there shows up as flaky validation — and, for the non-streaming
+    /// JSON stages, `response_format: json_object`, which stops a model wrapping the
+    /// object in a fence or a sentence of commentary at the source. The word "JSON"
+    /// that OpenAI requires in the prompt when that mode is on is in `ResearchPrompts`.
+    static func requestBody(model: String,
+                            system: String,
+                            userContent: String,
+                            stream: Bool,
+                            optionalParameters: Bool) -> [String: Any] {
+        var body: [String: Any] = [
+            "model": model,
+            "stream": stream,
+            "messages": [
+                ["role": "system", "content": system],
+                ["role": "user", "content": userContent],
+            ],
+        ]
+        if optionalParameters {
+            body["temperature"] = stream ? 0.4 : 0.2
+            if !stream { body["response_format"] = ["type": "json_object"] }
+        }
+        return body
+    }
+
     /// The user message: the context payload as JSON text.
     ///
     /// Keys are sorted so the same inputs produce the same bytes. Unsorted, the
@@ -208,25 +262,45 @@ struct ChatCompletionsClient {
         }
     }
 
-    /// Decodes a JSON object from a model reply, tolerating the two things models do
-    /// even when told not to: wrapping the object in a ```json fence, and prefixing
-    /// it with a sentence of commentary.
+    /// Decodes a JSON object from a model reply, tolerating the three things models do
+    /// even when told not to: wrapping the object in a ```json fence, prefixing it with
+    /// a sentence of commentary, and — for a reasoning model served through a gateway
+    /// that leaks its scratchpad — preceding it with a `<think>` block.
     static func decodeJSONObject(from text: String) -> [String: Any]? {
-        var candidate = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var candidate = stripReasoning(text).trimmingCharacters(in: .whitespacesAndNewlines)
         if candidate.hasPrefix("```") {
             candidate = stripFence(candidate)
         }
         if let object = parseObject(candidate) { return object }
-        // Fall back to the outermost brace-balanced run, which recovers a reply that
-        // has prose wrapped around the object.
-        guard let braced = outermostObject(in: candidate) else { return nil }
-        return parseObject(braced)
+        // Fall back to the brace-balanced runs, in order, until one parses. The *first*
+        // run is not enough on its own: a preamble that quotes the expected shape —
+        // `{"reading": ..., "searches": [...]}` with literal ellipses — is balanced and
+        // unparseable, and the real object follows it.
+        var from = candidate.startIndex
+        while let range = objectRange(in: candidate, from: from) {
+            if let object = parseObject(String(candidate[range])) { return object }
+            from = range.upperBound
+        }
+        return nil
     }
 
     private static func parseObject(_ text: String) -> [String: Any]? {
         guard let data = text.data(using: .utf8) else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
+
+    /// Removes `<think>…</think>` and `<reasoning>…</reasoning>` blocks, which some
+    /// OpenAI-compatible servers pass through in the content rather than in a
+    /// separate field. Only the JSON stages are affected: the streamed answer shows
+    /// whatever the model wrote.
+    static func stripReasoning(_ text: String) -> String {
+        guard let regex = reasoningBlock else { return text }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: "")
+    }
+
+    private static let reasoningBlock = try? NSRegularExpression(
+        pattern: #"(?is)<(think|reasoning)>.*?</\1>"#)
 
     /// Removes a surrounding ``` fence.
     ///
@@ -255,7 +329,12 @@ struct ChatCompletionsClient {
     /// The substring from the first `{` to its matching `}`, ignoring braces inside
     /// string literals so a brace in prose content cannot end the scan early.
     static func outermostObject(in text: String) -> String? {
-        guard let start = text.firstIndex(of: "{") else { return nil }
+        objectRange(in: text, from: text.startIndex).map { String(text[$0]) }
+    }
+
+    /// The range of the first brace-balanced run at or after `from`.
+    static func objectRange(in text: String, from: String.Index) -> Range<String.Index>? {
+        guard let start = text[from...].firstIndex(of: "{") else { return nil }
         var depth = 0
         var inString = false
         var escaped = false
@@ -272,7 +351,7 @@ struct ChatCompletionsClient {
                 if character == "{" { depth += 1 }
                 if character == "}" {
                     depth -= 1
-                    if depth == 0 { return String(text[start...index]) }
+                    if depth == 0 { return start..<text.index(after: index) }
                 }
             }
             index = text.index(after: index)

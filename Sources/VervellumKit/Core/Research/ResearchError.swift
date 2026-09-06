@@ -34,6 +34,13 @@ struct ResearchError: LocalizedError, Equatable {
     static let streamInterrupted = ResearchError(
         "The model's provider reported an error part-way through the answer. Try again.")
 
+    /// HTTP 400. Named rather than generic because the client acts on it: a request
+    /// carrying optional parameters is retried once without them before this reaches
+    /// the user.
+    static let badRequest = ResearchError(
+        "The provider rejected the request (HTTP 400). Check the model name in the provider "
+        + "settings; the model may also not accept a request parameter Vervellum sends.")
+
     static func providerStatus(_ code: Int) -> ResearchError {
         ResearchError("The provider returned HTTP \(code). Check the endpoint, key, model and quota.")
     }

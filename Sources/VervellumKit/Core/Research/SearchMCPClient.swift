@@ -151,6 +151,19 @@ final class SearchMCPClient {
         try checkGatewayEnvelope(body, method: method)
     }
 
+    /// Whether a gateway's own message describes a bad key rather than something else.
+    ///
+    /// "token" on its own is deliberately not a signal: quota and billing messages say
+    /// "insufficient token balance" and "tokens per minute", and reading those as an
+    /// invalid key tells the user to replace a key that works. The text is classified
+    /// only; it is never shown.
+    static func describesAuthenticationFailure(_ message: String) -> Bool {
+        let lowered = message.lowercased()
+        let markers = ["auth", "api key", "apikey", "api-key", "invalid token", "token expired",
+                       "expired token", "invalid key", "unauthorized", "unauthorised", "forbidden"]
+        return markers.contains { lowered.contains($0) }
+    }
+
     private func captureSession(from responseHeaders: [String: String]) {
         for (name, value) in responseHeaders where name.lowercased() == "mcp-session-id" {
             headers["Mcp-Session-Id"] = value
@@ -163,9 +176,9 @@ final class SearchMCPClient {
     private func checkGatewayEnvelope(_ body: [String: Any], method: String) throws {
         guard (body["success"] as? Bool) == false else { return }
         let code = body["code"] as? Int
-        let message = ((body["msg"] as? String) ?? "").lowercased()
+        let message = (body["msg"] as? String) ?? ""
         trace.log("Search gateway rejection method=\(method) code=\(code.map(String.init) ?? "unknown")")
-        if message.contains("auth") || message.contains("api key") || message.contains("token") {
+        if Self.describesAuthenticationFailure(message) {
             throw ResearchError(
                 "The search provider rejected the API key (authentication failed). "
                 + "Replace the web-search key in Settings ▸ Providers.")
