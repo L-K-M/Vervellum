@@ -53,10 +53,14 @@ jobs:
       - name: Test the shared core
         run: swift test --parallel
 
+      # Validated under its real basename: for a DBusActivatable entry the *filename*
+      # must be the reverse-DNS application id, and desktop-file-validate rejects
+      # `entry.desktop` outright before it looks at the contents.
       - name: Validate the desktop entry
         run: |
-          sed 's/@VERSION@/0.0.0/g' packaging/debian/ch.lkmc.Vervellum.desktop > /tmp/entry.desktop
-          desktop-file-validate /tmp/entry.desktop
+          mkdir -p /tmp/desktop
+          sed 's/@VERSION@/0.0.0/g' packaging/debian/ch.lkmc.Vervellum.desktop > /tmp/desktop/ch.lkmc.Vervellum.desktop
+          desktop-file-validate /tmp/desktop/ch.lkmc.Vervellum.desktop
 
       - name: Package
         run: packaging/build-deb.sh 0.0.0+ci
