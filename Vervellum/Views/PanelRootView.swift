@@ -27,6 +27,14 @@ struct PanelRootView: View {
     /// pinned, so reading back during an answer is never undone by the next token.
     @State private var isPinnedToBottom = true
 
+    /// The measured width of the composer's row, once layout has run.
+    @State private var composerRowWidth: CGFloat?
+
+    /// Horizontal room the send button and its spacing take from the composer's row.
+    /// Named rather than inlined: the height estimate silently drifts when the button
+    /// is restyled, and the bug is invisible until the composer wraps a line early.
+    private static let sendButtonReservation: CGFloat = 24 + PanelTheme.Space.small
+
     /// Whether the providers are configured, sampled rather than computed.
     ///
     /// Checking this needs a Keychain read, and a computed property would perform one
@@ -87,6 +95,10 @@ struct PanelRootView: View {
             showsHistory = false
             showsHelp = false
             recallIndex = nil
+            // The redaction banner belongs to the seed that caused it; a later summon
+            // may edit or clear the draft, and a stale count beside new text misstates
+            // what was removed.
+            redactionNote = nil
         }
         // Opening Settings returns immediately, so refreshing there would sample the
         // state before the user had typed anything. The window tells us when it closes.
@@ -215,12 +227,24 @@ struct PanelRootView: View {
                              isEnabled: !engine.isRunning,
                              onSubmit: { submit(draft) },
                              onArrow: recall)
-                    // The composer's own width: the panel minus its gutters and the
-                    // send button. Measured rather than guessed, so a widened panel
-                    // stops growing the field a line too early.
+                    // The composer's own width, measured from the row it actually sits
+                    // in rather than derived from the panel-width preference: the
+                    // preference is unclamped, but PanelPlacement clamps the real panel
+                    // on a small display or a Stage Manager slice — and a height
+                    // computed against a width that no longer exists wraps the field a
+                    // line too early. `composerRowWidth` is set from the background
+                    // geometry below; the preference-derived estimate only bridges the
+                    // first frame, before any layout has happened.
                     .frame(height: ComposerView.height(
                         for: draft,
-                        width: preferences.panelWidth - PanelTheme.Space.medium * 2 - 34))
+                        width: (composerRowWidth ?? estimatedComposerRowWidth)
+                            - Self.sendButtonReservation))
+                    .background(GeometryReader { geometry in
+                        Color.clear.onAppear { composerRowWidth = geometry.size.width }
+                            .onChange(of: geometry.size.width) { _, width in
+                                composerRowWidth = width
+                            }
+                    })
 
                 Button {
                     if engine.isRunning { engine.cancel() } else { submit(draft) }
@@ -244,6 +268,12 @@ struct PanelRootView: View {
         }
         .padding(.horizontal, PanelTheme.Space.medium)
         .padding(.vertical, PanelTheme.Space.small)
+    }
+
+    /// Width the composer's row should have, per the width preference — used only
+    /// until real geometry arrives. Same arithmetic the row itself applies.
+    private var estimatedComposerRowWidth: CGFloat {
+        preferences.panelWidth - PanelTheme.Space.medium * 2
     }
 
     private var placeholder: String {
