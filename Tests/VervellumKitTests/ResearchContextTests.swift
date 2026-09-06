@@ -78,6 +78,21 @@ final class ResearchContextTests: XCTestCase {
         XCTAssertTrue(answer.hasSuffix("[…]"))
     }
 
+    /// A `[2]` in last turn's answer indexed *last turn's* sources; passed on verbatim it
+    /// invites the model to reuse it as a citation of this turn's source 2.
+    func testStripsCitationMarkersFromHistoricAnswers() {
+        var previous = turn("Old", answer: "X is true [1]. Both agree [1, 2]. Not [9].")
+        previous.sources = [
+            Source(number: 1, url: "https://a.example.com/", title: "A", snippet: ""),
+            Source(number: 2, url: "https://b.example.com/", title: "B", snippet: ""),
+        ]
+        let assembled = ResearchContext.assemble(question: "And?", history: [previous], today: "2026-09-06")
+        let thread = assembled.payload["thread"] as? [[String: Any]] ?? []
+        let answer = thread.first?["answer"] as? String ?? ""
+        XCTAssertEqual(answer, "X is true. Both agree. Not [9].")
+        XCTAssertEqual(thread.first?["source_domains"] as? [String], ["a.example.com", "b.example.com"])
+    }
+
     func testCarriesUnsettledClaimsForward() {
         var previous = turn("Old", answer: "A")
         previous.findings = [
