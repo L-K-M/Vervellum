@@ -208,27 +208,20 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
                         return
                     }
 
-                    var payload: [String] = []
+                    var assembler = SSEFrameAssembler()
                     var finished = false
                     try await Self.readLines(from: body, limit: Self.maxStreamBytes) { line in
                         try Task.checkCancellation()
-                        if line.isEmpty {
-                            if let object = Self.decodeFrame(payload) { continuation.yield(object) }
-                            payload.removeAll(keepingCapacity: true)
-                            return true
-                        }
-                        if line.hasPrefix(":") { return true }   // an SSE comment / keep-alive
-                        guard line.hasPrefix("data:") else { return true }
-                        let value = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-                        if value == "[DONE]" {
+                        let step = assembler.consume(line)
+                        if let object = step.frame { continuation.yield(object) }
+                        if step.done {
                             finished = true
                             return false
                         }
-                        payload.append(value)
                         return true
                     }
                     // A stream that ends without a trailing blank line still has a frame.
-                    if !finished, let object = Self.decodeFrame(payload) { continuation.yield(object) }
+                    if !finished, let object = assembler.flush() { continuation.yield(object) }
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: ResearchError.cancelled)
@@ -378,23 +371,16 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     /// other frame belongs to a different in-flight call and is skipped.
     private func firstMatchingEvent(in body: AsyncThrowingStream<Data, Error>,
                                     expectedID: Int?) async throws -> [String: Any]? {
-        var payload: [String] = []
+        var assembler = SSEFrameAssembler()
         var found: [String: Any]?
         do {
             try await Self.readLines(from: body, limit: Self.maxResponseBytes) { line in
-                if line.isEmpty {
-                    if let object = Self.decodeFrame(payload),
-                       Self.matches(object, expectedID: expectedID) {
-                        found = object
-                        return false
-                    }
-                    payload.removeAll(keepingCapacity: true)
-                    return true
+                let step = assembler.consume(line)
+                if let object = step.frame, Self.matches(object, expectedID: expectedID) {
+                    found = object
+                    return false
                 }
-                if line.hasPrefix(":") { return true }
-                guard line.hasPrefix("data:") else { return true }
-                payload.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
-                return true
+                return !step.done
             }
         } catch let error as ResearchError {
             throw error
@@ -404,7 +390,7 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
             throw Self.sanitized(error)
         }
         if let found { return found }
-        if let object = Self.decodeFrame(payload), Self.matches(object, expectedID: expectedID) {
+        if let object = assembler.flush(), Self.matches(object, expectedID: expectedID) {
             return object
         }
         return nil
@@ -420,12 +406,18 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     ///
     /// Chunk boundaries fall wherever the network put them, so a line can span two
     /// chunks and a chunk can hold many lines. Both cases are handled by buffering.
+    ///
+    /// The SSE grammar allows three line terminators — LF, CRLF and a lone CR — and
+    /// says a single leading byte-order mark is ignored. All three terminators are
+    /// accepted, because a gateway that emits one of the rarer two would otherwise
+    /// deliver its whole body as a single "line" at close, which decodes as nothing.
     static func readLines(from body: AsyncThrowingStream<Data, Error>,
                           limit: Int,
                           handle: (String) throws -> Bool) async throws {
         var buffer: [UInt8] = []
         buffer.reserveCapacity(4096)
         var consumed = 0
+        var checkedForBOM = false
         let started = Date()
 
         for try await chunk in body {
@@ -441,16 +433,29 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
             guard consumed <= limit else { throw ResearchError.responseTooLarge }
             buffer.append(contentsOf: chunk)
 
-            while let newline = buffer.firstIndex(of: 0x0A) {
-                var line = Array(buffer[..<newline])
-                buffer.removeFirst(newline + 1)
-                if line.last == 0x0D { line.removeLast() }   // CRLF
+            // Decided once, and only once three bytes are in hand: a first chunk shorter
+            // than the mark must not be mistaken for its absence.
+            if !checkedForBOM, buffer.count >= 3 {
+                checkedForBOM = true
+                if buffer[0] == 0xEF, buffer[1] == 0xBB, buffer[2] == 0xBF { buffer.removeFirst(3) }
+            }
+
+            while let terminator = buffer.firstIndex(where: { $0 == 0x0A || $0 == 0x0D }) {
+                // A CR that is the last byte in hand may be the first half of a CRLF whose
+                // LF is still in flight. Wait for the next chunk rather than dispatching
+                // the line now and a spurious empty line — an SSE event boundary — later.
+                if buffer[terminator] == 0x0D, terminator == buffer.count - 1 { break }
+                let line = Array(buffer[..<terminator])
+                var end = terminator + 1
+                if buffer[terminator] == 0x0D, buffer[end] == 0x0A { end += 1 }   // CRLF
+                buffer.removeFirst(end)
                 guard try handle(String(decoding: line, as: UTF8.self)) else { return }
             }
         }
-        // A final line with no trailing newline is still a line.
+        // A final line with no trailing newline is still a line; a trailing lone CR was
+        // a terminator waiting for an LF that never came.
+        if buffer.last == 0x0D { buffer.removeLast() }
         if !buffer.isEmpty {
-            if buffer.last == 0x0D { buffer.removeLast() }
             _ = try handle(String(decoding: buffer, as: UTF8.self))
         }
     }
@@ -472,6 +477,39 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         let joined = payload.joined(separator: "\n")
         guard let data = joined.data(using: .utf8) else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    /// Turns a sequence of SSE lines into decoded frames.
+    ///
+    /// A value type with no I/O, so the framing rules can be unit-tested with plain
+    /// strings. Two rules beyond the spec's blank-line dispatch:
+    ///
+    /// * `data: [DONE]` ends the stream — but it flushes the `data:` lines gathered
+    ///   before it first. A gateway that puts the last delta and the sentinel in one
+    ///   event block would otherwise lose that delta, and it is typically the one
+    ///   carrying `finish_reason`.
+    /// * Comment lines (`:` keep-alives) and fields other than `data:` are ignored.
+    struct SSEFrameAssembler {
+        private var payload: [String] = []
+
+        /// Feeds one line. Returns the frame that line completed, if any, and whether
+        /// the stream has announced its end.
+        mutating func consume(_ line: String) -> (frame: [String: Any]?, done: Bool) {
+            if line.isEmpty { return (flush(), false) }
+            if line.hasPrefix(":") { return (nil, false) }
+            guard line.hasPrefix("data:") else { return (nil, false) }
+            let value = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+            if value == "[DONE]" { return (flush(), true) }
+            payload.append(value)
+            return (nil, false)
+        }
+
+        /// Decodes and clears whatever has been gathered — the frame a blank line
+        /// dispatches, or the one a stream ends on without a trailing blank line.
+        mutating func flush() -> [String: Any]? {
+            defer { payload.removeAll(keepingCapacity: true) }
+            return HTTPTransport.decodeFrame(payload)
+        }
     }
 
     // MARK: Response checks
