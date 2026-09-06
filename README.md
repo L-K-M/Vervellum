@@ -2,7 +2,7 @@
 
 A hotkey-summoned research panel for macOS and Linux. It looks things up, then shows its work.
 
-**Latest release:** v<!-- version -->0.1.0<!-- /version --> · [Download](https://github.com/L-K-M/Vervellum/releases/latest)
+**Latest release:** v<!-- version -->0.2.0<!-- /version --> · [Download](https://github.com/L-K-M/Vervellum/releases/latest)
 
 > [!IMPORTANT]
 > LLM Disclosure: Vervellum was built with substantial help from large language models.
