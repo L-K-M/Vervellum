@@ -49,8 +49,9 @@ runs the searches and answers based on current sources.
 - **Research the selection.** An optional second shortcut opens the panel with
   whatever text you had selected, with credential-shaped values stripped out first.
 - **`/direct`** answers with no search at all, and is clearly badged as unsourced.
-- **Bring your own providers.** Any OpenAI-compatible Chat Completions endpoint,
-  and a Model Context Protocol web-search server. Keys live in your Keychain.
+- **Bring your own providers.** An OpenAI-compatible Chat Completions endpoint and
+  an HTTP MCP web-search server. Recognized tools include z.ai, Brave, Tavily, Exa
+  and SearXNG. Keys live in your Keychain on macOS.
 - **Native.** SwiftUI and AppKit, Liquid Glass on macOS 26, no dependencies.
 
 ## Getting started

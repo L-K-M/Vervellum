@@ -20,6 +20,12 @@ import Foundation
 /// The tool's real `inputSchema` is fetched rather than assumed: the model is given
 /// that schema to write its query arguments against, and the arguments are checked
 /// back against it before the call goes out.
+///
+/// The client was written against z.ai's server but is not tied to it. The search tool
+/// is resolved by *shape* — see `resolveSearchTool` — so a Brave, Tavily, Exa or
+/// SearXNG MCP server, whose tools are named differently, passes the same handshake.
+/// Everything downstream is already backend-agnostic: the planner writes arguments
+/// against whatever schema was advertised, and `EvidenceExtractor` walks any result.
 final class SearchMCPClient {
 
     /// One MCP tool as advertised by `tools/list`.
@@ -33,6 +39,19 @@ final class SearchMCPClient {
             guard let properties = inputSchema["properties"] as? [String: Any] else { return [] }
             return Set(properties.keys)
         }
+
+        /// Whether the schema declares a string property that reads as the query text.
+        /// A schema with no `properties` at all counts: a bare tool cannot be checked,
+        /// and refusing it would lose a server that simply did not publish one.
+        var hasQueryProperty: Bool {
+            guard let properties = inputSchema["properties"] as? [String: Any] else { return true }
+            return properties.contains { name, schema in
+                guard SearchMCPClient.queryPropertyNames.contains(name.lowercased()) else { return false }
+                let type = (schema as? [String: Any])?["type"]
+                return type == nil || (type as? String) == "string"
+                    || ((type as? [String])?.contains("string") ?? false)
+            }
+        }
     }
 
     private let endpoint: URL
@@ -43,8 +62,16 @@ final class SearchMCPClient {
 
     private(set) var tool: Tool?
 
-    /// The tool names z.ai has shipped for the same search capability.
-    private static let searchToolNames: Set<String> = ["web_search_prime", "webSearchPrime"]
+    /// Tool names known to be a web search: z.ai's two spellings first, then the names
+    /// the common MCP search servers ship. Matched exactly, before any guessing.
+    static let knownSearchToolNames: [String] = [
+        "web_search_prime", "webSearchPrime",
+        "brave_web_search", "tavily-search", "tavily_search", "web_search_exa",
+        "searxng_web_search", "web_search", "search",
+    ]
+
+    /// Argument names a search tool's schema uses for the query text.
+    private static let queryPropertyNames: Set<String> = ["search_query", "query", "q", "keywords", "keyword", "text"]
 
     init(endpoint: URL, apiKey: String, trace: ResearchTrace, transport: HTTPTransport = .shared) {
         self.endpoint = endpoint
@@ -76,15 +103,46 @@ final class SearchMCPClient {
 
         let listing = try await call("tools/list", params: [:])
         let tools = listing["tools"] as? [[String: Any]] ?? []
-        guard let match = tools.first(where: {
-            Self.searchToolNames.contains(($0["name"] as? String) ?? "")
-        }), let name = match["name"] as? String else {
-            throw ResearchError("The search provider did not advertise a supported web-search tool.")
+        guard let resolved = Self.resolveSearchTool(from: tools) else {
+            // Tool names are the server's public interface, not secrets, and naming them
+            // is what lets the user see that they pointed at the wrong kind of server.
+            let advertised = tools.compactMap { $0["name"] as? String }
+            let listed = advertised.isEmpty ? "no tools at all" : advertised.joined(separator: ", ")
+            throw ResearchError("The search provider did not advertise a web-search tool "
+                                + "(it offered \(listed)). Check the search endpoint in the "
+                                + "provider settings.")
         }
-        tool = Tool(name: name,
-                    description: match["description"] as? String,
-                    inputSchema: match["inputSchema"] as? [String: Any] ?? [:])
-        trace.log("Search tool ready: \(name)")
+        tool = resolved
+        trace.log("Search tool ready: \(resolved.name)")
+    }
+
+    /// Picks the web-search tool out of a `tools/list` reply.
+    ///
+    /// By shape rather than by one vendor's name, in this order:
+    ///
+    /// 1. A tool whose name is one of `knownSearchToolNames`, in that list's order.
+    /// 2. The only tool, if the server advertises exactly one — a search server with
+    ///    one tool is offering a search.
+    /// 3. The first tool whose name or description mentions "search" and whose schema
+    ///    has a string property that reads as the query, so a "search_history" or
+    ///    "research_notes" tool with no query cannot be mistaken for one.
+    ///
+    /// Pure, so the rules are unit-tested with fixture listings.
+    static func resolveSearchTool(from tools: [[String: Any]]) -> Tool? {
+        let candidates = tools.compactMap { entry -> Tool? in
+            guard let name = entry["name"] as? String, !name.isEmpty else { return nil }
+            return Tool(name: name,
+                        description: entry["description"] as? String,
+                        inputSchema: entry["inputSchema"] as? [String: Any] ?? [:])
+        }
+        for known in knownSearchToolNames {
+            if let match = candidates.first(where: { $0.name == known }) { return match }
+        }
+        if candidates.count == 1 { return candidates[0] }
+        return candidates.first { tool in
+            let text = (tool.name + " " + (tool.description ?? "")).lowercased()
+            return text.contains("search") && tool.hasQueryProperty
+        }
     }
 
     // MARK: Search
