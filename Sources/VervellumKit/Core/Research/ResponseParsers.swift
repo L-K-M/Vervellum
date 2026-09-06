@@ -101,15 +101,22 @@ enum AssessmentParser {
             // is range-checked because `Int(_: Double)` *traps*, and this value comes
             // straight from a model's JSON: a reply containing `1e308` would crash the
             // app rather than fail the turn.
-            let claimed: [Int] = (entry["sources"] as? [Any] ?? []).compactMap { value in
+            let rawSources = entry["sources"] as? [Any] ?? []
+            let claimed: [Int] = rawSources.compactMap { value in
                 if let number = value as? Int { return number }
                 // `Int(exactly:)` rather than a range check: `Double(Int.max)` rounds
                 // *up* to 2^63, so `number <= Double(Int.max)` still admits a value that
-                // `Int(_:)` then traps on.
-                if let number = value as? Double { return Int(exactly: number.rounded()) }
+                // `Int(_:)` then traps on. No rounding, either: 2.7 is not a sloppy
+                // integer but a wrong one, and rounding it onto source 3 would attribute
+                // the claim to a source the model never named.
+                if let number = value as? Double { return Int(exactly: number) }
                 if let text = value as? String { return Int(text.trimmingCharacters(in: .whitespaces)) }
                 return nil
             }
+            // A source entry that could not be read as a number at all is still a
+            // citation the model tried to make — count it as invalid rather than
+            // letting it vanish between the raw list and `claimed`.
+            if claimed.count != rawSources.count { notices.insert(.invalidCitation) }
             let valid = claimed.filter { $0 >= 1 && $0 <= sourceCount }
             if valid.count != claimed.count { notices.insert(.invalidCitation) }
 

@@ -126,6 +126,15 @@ final class AssessmentParserTests: XCTestCase {
         XCTAssertEqual(assessment.findings.first?.sourceNumbers, [1, 2])
     }
 
+    /// A fractional number is not a sloppy integer, it is a wrong one: rounding
+    /// 2.7 onto source 3 would attribute a claim to a source the model never named.
+    func testRejectsFractionalSourceNumbers() throws {
+        let object: [String: Any] = ["findings": [finding("supported", sources: [1, 2.7])]]
+        let assessment = try AssessmentParser.parse(object, sourceCount: 3)
+        XCTAssertEqual(assessment.findings.first?.sourceNumbers, [1])
+        XCTAssertTrue(assessment.notices.contains(.invalidCitation))
+    }
+
     func testSkipsUnparseableFindingsWithoutFailingTheTurn() throws {
         let entries: [[String: Any]] = [
             ["claim": "", "verdict": "supported", "sources": [1]],
