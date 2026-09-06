@@ -167,6 +167,10 @@ enum PangoMarkup {
     static func trail(_ turn: ResearchTurn) -> String {
         guard !turn.stage.isTerminal else {
             var parts: [String] = []
+            // A stopped run must say so: a truncated paragraph over an ordinary-looking
+            // summary line reads as the model simply stopping there, and nobody would
+            // know its claims were never checked.
+            if turn.stage == .cancelled { parts.append("Stopped") }
             parts.append(turn.searches.isEmpty
                          ? "no search"
                          : "\(turn.searches.count) search\(turn.searches.count == 1 ? "" : "es")")
