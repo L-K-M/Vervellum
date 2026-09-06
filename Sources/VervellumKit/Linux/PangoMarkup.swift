@@ -86,24 +86,47 @@ enum PangoMarkup {
     /// Inline markdown plus citations, as markup.
     ///
     /// Citations are resolved first, so a `[3]` becomes a link before emphasis is
-    /// parsed and cannot be mistaken for markdown link syntax.
+    /// parsed and cannot be mistaken for markdown link syntax. Emphasis is then parsed
+    /// over the *whole* run, with each citation standing in as one placeholder
+    /// character. Parsing the text between citations piece by piece would leave a bold
+    /// run that contains a citation — `**Cost [2]:**`, the commonest shape a model
+    /// writes — with its opening marker in one piece and its closing marker in
+    /// another, and both would be printed as literal asterisks.
     static func inline(_ text: String, sources: [Source]) -> String {
         let validation = CitationValidator.validate(answer: text, sourceCount: sources.count)
-        var result = ""
+        var citations: [String] = []
+        var flattened = ""
         for span in validation.spans {
             switch span {
             case .text(let value):
-                result += emphasis(value)
+                // A placeholder that arrives in the answer itself is dropped, so it
+                // cannot be read back as a citation.
+                flattened += value.replacingOccurrences(of: String(placeholder), with: "")
             case .citation(let indices, let raw):
                 let cited = indices.compactMap { sources.indices.contains($0) ? sources[$0] : nil }
-                guard let first = cited.first else { result += GTK.escape(raw); continue }
-                let label = cited.map { String($0.number) }.joined(separator: ",")
-                result += "<a href=\"\(GTK.escape(first.url))\">"
-                    + "<span size=\"small\" font_family=\"monospace\">[\(label)]</span></a>"
+                if let first = cited.first {
+                    let label = cited.map { String($0.number) }.joined(separator: ",")
+                    citations.append("<a href=\"\(GTK.escape(first.url))\">"
+                                     + "<span size=\"small\" font_family=\"monospace\">[\(label)]</span></a>")
+                } else {
+                    citations.append(GTK.escape(raw))
+                }
+                flattened.append(placeholder)
             }
+        }
+
+        var result = ""
+        var pending = citations.makeIterator()
+        for piece in emphasis(flattened).split(separator: placeholder, omittingEmptySubsequences: false) {
+            result += piece
+            if let citation = pending.next() { result += citation }
         }
         return result
     }
+
+    /// Stands in for a citation while emphasis is parsed. A private-use character:
+    /// no markdown marker, and nothing `g_markup_escape_text` touches.
+    private static let placeholder: Character = "\u{E000}"
 
     /// The inline markdown Pango can express: bold, italic and code.
     ///
