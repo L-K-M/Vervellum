@@ -13,24 +13,24 @@ problem, pick one — the other should then be closed, not rebased on top.
 
 | PR | Branch | Scope |
 | --- | --- | --- |
-| #3 | `astra2/swift62-test-compile` | CI fix: `(raw as? UInt).map(Int.init)` ambiguous on Swift 6.2 — the compile error that had main red. (Overlaps the test half of #38.) |
+| #46 | `astra2/swift62-test-compile` | CI fix: `(raw as? UInt).map(Int.init)` ambiguous on Swift 6.2 — the compile error that had main red. (Overlaps the test half of #38.) |
 | #38 | `k3/fix-archive-test-inference` | CI fix: same Swift 6.2 ambiguity **plus** the desktop-entry validation copying to a non-reverse-DNS filename, which desktop-file-utils 0.27+ rejects for a DBusActivatable entry. |
 | #22 | `k3/atx-heading-closing-sequence` | Bug: `# C#` rendered as "C" — trailing `#` stripped without the required preceding space. Core + tests. |
 | #23 | `k3/reject-fractional-citations` | Bug: `AssessmentParser` rounded a fractional source number (2.7) onto a real source (3). Core + tests. |
-| #24 | `k3/streaming-render-throttle` | Perf: macOS republished per token; coalesces prose-only updates to 10 Hz, mirroring `LinuxPanel`. `ResearchEngine`. (Same problem as #44, different implementation.) |
-| #44 | `astra2/coalesced-snapshots` | Perf: same throttle as #24 as a shared, tested Core type (`SnapshotCoalescer`); also feeds `onThreadChanged` during the stream so a mid-run crash no longer loses the partial answer. |
+| #24 | `k3/streaming-render-throttle` | Perf: macOS republished per token; coalesces prose-only updates to 10 Hz, mirroring `LinuxPanel`. `ResearchEngine`. (Same problem as #51, different implementation.) |
+| #51 | `astra2/coalesced-snapshots` | Perf: same throttle as #24 as a shared, tested Core type (`SnapshotCoalescer`); also feeds `onThreadChanged` during the stream so a mid-run crash no longer loses the partial answer. |
 | #25 | `k3/ask-from-history` | Bug: asking while the history list was open ran the research invisibly behind it. `PanelRootView`. |
-| #31 | `k3/scroll-follow` | Bug/UX: every token scrolled to bottom even while the user read back. `BottomSentinel` + "Latest" pill; follows only while pinned. (Same problem as #42.) |
-| #42 | `astra2/pinned-autoscroll` | Bug/UX: same yank as #31, fixed with preference-probe geometry and hysteresis thresholds sized above coalesced-batch growth (no ordering assumption between geometry reports and scroll decisions). |
+| #31 | `k3/scroll-follow` | Bug/UX: every token scrolled to bottom even while the user read back. `BottomSentinel` + "Latest" pill; follows only while pinned. (Same problem as #49.) |
+| #49 | `astra2/pinned-autoscroll` | Bug/UX: same yank as #31, fixed with preference-probe geometry and hysteresis thresholds sized above coalesced-batch growth (no ordering assumption between geometry reports and scroll decisions). |
 | #32 | `k3/markdown-tables` | Feature: pipe tables in `MarkdownParser`, `Grid` renderer on macOS, aligned `<tt>` in Pango. 8 tests. |
 | #33 | `k3/turn-polish` | Feature: "Ask again" on completed turns; live elapsed clock in the process trail. |
 | #34 | `k3/empty-state-examples` | Feature: clickable example questions seed the composer. |
-| #35 | `k3/history-search-index` | Perf: history search lowercased every answer per keystroke; `ThreadSearchIndex` builds one haystack per thread on library change. (Same problem as #39.) |
-| #39 | `astra2/history-search-perf` | Perf: same cost as #35, fixed allocation-free with `range(of:options:.caseInsensitive)` — no index structure to keep warm. Behavior pinned by tests. |
+| #35 | `k3/history-search-index` | Perf: history search lowercased every answer per keystroke; `ThreadSearchIndex` builds one haystack per thread on library change. (Same problem as #47.) |
+| #47 | `astra2/history-search-perf` | Perf: same cost as #35, fixed allocation-free with `range(of:options:.caseInsensitive)` — no index structure to keep warm. Behavior pinned by tests. |
 | #36 | `k3/completion-signal` | Feature: menu-bar hourglass while running; soft sound when a run completes with the panel closed. |
-| #41 | `astra2/search-progress` | Feature: live "Searching the web · 2 of 3" in the running trail (both platforms) via `ResearchTurn.searchesCompleted`; first-ever `ResearchTurn` field addition, with the hand-written tolerant `init(from:)` that keeps every existing threads.json loading. |
-| #43 | `astra2/composer-fixes` | Bug: composer height computed against the unclamped width preference (wraps early on clamped panels) — now measured from the row. Also clears the redaction banner on panel hide. |
-| #45 | `astra2/queued-question` | Feature: the composer stays editable while a run is in flight; a submit mid-run queues the question (one slot, newest wins, chip + cancel), asked the moment the answer lands. macOS + Linux + engine. |
+| #48 | `astra2/search-progress` | Feature: live "Searching the web · 2 of 3" in the running trail (both platforms) via `ResearchTurn.searchesCompleted`; first-ever `ResearchTurn` field addition, with the hand-written tolerant `init(from:)` that keeps every existing threads.json loading. |
+| #50 | `astra2/composer-fixes` | Bug: composer height computed against the unclamped width preference (wraps early on clamped panels) — now measured from the row. Also clears the redaction banner on panel hide. |
+| #52 | `astra2/queued-question` | Feature: the composer stays editable while a run is in flight; a submit mid-run queues the question (one slot, newest wins, chip + cancel), asked the moment the answer lands. macOS + Linux + engine. |
 
 Notes on verification: Core changes were tested locally on Linux (Swift 6.2.3,
 198+ tests green). macOS view changes could not be compiled locally (no Mac);
@@ -38,7 +38,7 @@ they are deliberately small and idiomatic. Fork PRs (astra2/*) currently get
 **neither** the GLM review (workflow guard requires same-repo branches) nor CI
 (workflows need maintainer approval for first-time fork contributors) — approving
 one run of CI on them is worthwhile before merging the view-layer PRs
-(#42/#43/#45).
+(#49/#50/#52).
 
 ## Bugs not yet fixed
 
@@ -71,7 +71,7 @@ one run of CI on them is worthwhile before merging the view-layer PRs
 ## Performance
 
 - **P2 — `TurnView.validation` recomputes per render.** Mostly covered by the
-  throttle PRs (#24/#44); if profiling still shows it, memoize per answer
+  throttle PRs (#24/#51); if profiling still shows it, memoize per answer
   string.
 - **P3 — `ComposerView.height` builds a text stack per keystroke.** Bounded and
   small; only revisit if the composer ever handles large pastes.
