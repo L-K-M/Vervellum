@@ -65,7 +65,8 @@ ad-hoc signed, the grant is reset by every update. Vervellum says so when that h
 Vervellum writes diagnostic lines to the unified system log under its own subsystem:
 stage names, durations, counts and sizes, tagged with a short per-run identifier.
 Questions, answers, search queries, retrieved content, API keys and provider error text
-are deliberately excluded, so the log is safe to attach to a bug report.
+are deliberately excluded. Result diagnostics print only known schema field names and
+aggregate counts; arbitrary field names are omitted because they can contain secrets.
 
 ## The keyboard shortcut on Linux
 

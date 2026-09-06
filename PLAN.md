@@ -287,7 +287,8 @@ rules:
 3. **Provider errors never escape verbatim.** Gateway messages have been observed
    echoing request data and credentials, so every underlying error is caught and
    replaced with a message Vervellum wrote. The logs get a type name, never a
-   description.
+   description. Search diagnostics print only known schema field names and aggregate
+   counts; arbitrary keys are omitted because they can contain secrets too.
 
 Keys live in the login Keychain, never in preferences and never in a thread. Endpoints
 must be HTTPS (with a loopback exception for a local model server, which has no
