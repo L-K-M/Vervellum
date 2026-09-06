@@ -223,7 +223,9 @@ streamed answer while stage 4 runs, so the latency that matters is already hidde
 If assessment fails, the completed answer remains with an `assessmentUnavailable`
 notice. That qualification also travels with follow-up history. Missing or unknown
 finish reasons, malformed SSE data, and provider error envelopes instead leave the
-answer incomplete; only `finish_reason: stop` completes a model reply. Retained prose
+answer incomplete; only `finish_reason: stop` completes a model reply. After a finish
+reason, only usage-only frames are accepted; additional choices, even empty ones,
+are protocol errors rather than evidence of another completed answer. Retained prose
 is citation-validated after cancellation, failure, and checkpoint recovery.
 
 **Why searches are sequential.** The MCP session is stateful — one JSON-RPC id

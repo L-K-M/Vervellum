@@ -21,9 +21,8 @@ import Foundation
 /// that schema to write its query arguments against, and the arguments are checked
 /// back against it before the call goes out.
 ///
-/// The client was written against z.ai's server but is not tied to it. The search tool
-/// is resolved by *shape* — see `resolveSearchTool` — so a Brave, Tavily, Exa or
-/// SearXNG MCP server, whose tools are named differently, passes the same handshake.
+/// Recognized names cover z.ai, Brave, Tavily, Exa and SearXNG. Unknown operations
+/// are never inferred from descriptions or query-shaped arguments.
 /// Everything downstream is already backend-agnostic: the planner writes arguments
 /// against whatever schema was advertised, and `EvidenceExtractor` walks any result.
 final class SearchMCPClient {
@@ -90,8 +89,8 @@ final class SearchMCPClient {
         let tools = listing["tools"] as? [[String: Any]] ?? []
         guard let resolved = Self.resolveSearchTool(from: tools) else {
             // Names are provider-controlled too; never copy them into diagnostics.
-            throw ResearchError("The search provider did not advertise an unambiguous web-search tool. "
-                                + "Check the search endpoint in Settings.")
+            throw ResearchError("The search provider did not advertise a recognized web-search tool name. "
+                                + "Check the endpoint's compatibility with the supported search providers.")
         }
         tool = resolved
         trace.log("Search tool ready")
