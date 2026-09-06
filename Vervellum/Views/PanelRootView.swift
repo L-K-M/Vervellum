@@ -257,10 +257,14 @@ struct PanelRootView: View {
             return
         case .ask(let question):
             showsHelp = false
+            // The composer is live while the history list is open, and a question
+            // asked from there must not run invisibly behind it.
+            showsHistory = false
             draft = ""
             engine.ask(question, mode: .research)
         case .direct(let question):
             showsHelp = false
+            showsHistory = false
             draft = ""
             engine.ask(question, mode: .direct)
         case .newThread:
