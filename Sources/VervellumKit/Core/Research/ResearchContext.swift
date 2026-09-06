@@ -74,10 +74,18 @@ enum ResearchContext {
     /// One prior turn as the model sees it: the question, a shortened answer, and
     /// the domains that backed it. Verdicts are included because a follow-up like
     /// "why is that uncertain?" is unanswerable without them.
+    ///
+    /// The answer goes in with its citation markers removed. A `[2]` in last turn's
+    /// answer indexed *last turn's* source list; shown to the model verbatim, it is an
+    /// invitation to restate the claim with the same marker, which `CitationValidator`
+    /// would accept as a citation of *this* turn's source 2 — a wrong attribution
+    /// wearing a clean badge, which is exactly what citing by number is meant to make
+    /// impossible. The domains that backed the earlier answer travel separately.
     private static func historyEntry(_ turn: ResearchTurn) -> [String: Any] {
         var entry: [String: Any] = [
             "question": turn.question,
-            "answer": shorten(turn.answer, to: maxHistoricAnswerCharacters),
+            "answer": shorten(withoutCitationMarkers(turn.answer, sourceCount: turn.sources.count),
+                              to: maxHistoricAnswerCharacters),
         ]
         let domains = Array(Set(turn.sources.map(\.domain))).sorted().prefix(8)
         if !domains.isEmpty { entry["source_domains"] = Array(domains) }
@@ -113,6 +121,26 @@ enum ResearchContext {
             entries.append(entry)
         }
         return (entries, sources.count - entries.count)
+    }
+
+    /// The answer with every `[n]` marker removed, and the space that carried it.
+    ///
+    /// `sourceCount` is the *earlier* turn's, so only markers that were real citations
+    /// then are stripped; a bracketed number the validator would not have read as a
+    /// citation (inside code, or out of range) is left as the text it was.
+    static func withoutCitationMarkers(_ answer: String, sourceCount: Int) -> String {
+        let spans = CitationValidator.validate(answer: answer, sourceCount: sourceCount).spans
+        var result = ""
+        for span in spans {
+            switch span {
+            case .text(let text):
+                result += text
+            case .citation:
+                // Drop the space before the marker too, so "true [1]." reads "true.".
+                while result.last == " " { result.removeLast() }
+            }
+        }
+        return result
     }
 
     /// Serialized size of a payload, which is what the provider actually charges

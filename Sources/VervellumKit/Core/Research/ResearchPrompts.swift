@@ -96,6 +96,9 @@ enum ResearchPrompts {
         so a reader can tell instantly which parts the evidence actually backs. A \
         bracketed number inside code, fenced or inline, is code and is not read as a \
         citation: put the citation in the sentence before the code, never inside it.
+        The numbered evidence is this turn's alone: earlier answers in the thread are \
+        supplied without their citations, and nothing from an earlier turn may be \
+        cited unless it appears in the evidence supplied now.
 
         Where sources conflict, say so and attribute each side to its number. Do not \
         average them into a false consensus. Where a search summary is too thin to \
