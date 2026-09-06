@@ -23,6 +23,9 @@ struct PanelRootView: View {
     @State private var redactionNote: Int?
     /// Earlier questions, newest first, for ↑/↓ recall in the composer.
     @State private var recallIndex: Int?
+    /// Whether the thread is scrolled to its end. Streams auto-scroll only while
+    /// pinned, so reading back during an answer is never undone by the next token.
+    @State private var isPinnedToBottom = true
 
     /// Whether the providers are configured, sampled rather than computed.
     ///
@@ -133,13 +136,24 @@ struct PanelRootView: View {
                     }
                     // A scroll anchor rather than scrolling to the last turn: the last
                     // turn's own id points at its *top*, so pinning to it would jump
-                    // backwards every time the answer grew.
+                    // backwards every time the answer grew. The sentinel it carries is
+                    // what reports whether the user is still at the bottom.
                     Color.clear.frame(height: 1).id(Self.bottomAnchor)
+                        .background(BottomSentinel { pinned in
+                            isPinnedToBottom = pinned
+                        })
                 }
                 .padding(.horizontal, PanelTheme.Space.gutter)
                 .padding(.vertical, PanelTheme.Space.large)
             }
+            .overlay(alignment: .bottom) {
+                if !isPinnedToBottom, engine.isRunning {
+                    jumpToLatest(proxy)
+                }
+            }
+            .animation(PanelTheme.Motion.disclosure, value: isPinnedToBottom)
             .onChange(of: engine.thread.turns.last?.answer) { _, _ in
+                guard isPinnedToBottom else { return }
                 scrollToBottom(proxy)
             }
             .onChange(of: engine.thread.turns.count) { _, _ in
@@ -154,6 +168,26 @@ struct PanelRootView: View {
         // Unanimated: an animated scroll re-targeted on every streamed token fights
         // itself and the text visibly judders.
         proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+    }
+
+    /// The way back to the stream after scrolling up mid-answer. Tapping it scrolls,
+    /// and the sentinel then re-pins, so follow mode resumes on its own.
+    private func jumpToLatest(_ proxy: ScrollViewProxy) -> some View {
+        Button {
+            scrollToBottom(proxy)
+        } label: {
+            Label("Latest", systemImage: "arrow.down")
+                .font(PanelTheme.Font.caption)
+                .padding(.horizontal, PanelTheme.Space.medium)
+                .padding(.vertical, PanelTheme.Space.small)
+                .background(PanelTheme.Palette.accent,
+                            in: Capsule(style: .continuous))
+                .foregroundStyle(.white)
+        }
+        .buttonStyle(.plain)
+        .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+        .padding(.bottom, PanelTheme.Space.small)
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
 
     // MARK: Composer
