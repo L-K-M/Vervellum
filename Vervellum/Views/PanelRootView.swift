@@ -48,6 +48,7 @@ struct PanelRootView: View {
             if showsHistory {
                 HistoryView(store: store,
                             onOpen: openThread,
+                            onDelete: deleteThread,
                             onClose: { showsHistory = false })
             } else {
                 thread
@@ -89,6 +90,15 @@ struct PanelRootView: View {
         // state before the user had typed anything. The window tells us when it closes.
         .onReceive(NotificationCenter.default.publisher(for: .vervellumSettingsDidClose)) { _ in
             refreshConfiguredState()
+            // "Delete All" in Settings empties the library but not the engine's copy of
+            // the open thread, and the next change that thread published — a follow-up,
+            // a Stop — would write the deleted thread straight back. A stored thread
+            // that is no longer stored has been deleted; let it go.
+            if store.isHistoryEnabled, !engine.thread.isEmpty,
+               !store.library.threads.contains(where: { $0.id == engine.thread.id }) {
+                engine.startNewThread()
+                recallIndex = nil
+            }
         }
         // Command shortcuts raised by the panel window. See `PanelCommand`.
         .onReceive(NotificationCenter.default.publisher(for: .vervellumPanelCommand)) { note in
@@ -332,6 +342,18 @@ struct PanelRootView: View {
         draft = ""
         recallIndex = nil
         engine.startNewThread()
+    }
+
+    /// Deleting the open thread must take it out of the engine too, or the next
+    /// change the engine publishes writes the deleted thread back into the library.
+    /// The history list stays open and the draft is kept: the user is tidying, not
+    /// starting over.
+    private func deleteThread(_ thread: ResearchThread) {
+        store.delete(id: thread.id)
+        if engine.thread.id == thread.id {
+            engine.startNewThread()
+            recallIndex = nil
+        }
     }
 
     private func openThread(_ thread: ResearchThread) {

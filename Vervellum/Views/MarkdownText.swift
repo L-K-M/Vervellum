@@ -39,6 +39,11 @@ struct MarkdownText: View {
     private var attributed: AttributedString {
         let (masked, citations) = Self.mask(markdown, sources: sources)
         var result = Self.parseInline(masked)
+        // A link the model wrote is exactly what the citation rule forbids: evidence
+        // is cited by number, and a URL in the prose is flagged, never followed. The
+        // markdown parser turns `[text](url)` into a clickable run, so the attribute
+        // is dropped and the text kept. The citation chips below are the only links.
+        result.link = nil
         Self.substitute(citations, in: &result, scale: scale)
         return result
     }

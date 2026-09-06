@@ -10,6 +10,9 @@ struct HistoryView: View {
 
     @ObservedObject var store: ThreadStore
     var onOpen: (ResearchThread) -> Void
+    /// Deletion is the root view's, not the store's alone: the thread may be the one
+    /// the engine is showing, and only the root view can take it out of both.
+    var onDelete: (ResearchThread) -> Void
     var onClose: () -> Void
 
     @State private var query = ""
@@ -71,7 +74,7 @@ struct HistoryView: View {
                 ForEach(results) { thread in
                     HistoryRow(thread: thread,
                                onOpen: { onOpen(thread) },
-                               onDelete: { store.delete(id: thread.id) })
+                               onDelete: { onDelete(thread) })
                 }
                 if results.isEmpty {
                     Text("Nothing matches “\(query)”.")
