@@ -1,0 +1,84 @@
+import XCTest
+#if canImport(VervellumKit)
+// Linux: the portable code is its own SwiftPM module.
+@testable import VervellumKit
+#else
+// macOS: it is compiled straight into the app target, so there is no separate module.
+@testable import Vervellum
+#endif
+
+/// Picking the web-search tool out of a `tools/list` reply, by shape rather than by
+/// one vendor's name.
+final class SearchMCPClientTests: XCTestCase {
+
+    private func tool(_ name: String, description: String? = nil,
+                      properties: [String: Any]? = ["query": ["type": "string"]]) -> [String: Any] {
+        var entry: [String: Any] = ["name": name]
+        if let description { entry["description"] = description }
+        if let properties { entry["inputSchema"] = ["type": "object", "properties": properties] }
+        return entry
+    }
+
+    func testPrefersTheKnownZAIName() {
+        let tools = [tool("fetch_page"), tool("web_search_prime", properties: ["search_query": ["type": "string"]])]
+        XCTAssertEqual(SearchMCPClient.resolveSearchTool(from: tools)?.name, "web_search_prime")
+    }
+
+    /// The names the common MCP search servers ship all pass the handshake.
+    func testAcceptsOtherVendorsKnownNames() {
+        for name in ["brave_web_search", "tavily-search", "web_search_exa", "searxng_web_search"] {
+            let tools = [tool("brave_local_search"), tool(name)]
+            XCTAssertEqual(SearchMCPClient.resolveSearchTool(from: tools)?.name, name, name)
+        }
+    }
+
+    /// A server that offers exactly one tool is offering a search, whatever it is called.
+    func testASingleUnknownToolIsAccepted() {
+        let tools = [tool("lookup", properties: ["q": ["type": "string"]])]
+        XCTAssertEqual(SearchMCPClient.resolveSearchTool(from: tools)?.name, "lookup")
+    }
+
+    /// Among several unknown tools, the one that says "search" and takes a query wins.
+    func testFallsBackToAToolThatSearchesWithAQuery() {
+        let tools = [
+            tool("get_page", description: "Fetch a URL", properties: ["url": ["type": "string"]]),
+            tool("find_pages", description: "Search the web", properties: ["query": ["type": "string"]]),
+        ]
+        XCTAssertEqual(SearchMCPClient.resolveSearchTool(from: tools)?.name, "find_pages")
+    }
+
+    /// "search" in the name is not enough on its own: a tool with no query argument is
+    /// not a web search, and choosing it would send the model's query into the void.
+    func testAToolThatSearchesWithoutAQueryIsNotChosen() {
+        let tools = [
+            tool("search_history", properties: ["days": ["type": "integer"]]),
+            tool("fetch_page", properties: ["url": ["type": "string"]]),
+        ]
+        XCTAssertNil(SearchMCPClient.resolveSearchTool(from: tools))
+    }
+
+    func testAQueryPropertyMayBeAUnionType() {
+        let tools = [tool("a"), tool("web_search_thing", description: "search",
+                                     properties: ["query": ["type": ["string", "null"]]])]
+        XCTAssertEqual(SearchMCPClient.resolveSearchTool(from: tools)?.name, "web_search_thing")
+    }
+
+    /// A schema without `properties` cannot be checked and is given the benefit of the
+    /// doubt.
+    func testAToolWithoutASchemaIsAccepted() {
+        let tools = [tool("a"), tool("web_search_beta", description: "search", properties: nil)]
+        XCTAssertEqual(SearchMCPClient.resolveSearchTool(from: tools)?.name, "web_search_beta")
+    }
+
+    func testAnEmptyOrNamelessListingResolvesNothing() {
+        XCTAssertNil(SearchMCPClient.resolveSearchTool(from: []))
+        XCTAssertNil(SearchMCPClient.resolveSearchTool(from: [["description": "search"]]))
+    }
+
+    /// The resolved tool keeps the schema the model will be asked to follow.
+    func testTheResolvedToolCarriesItsSchema() throws {
+        let tools = [tool("web_search_prime", properties: ["search_query": ["type": "string"]])]
+        let resolved = try XCTUnwrap(SearchMCPClient.resolveSearchTool(from: tools))
+        XCTAssertEqual(resolved.propertyKeys, ["search_query"])
+    }
+}

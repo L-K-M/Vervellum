@@ -45,7 +45,9 @@ the product.
   text you had selected — with credential-shaped values stripped out first.
 - **`/direct`** answers with no search at all, clearly badged as unsourced.
 - **Bring your own providers.** Any OpenAI-compatible Chat Completions endpoint, and a
-  Model Context Protocol web-search server. Keys live in your Keychain.
+  Model Context Protocol web-search server — z.ai's by default; a Brave, Tavily, Exa or
+  SearXNG MCP server is recognised by the shape of the tool it advertises. Keys live in
+  your Keychain.
 - **Native.** SwiftUI and AppKit, Liquid Glass on macOS 26, no dependencies at all.
 
 ## Getting started
