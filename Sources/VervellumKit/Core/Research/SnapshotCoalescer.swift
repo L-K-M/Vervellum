@@ -1,5 +1,4 @@
 import Foundation
-import Dispatch
 
 /// Rate-limits the snapshots a streaming research turn produces before they reach the
 /// UI, without ever delaying the moments the user is waiting for.
@@ -25,8 +24,8 @@ import Dispatch
 /// owner to apply directly after `discardPending()` so nothing scheduled can overwrite
 /// the terminal state.
 ///
-/// **Main-thread only.** Both front ends deliver runner callbacks onto their UI thread
-/// before reaching this type; the lock-free state below relies on that.
+/// Caller-serialized: the injected scheduler must use the same queue as `receive`.
+/// Core never chooses a UI queue; GLib does not drain DispatchQueue.main.
 final class SnapshotCoalescer {
 
     /// What separates a snapshot the UI must see at once from one that can wait a
@@ -34,17 +33,15 @@ final class SnapshotCoalescer {
     ///
     /// Pure and static so it can be unit-tested apart from the scheduling.
     static func isStructural(_ new: ResearchTurn, relativeTo old: ResearchTurn) -> Bool {
-        new.stage != old.stage
-            || new.reading != old.reading
-            || new.searches != old.searches
-            || new.sources.count != old.sources.count
-            || new.findings.count != old.findings.count
-            || new.limitations != old.limitations
-            || new.followups != old.followups
-            || new.notices != old.notices
-            || new.failure != old.failure
-            || new.duration != old.duration
+        // Compare every field except prose so future progress fields cannot be missed.
+        var incoming = new
+        var previous = old
+        incoming.answer = ""
+        previous.answer = ""
+        return incoming != previous
     }
+
+    static let defaultInterval: TimeInterval = 0.1
 
     private let interval: TimeInterval
     private let now: () -> Date
@@ -63,13 +60,11 @@ final class SnapshotCoalescer {
     ///   - interval: the maximum time an answer-growth snapshot may wait.
     ///   - now: clock, injectable for tests.
     ///   - after: schedules work after a delay on the caller's queue, injectable for
-    ///     tests. Default is the main dispatch queue, which is the queue this type is
-    ///     documented to live on.
+    ///     tests. The front end supplies its own UI-loop scheduler.
     ///   - publish: receives the snapshots that may be shown.
-    init(interval: TimeInterval = 0.1,
+    init(interval: TimeInterval = SnapshotCoalescer.defaultInterval,
          now: @escaping () -> Date = { Date() },
-         after: @escaping (TimeInterval, @escaping () -> Void) -> Void =
-             { delay, work in DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work) },
+         after: @escaping (TimeInterval, @escaping () -> Void) -> Void,
          publish: @escaping (ResearchTurn) -> Void) {
         self.interval = interval
         self.now = now
@@ -120,6 +115,7 @@ final class SnapshotCoalescer {
         generation += 1
         flushScheduled = false
         pending = nil
+        previous = nil
     }
 
     // MARK: Private

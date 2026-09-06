@@ -238,6 +238,7 @@ final class LinuxPanel {
         runningTurnID = turn.id
         isRunning = true
         scrollToNewest = true
+        environment.archive.save(persistableThread)
         render()
 
         // Informational turns (`/help`) are filtered out again by `ResearchContext`;
@@ -262,7 +263,8 @@ final class LinuxPanel {
     }
 
     private func apply(_ snapshot: ResearchTurn) {
-        guard let index = thread.turns.firstIndex(where: { $0.id == snapshot.id }) else { return }
+        guard snapshot.id == runningTurnID,
+              let index = thread.turns.firstIndex(where: { $0.id == snapshot.id }) else { return }
         let previous = thread.turns[index]
         thread.turns[index] = snapshot
         thread.updatedAt = Date()
@@ -271,11 +273,9 @@ final class LinuxPanel {
         // Anything structural — a new stage, sources arriving, verdicts landing — is
         // drawn immediately, because those are the moments the user is waiting for. The
         // final frame is guaranteed by `finish(_:)`, which always draws.
-        let structural = previous.stage != snapshot.stage
-            || previous.sources.count != snapshot.sources.count
-            || previous.findings.count != snapshot.findings.count
-            || previous.notices != snapshot.notices
-        guard structural || Date().timeIntervalSince(lastRender) >= 0.1 else { return }
+        let structural = SnapshotCoalescer.isStructural(snapshot, relativeTo: previous)
+        guard structural || Date().timeIntervalSince(lastRender) >= SnapshotCoalescer.defaultInterval else { return }
+        environment.archive.save(persistableThread)
         render()
     }
 
@@ -379,7 +379,7 @@ final class LinuxPanel {
         }
         // One click re-asks, as on macOS. Retyping the question was the only recourse
         // before, and the composer had been cleared on submit.
-        if turn.failure != nil || (turn.stage == .cancelled && turn.answer.isEmpty), !turn.question.isEmpty {
+        if turn.failure != nil || turn.stage == .cancelled, !turn.question.isEmpty {
             let retry = GTK.button("Try again") { [weak self] in self?.retry(turn) }
             gtk_widget_set_halign(retry, GTK_ALIGN_START)
             GTK.append(box, retry)

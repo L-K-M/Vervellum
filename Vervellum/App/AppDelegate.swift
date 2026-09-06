@@ -33,9 +33,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let selectionHotkey = CarbonHotkey(identifier: 2)
     private var statusItem: NSStatusItem?
     private var runningObserver: AnyCancellable?
-    /// Tracks the last run state so a completion — not the publisher's initial
-    /// emission — can be told apart from it.
-    private var wasRunning = false
 
     // MARK: Lifecycle
 
@@ -71,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        engine.flushProgress()
         store.flush()
         summonHotkey.unregister()
         selectionHotkey.unregister()
@@ -98,7 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.isBusy = { [weak self] in self?.engine.isRunning ?? false }
         // Dismissing the panel is the natural moment to make the thread durable: the
         // store debounces writes by a second, and the user may quit right after.
-        controller.onDismiss = { [weak self] in self?.store.flush() }
+        controller.onDismiss = { [weak self] in
+            self?.engine.flushProgress()
+            self?.store.flush()
+        }
         controller.selectionProvider = { SelectedTextReader.selectedText() }
         controller.onSeedComposer = { [weak self] text in
             // Redact before the text reaches the composer, not before it is sent: the
@@ -258,26 +259,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
-    /// Mirrors the run state in the menu bar, and closes the loop when the panel
-    /// was dismissed mid-run: the status item shows a busy glyph while research is
-    /// in flight, and a soft tick sounds when it finishes *with the panel closed*.
-    /// A user watching the panel needs no sound; a user who closed it mid-run does.
+    /// Keep run state visible when the panel is hidden, without unsolicited sounds.
     private func observeRunningState() {
         runningObserver = engine.$isRunning
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isRunning in
                 guard let self else { return }
-                let finishedWhileHidden = self.wasRunning && !isRunning
-                    && self.panelController?.isOpen == false
-                self.wasRunning = isRunning
                 let symbol = isRunning ? "hourglass" : "text.magnifyingglass"
                 self.statusItem?.button?.image = NSImage(
                     systemSymbolName: symbol, accessibilityDescription: "Vervellum")
                 self.statusItem?.button?.image?.isTemplate = true
-                if finishedWhileHidden {
-                    NSSound(named: NSSound.Name("Tink"))?.play()
-                }
             }
     }
 

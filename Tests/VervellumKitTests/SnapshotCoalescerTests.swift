@@ -42,7 +42,8 @@ final class SnapshotCoalescerTests: XCTestCase {
 
     func testTheFirstSnapshotPublishesImmediately() {
         var published: [String] = []
-        let coalescer = SnapshotCoalescer(publish: { published.append($0.answer) })
+        let coalescer = SnapshotCoalescer(after: { _, _ in XCTFail("Unexpected delay") },
+                                          publish: { published.append($0.answer) })
 
         coalescer.receive(turn(answer: "a"))
 
@@ -51,7 +52,8 @@ final class SnapshotCoalescerTests: XCTestCase {
 
     func testAStageChangePublishesImmediately() {
         var published: [ResearchStage] = []
-        let coalescer = SnapshotCoalescer(publish: { published.append($0.stage) })
+        let coalescer = SnapshotCoalescer(after: { _, _ in XCTFail("Unexpected delay") },
+                                          publish: { published.append($0.stage) })
 
         coalescer.receive(turn(answer: "a", stage: .answering))
         coalescer.receive(turn(answer: "ab", stage: .assessing))
@@ -61,7 +63,8 @@ final class SnapshotCoalescerTests: XCTestCase {
 
     func testSourcesArrivingIsStructural() {
         var published: [Int] = []
-        let coalescer = SnapshotCoalescer(publish: { published.append($0.sources.count) })
+        let coalescer = SnapshotCoalescer(after: { _, _ in XCTFail("Unexpected delay") },
+                                          publish: { published.append($0.sources.count) })
 
         coalescer.receive(turn(answer: "a"))
         var withSource = turn(answer: "ab")

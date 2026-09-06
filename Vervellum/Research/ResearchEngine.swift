@@ -43,9 +43,9 @@ final class ResearchEngine: ObservableObject {
         self.preferences = preferences
         self.secrets = secrets
         self.logSink = logSink
-        coalescer = SnapshotCoalescer(publish: { [weak self] turn in
-            self?.applyNow(turn)
-        })
+        coalescer = SnapshotCoalescer(
+            after: { delay, work in DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work) },
+            publish: { [weak self] turn in self?.applyNow(turn) })
     }
 
     // MARK: Thread control
@@ -66,6 +66,8 @@ final class ResearchEngine: ObservableObject {
     /// changing their mind.
     func cancel() {
         guard let task else { return }
+        coalescer?.flush()
+        coalescer?.discardPending()
         task.cancel()
         self.task = nil
         if let id = runningTurnID {
@@ -73,6 +75,7 @@ final class ResearchEngine: ObservableObject {
                 if !turn.stage.isTerminal {
                     turn.stage = .cancelled
                     turn.duration = Date().timeIntervalSince(turn.askedAt)
+                    turn.applyCitationValidation(sourceCount: turn.sources.count)
                 }
             }
         }
@@ -142,13 +145,15 @@ final class ResearchEngine: ObservableObject {
     /// A snapshot from the running turn. Runs on the main queue (see `ask`), which is
     /// the queue the coalescer is documented to live on.
     private func apply(_ snapshot: ResearchTurn) {
+        guard snapshot.id == runningTurnID else { return }
         coalescer?.receive(snapshot)
     }
 
     /// Publishes a snapshot directly — the coalescer's flush path and `finish`'s final
     /// turn both land here.
     private func applyNow(_ snapshot: ResearchTurn) {
-        guard let index = thread.turns.firstIndex(where: { $0.id == snapshot.id }) else { return }
+        guard snapshot.id == runningTurnID,
+              let index = thread.turns.firstIndex(where: { $0.id == snapshot.id }) else { return }
         thread.turns[index] = snapshot
         thread.updatedAt = Date()
         // Published here rather than only at ask/finish so the debounced archive keeps
@@ -164,17 +169,22 @@ final class ResearchEngine: ObservableObject {
     }
 
     private func finish(_ id: UUID, with turn: ResearchTurn) {
+        // A cancelled run cannot overwrite Stop or discard a newer run's pending work.
+        guard runningTurnID == id else { return }
         // The finished turn is the whole truth; any coalesced snapshot still waiting is
         // older by definition, and a scheduled flush firing after this would otherwise
         // repaint the turn as mid-answer.
         coalescer?.discardPending()
         applyNow(turn)
-        if runningTurnID == id {
-            runningTurnID = nil
-            isRunning = false
-            task = nil
-        }
+        runningTurnID = nil
+        isRunning = false
+        task = nil
         publishChange()
+    }
+
+    /// Make the latest displayed progress durable before dismissal or termination.
+    func flushProgress() {
+        coalescer?.flush()
     }
 
     private func publishChange() {
