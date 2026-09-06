@@ -426,7 +426,19 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         var buffer: [UInt8] = []
         buffer.reserveCapacity(4096)
         var consumed = 0
+        var followsCarriageReturn = false
+        var isFirstLine = true
         let started = Date()
+
+        func emitLine() throws -> Bool {
+            var line = String(decoding: buffer, as: UTF8.self)
+            buffer.removeAll(keepingCapacity: true)
+            if isFirstLine {
+                isFirstLine = false
+                if line.hasPrefix(SSELine.byteOrderMark) { line.removeFirst() }
+            }
+            return try handle(line)
+        }
 
         for try await chunk in body {
             // A wall-clock deadline as well as a size cap. The session's timeout is an
@@ -439,20 +451,32 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
             }
             consumed += chunk.count
             guard consumed <= limit else { throw ResearchError.responseTooLarge }
-            buffer.append(contentsOf: chunk)
 
-            while let newline = buffer.firstIndex(of: 0x0A) {
-                var line = Array(buffer[..<newline])
-                buffer.removeFirst(newline + 1)
-                if line.last == 0x0D { line.removeLast() }   // CRLF
-                guard try handle(String(decoding: line, as: UTF8.self)) else { return }
+            // Visit each byte once and keep only the unfinished line. Prefix removal
+            // per newline repeatedly copied the rest of a large chunk.
+            for byte in chunk {
+                if followsCarriageReturn, byte == SSELine.lineFeed {
+                    followsCarriageReturn = false
+                    continue
+                }
+                followsCarriageReturn = byte == SSELine.carriageReturn
+
+                // SSE permits CR, LF, and CRLF, even across separate chunks.
+                if byte == SSELine.carriageReturn || byte == SSELine.lineFeed {
+                    guard try emitLine() else { return }
+                } else {
+                    buffer.append(byte)
+                }
             }
         }
         // A final line with no trailing newline is still a line.
-        if !buffer.isEmpty {
-            if buffer.last == 0x0D { buffer.removeLast() }
-            _ = try handle(String(decoding: buffer, as: UTF8.self))
-        }
+        if !buffer.isEmpty { _ = try emitLine() }
+    }
+
+    private enum SSELine {
+        static let carriageReturn: UInt8 = 0x0D
+        static let lineFeed: UInt8 = 0x0A
+        static let byteOrderMark = "\u{FEFF}"
     }
 
     /// Whether an SSE frame is the response being waited for.
