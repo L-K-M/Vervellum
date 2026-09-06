@@ -145,7 +145,10 @@ final class ThreadArchiveTests: XCTestCase {
         // Three-way cast: Foundation boxes this as `NSNumber` on Darwin but as a plain
         // `UInt` in swift-corelibs-foundation, and this test runs on both.
         let raw = attributes[.posixPermissions]
-        let permissions = (raw as? NSNumber)?.intValue ?? (raw as? UInt).map(Int.init) ?? (raw as? Int) ?? -1
+        // `Int($0)` rather than `Int.init`: on newer toolchains the bare reference is
+        // ambiguous between `init(_:)` and `init(bitPattern:)`, which breaks compiling
+        // the shared tests on Swift 6.2 (CI's 6.1 image still accepts it).
+        let permissions = (raw as? NSNumber)?.intValue ?? (raw as? UInt).map { Int($0) } ?? (raw as? Int) ?? -1
         XCTAssertNotEqual(permissions, -1, "could not read the file's permissions")
         XCTAssertEqual(permissions & 0o077, 0)
     }
