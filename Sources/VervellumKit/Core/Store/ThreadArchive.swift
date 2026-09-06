@@ -24,6 +24,8 @@ final class ThreadArchive {
     var onChange: (() -> Void)?
 
     private(set) var library: ThreadLibrary
+    // Late runner snapshots retain their IDs. Erasure must outlive those callbacks.
+    private var forgottenThreadIDs: Set<UUID> = []
 
     /// True when the file on disk claims a newer document version than this build
     /// understands. In that case the archive never writes.
@@ -46,6 +48,7 @@ final class ThreadArchive {
             // Forget in memory as well as on disk. Erasing only the file would leave
             // every thread loaded, so switching history back on would write them all out
             // again — the user's "delete this" would have been a no-op.
+            forgottenThreadIDs.formUnion(library.threads.map(\.id))
             library.threads.removeAll()
             recordingFailure { try eraseEverything() }
             onChange?()
@@ -98,19 +101,21 @@ final class ThreadArchive {
     // MARK: Mutation
 
     func save(_ thread: ResearchThread) {
-        guard isHistoryEnabled else { return }
+        guard isHistoryEnabled, !forgottenThreadIDs.contains(thread.id) else { return }
         library.upsert(thread)
         onChange?()
         scheduleSave()
     }
 
     func delete(id: UUID) {
+        forgottenThreadIDs.insert(id)
         library.remove(id: id)
         onChange?()
         scheduleSave()
     }
 
     func deleteAll() {
+        forgottenThreadIDs.formUnion(library.threads.map(\.id))
         library.threads.removeAll()
         recordingFailure { try eraseEverything() }
         onChange?()
