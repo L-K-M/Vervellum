@@ -51,7 +51,7 @@ runs the searches and answers based on current sources.
 - **`/direct`** answers with no search at all, and is clearly badged as unsourced.
 - **Bring your own providers.** An OpenAI-compatible Chat Completions endpoint and
   an HTTP MCP web-search server. Recognized tools include z.ai, Brave, Tavily, Exa
-  and SearXNG. Unknown or ambiguous non-search tools are rejected. Model replies
+  and SearXNG. Only recognized tool names are accepted. Model replies
   must finish with `finish_reason: stop`; malformed or unfinished replies remain
   incomplete. Keys live in your Keychain on macOS.
 - **Native.** SwiftUI and AppKit, Liquid Glass on macOS 26, no dependencies.

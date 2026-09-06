@@ -9,6 +9,19 @@ import XCTest
 
 final class CitationValidatorTests: XCTestCase {
 
+    func testInlineCodeCannotCrossRenderedBlockBoundaries() {
+        let answers = [
+            "- `open [1]\n- [2] close`",
+            "# `open [1]\n[2] close`",
+            "| `open [1] | [2] close` |\n| --- | --- |",
+        ]
+        for answer in answers {
+            let result = CitationValidator.validate(answer: answer, sourceCount: 2)
+            XCTAssertEqual(result.citedSourceIndices, [0, 1], answer)
+            XCTAssertFalse(ResearchContext.withoutCitationMarkers(answer).contains("[1]"))
+        }
+    }
+
     func testCRLFFencesDoNotHideFollowingProseCitations() {
         let answer = "```swift\r\nitems[0]\r\n```\r\nFact [1]."
         let result = CitationValidator.validate(answer: answer, sourceCount: 1)

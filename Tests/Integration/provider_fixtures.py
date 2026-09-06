@@ -28,6 +28,7 @@ class Scenario(Enum):
     REJECT = auto()
     EOF = auto()
     MALFORMED = auto()
+    INVALID_DELTA = auto()
     STREAM_ERROR = auto()
     WHOLE_RESPONSE = auto()
     ASSESSMENT_FAILURE = auto()
@@ -102,6 +103,8 @@ class Fixture:
             return HTTPStatus.OK, SSE_TYPE, payload.encode()
         if self.scenario == Scenario.MALFORMED:
             payload += "data: {broken\r\n\r\n"
+        if self.scenario == Scenario.INVALID_DELTA:
+            payload += 'data: {"choices":[{"delta":{"content":123}}]}\r\n\r\n'
         if self.scenario == Scenario.STREAM_ERROR:
             payload += "data: " + json.dumps({"error": PROVIDER_ERROR}) + "\r\n\r\n"
         # No blank line before DONE: the assembler must retain this finish reason.
@@ -204,6 +207,9 @@ class ProviderFixtures(unittest.TestCase):
 
     def test_malformed_frames_cannot_disappear(self):
         self.assert_incomplete_stream(Scenario.MALFORMED)
+
+    def test_invalid_delta_shapes_cannot_disappear(self):
+        self.assert_incomplete_stream(Scenario.INVALID_DELTA)
 
     def test_stream_errors_do_not_duplicate_deltas(self):
         self.assert_incomplete_stream(Scenario.STREAM_ERROR)

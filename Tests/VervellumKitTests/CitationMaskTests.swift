@@ -20,6 +20,12 @@ final class CitationMaskTests: XCTestCase {
         XCTAssertTrue(mask.sourceIndices.isEmpty)
     }
 
+    func testInlineFragmentsDoNotInventBlockFences() {
+        let mask = CitationMask("```items[0]``` claim [1]", sourceCount: 1)
+        XCTAssertEqual(mask.text, "```items[0]``` claim \(CitationMask.placeholder)")
+        XCTAssertEqual(mask.sourceIndices, [[0]])
+    }
+
     func testCodeAndUnknownCitationsRemainLiteral() {
         let mask = CitationMask("`items[0]` [9] fact [1]", sourceCount: 1)
         XCTAssertEqual(mask.text, "`items[0]` [9] fact \(CitationMask.placeholder)")

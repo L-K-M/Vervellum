@@ -157,9 +157,20 @@ final class ChatCompletionsClient {
             if let error = event["error"], !(error is NSNull) {
                 throw ResearchError.streamInterrupted
             }
-            guard let choices = event["choices"] as? [[String: Any]],
-                  let first = choices.first else { return nil }
-            if let reason = first["finish_reason"] as? String { finishReason = reason }
+            // Usage frames carry no prose. Other missing or wrongly typed fields are
+            // protocol errors, not empty deltas that can silently remove answer text.
+            if event["choices"] == nil, event["usage"] is [String: Any] { return nil }
+            guard let choices = event["choices"] as? [[String: Any]] else {
+                throw ResearchError.invalidResponse
+            }
+            guard let first = choices.first else {
+                guard event["usage"] is [String: Any] else { throw ResearchError.invalidResponse }
+                return nil
+            }
+            if let value = first["finish_reason"], !(value is NSNull) {
+                guard let reason = value as? String else { throw ResearchError.invalidResponse }
+                finishReason = reason
+            }
             // Whole-response fallback must retain its finish reason and validation errors.
             if first["message"] != nil {
                 guard text.isEmpty else { throw ResearchError.invalidResponse }
@@ -167,8 +178,15 @@ final class ChatCompletionsClient {
                 text = whole
                 return whole
             }
-            guard let delta = first["delta"] as? [String: Any],
-                  let chunk = delta["content"] as? String, !chunk.isEmpty else { return nil }
+            guard let value = first["delta"] else {
+                guard first["finish_reason"] is String else { throw ResearchError.invalidResponse }
+                return nil
+            }
+            guard let delta = value as? [String: Any] else { throw ResearchError.invalidResponse }
+            if let role = delta["role"], !(role is String) { throw ResearchError.invalidResponse }
+            guard let content = delta["content"], !(content is NSNull) else { return nil }
+            guard let chunk = content as? String else { throw ResearchError.invalidResponse }
+            guard !chunk.isEmpty else { return nil }
             text += chunk
             return chunk
         }

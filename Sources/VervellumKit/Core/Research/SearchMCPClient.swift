@@ -40,16 +40,6 @@ final class SearchMCPClient {
             return Set(properties.keys)
         }
 
-        /// Unknown tools need a query schema before they can be selected automatically.
-        fileprivate var hasQueryProperty: Bool {
-            guard let properties = inputSchema["properties"] as? [String: Any] else { return false }
-            return properties.contains { name, schema in
-                guard SearchMCPClient.queryPropertyNames.contains(name.lowercased()) else { return false }
-                let type = (schema as? [String: Any])?["type"]
-                return type == nil || (type as? String) == "string"
-                    || ((type as? [String])?.contains("string") ?? false)
-            }
-        }
     }
 
     private let endpoint: URL
@@ -61,15 +51,12 @@ final class SearchMCPClient {
     private(set) var tool: Tool?
 
     /// Tool names known to be a web search: z.ai's two spellings first, then the names
-    /// the common MCP search servers ship. Matched exactly, before any guessing.
+    /// the common MCP search servers ship. Unknown operations are never inferred.
     private static let knownSearchToolNames: [String] = [
         "web_search_prime", "webSearchPrime",
         "brave_web_search", "tavily-search", "tavily_search", "web_search_exa",
         "searxng_web_search", "web_search",
     ]
-
-    /// Argument names a search tool's schema uses for the query text.
-    private static let queryPropertyNames: Set<String> = ["search_query", "query", "q", "keywords", "keyword", "text"]
 
     init(endpoint: URL, apiKey: String, trace: ResearchTrace, transport: HTTPTransport = .shared) {
         self.endpoint = endpoint
@@ -112,11 +99,9 @@ final class SearchMCPClient {
 
     /// Picks the web-search tool out of a `tools/list` reply.
     ///
-    /// By shape rather than by one vendor's name, in this order:
-    ///
-    /// 1. A tool whose name is one of `knownSearchToolNames`, in that list's order.
-    /// 2. A unique tool explicitly advertising web search and a string query.
-    /// Never assume an arbitrary single tool is a search or choose among ambiguous tools.
+    /// Accept known names in preference order.
+    /// Unknown names are rejected: a query field and "web search" in a description
+    /// cannot distinguish searching from deleting search history.
     ///
     /// Pure, so the rules are unit-tested with fixture listings.
     static func resolveSearchTool(from tools: [[String: Any]]) -> Tool? {
@@ -129,13 +114,7 @@ final class SearchMCPClient {
         for known in knownSearchToolNames {
             if let match = candidates.first(where: { $0.name == known }) { return match }
         }
-        let matches = candidates.filter { tool in
-            let text = (tool.name + " " + (tool.description ?? "")).lowercased()
-                .replacingOccurrences(of: "_", with: " ")
-                .replacingOccurrences(of: "-", with: " ")
-            return tool.hasQueryProperty && (text.contains("web search") || text.contains("search the web"))
-        }
-        return matches.count == 1 ? matches.first : nil
+        return nil
     }
 
     // MARK: Search

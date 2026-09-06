@@ -43,13 +43,18 @@ enum MarkdownParser {
         /// The block's inline markdown source, with its marker removed. Empty for
         /// `.rule`; the verbatim body for `.code`.
         var text: String
+        /// Offsets in the original input, shared with citation validation.
+        var sourceRange: Range<String.Index>
     }
 
     /// Parses `markdown` into blocks.
     static func parse(_ markdown: String) -> [Block] {
         var blocks: [Block] = []
         var paragraph: [String] = []
+        var paragraphStart = markdown.startIndex
+        var paragraphEnd = markdown.startIndex
         var codeLines: [String]?
+        var codeStart = markdown.startIndex
         var codeLanguage = ""
         var nextID = 0
 
@@ -58,32 +63,36 @@ enum MarkdownParser {
             let text = paragraph.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             paragraph.removeAll(keepingCapacity: true)
             guard !text.isEmpty else { return }
-            blocks.append(Block(id: nextID, kind: .paragraph, text: text))
+            blocks.append(Block(id: nextID, kind: .paragraph, text: text,
+                                sourceRange: paragraphStart..<paragraphEnd))
             nextID += 1
         }
 
-        func append(_ kind: Block.Kind, _ text: String) {
+        func append(_ kind: Block.Kind, _ text: String, range: Range<String.Index>) {
             flushParagraph()
-            blocks.append(Block(id: nextID, kind: kind, text: text))
+            blocks.append(Block(id: nextID, kind: kind, text: text, sourceRange: range))
             nextID += 1
         }
 
-        // `components(separatedBy: .newlines)` would split "\r\n" into two lines and
-        // insert a spurious paragraph break for every line of Windows-style output.
-        let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        // CRLF is one Character. Keep original indices instead of normalizing a copy,
+        // so renderers and citation validation share exactly the same block boundaries.
+        let lines = markdown.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         // Index-based rather than `for`: the increment happens right after the read,
         // so every `continue` below keeps working, and table parsing can consume a
         // run of lines (header, delimiter, rows) by moving the index itself.
         var index = lines.startIndex
         while index < lines.endIndex {
-            let line = lines[index]
+            let sourceLine = lines[index]
+            let line = String(sourceLine)
+            let range = sourceLine.startIndex..<sourceLine.endIndex
             index = lines.index(after: index)
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             // Inside a fence, everything is literal until the closing fence.
             if codeLines != nil {
                 if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                    append(.code(language: codeLanguage), (codeLines ?? []).joined(separator: "\n"))
+                    append(.code(language: codeLanguage), (codeLines ?? []).joined(separator: "\n"),
+                           range: codeStart..<sourceLine.endIndex)
                     codeLines = nil
                     codeLanguage = ""
                 } else {
@@ -95,6 +104,7 @@ enum MarkdownParser {
             if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
                 flushParagraph()
                 codeLines = []
+                codeStart = sourceLine.startIndex
                 codeLanguage = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 continue
             }
@@ -105,12 +115,12 @@ enum MarkdownParser {
             }
 
             if isRule(trimmed) {
-                append(.rule, "")
+                append(.rule, "", range: range)
                 continue
             }
 
             if let (level, text) = heading(trimmed) {
-                append(.heading(level), text)
+                append(.heading(level), text, range: range)
                 continue
             }
 
@@ -120,20 +130,21 @@ enum MarkdownParser {
                 // them, instead of stacking one bar per line.
                 if paragraph.isEmpty, var last = blocks.last, last.kind == .quote {
                     last.text += "\n" + text
+                    last.sourceRange = last.sourceRange.lowerBound..<sourceLine.endIndex
                     blocks[blocks.count - 1] = last
                 } else {
-                    append(.quote, text)
+                    append(.quote, text, range: range)
                 }
                 continue
             }
 
             let depth = indentDepth(line)
             if let text = bullet(trimmed) {
-                append(.bullet(depth: depth), text)
+                append(.bullet(depth: depth), text, range: range)
                 continue
             }
             if let (number, text) = ordered(trimmed) {
-                append(.ordered(number: number, depth: depth), text)
+                append(.ordered(number: number, depth: depth), text, range: range)
                 continue
             }
 
@@ -144,14 +155,14 @@ enum MarkdownParser {
             // CommonMark demands it, and it stops a rule line ("---") from pairing
             // with a stray pipe above it.
             if trimmed.contains("|"), index < lines.endIndex,
-               let columns = delimiterColumns(of: lines[index]) {
+               let columns = delimiterColumns(of: String(lines[index])) {
                 let header = splitRow(trimmed)
                 if header.count == columns {
                     flushParagraph()
                     index = lines.index(after: index)   // consume the delimiter
                     var rows: [[String]] = []
                     while index < lines.endIndex {
-                        let rowLine = lines[index]
+                        let rowLine = String(lines[index])
                         let rowTrimmed = rowLine.trimmingCharacters(in: .whitespaces)
                         guard !rowTrimmed.isEmpty, rowTrimmed.contains("|") else { break }
                         index = lines.index(after: index)
@@ -159,18 +170,22 @@ enum MarkdownParser {
                         if delimiterColumns(of: rowLine) != nil { continue }
                         rows.append(splitRow(rowTrimmed, columns: columns))
                     }
-                    append(.table(headers: header, rows: rows), "")
+                    append(.table(headers: header, rows: rows), "",
+                           range: sourceLine.startIndex..<lines[index - 1].endIndex)
                     continue
                 }
             }
 
+            if paragraph.isEmpty { paragraphStart = sourceLine.startIndex }
+            paragraphEnd = sourceLine.endIndex
             paragraph.append(trimmed)
         }
 
         // A fence still open at the end of the input is normal mid-stream: emit what
         // has arrived rather than hiding it until the closer shows up.
         if let codeLines {
-            append(.code(language: codeLanguage), codeLines.joined(separator: "\n"))
+            append(.code(language: codeLanguage), codeLines.joined(separator: "\n"),
+                   range: codeStart..<markdown.endIndex)
         }
         flushParagraph()
         return blocks
@@ -259,23 +274,7 @@ enum MarkdownParser {
     /// normalised to `columns` when given — short rows pad with empty cells, long
     /// ones drop their tail, so the renderer never juggles ragged rows.
     static func splitRow(_ line: String, columns: Int? = nil) -> [String] {
-        var body = line.trimmingCharacters(in: .whitespaces)
-        if body.hasPrefix("|") { body.removeFirst() }
-        if body.hasSuffix("|") { body.removeLast() }
-
-        var cells: [String] = []
-        var current = ""
-        for character in body {
-            if character == "|", !current.hasSuffix("\\") {
-                cells.append(current)
-                current = ""
-            } else {
-                current.append(character)
-            }
-        }
-        cells.append(current)
-
-        var result = cells.map {
+        var result = tableCells(in: line[...]).map {
             $0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\\|", with: "|")
         }
         if let columns {
@@ -286,5 +285,24 @@ enum MarkdownParser {
             }
         }
         return result
+    }
+
+    /// Preserve cell offsets so inline code cannot pair across rendered table cells.
+    static func tableCells(in line: Substring) -> [Substring] {
+        var body = line
+        while let first = body.first, first.isWhitespace { body.removeFirst() }
+        while let last = body.last, last.isWhitespace { body.removeLast() }
+        if body.hasPrefix("|") { body.removeFirst() }
+        if body.hasSuffix("|") { body.removeLast() }
+
+        var cells: [Substring] = []
+        var start = body.startIndex
+        for index in body.indices where body[index] == "|" {
+            if index > body.startIndex, body[body.index(before: index)] == "\\" { continue }
+            cells.append(body[start..<index])
+            start = body.index(after: index)
+        }
+        cells.append(body[start...])
+        return cells
     }
 }

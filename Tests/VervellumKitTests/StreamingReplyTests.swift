@@ -76,10 +76,27 @@ final class StreamingReplyTests: XCTestCase {
         }
     }
 
-    func testIgnoresFramesWithoutChoices() throws {
+    func testAllowsUsageOnlyAndNullContentFrames() throws {
         var reply = ChatCompletionsClient.StreamingReply()
-        XCTAssertNil(try reply.apply(["id": "chatcmpl-1", "object": "chat.completion.chunk"]))
+        XCTAssertNil(try reply.apply(["usage": ["completion_tokens": 1]]))
+        XCTAssertNil(try reply.apply(["choices": [], "usage": ["completion_tokens": 1]]))
+        XCTAssertNil(try reply.apply(["choices": [["delta": ["role": "assistant", "content": NSNull()]]]]))
         XCTAssertEqual(reply.text, "")
+    }
+
+    func testMalformedJSONShapesCannotDiscardAnswerData() {
+        let events: [[String: Any]] = [
+            [:], ["choices": "invalid"], ["choices": []], ["choices": [42]],
+            ["choices": [["delta": "invalid"]]],
+            ["choices": [["delta": ["content": 123]]]],
+            ["choices": [["delta": ["content": ["text": "lost"]]]]],
+            ["choices": [["delta": ["role": 123]]]],
+            ["choices": [["delta": [:], "finish_reason": 123]]],
+        ]
+        for event in events {
+            var reply = ChatCompletionsClient.StreamingReply()
+            XCTAssertThrowsError(try reply.apply(event))
+        }
     }
 }
 

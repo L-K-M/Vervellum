@@ -26,7 +26,7 @@ not merged independently over one another.
 | #51 | Keep coalescing; supersede #24. Inject scheduling and compare every non-prose field. |
 | #52 | Discard. Stop can launch queued billable work; lifecycle coverage is absent. |
 | #54 | Keep one optional-field retry; preserve reasoning tags inside JSON strings. |
-| #55 | Keep known-provider support; reject arbitrary/ambiguous tools and omit untrusted names from diagnostics. |
+| #55 | Keep recognized tool names only; never infer operations from descriptions or log their names. |
 | #56, #58 | Keep code-aware citations and historical-marker removal; fix CRLF, escaping, and stale invalid numbers. |
 | #57 | Keep qualified assessment failure and unambiguous verdict aliases; never equate dispute with contradiction. |
 | #60 | Keep recovery/erasure fixes and Stripe redaction; restore conservative alphabetic bearer-token redaction. |
@@ -45,7 +45,7 @@ Regression tests exposed and now cover:
   history reenablement, deletion resurrection, and checkpoint starvation.
 - Stop versus queued callbacks, pending prose, and late completion, using controlled
   runner/scheduler fixtures rather than sleeps.
-- Missing/unknown finish reasons, malformed/error frames, whole-response completion,
+- Missing/unknown finish reasons, malformed/error frames and delta shapes, whole-response completion,
   optional-field retries, and preserved partial transcripts.
 - Fixed-context rejection, exact JSON budget accounting, and assessment warnings in
   follow-up history. Recovering partial prose also reruns citation validation.
@@ -61,10 +61,10 @@ Deletion markers exist only in memory, not in the history document.
 
 - Linux shared tests: `swift test --parallel`.
 - macOS build and shared/platform tests: `xcodebuild ... clean test` in CI.
-- Ten loopback provider scenarios: `python3 Tests/Integration/provider_fixtures.py .build/release/vervellum`.
+- Eleven loopback provider scenarios: `python3 Tests/Integration/provider_fixtures.py .build/release/vervellum`.
 - GTK native-close/reopen under Xvfb; desktop validation; Debian build, install, and
   dependency checks in Linux CI.
-- New regression assertions were observed failing before their fixes. Logs and CI
+- Defect regressions were observed failing before their fixes. Logs and CI
   history are linked from #69. The optional GLM integration repeatedly skipped actual
   review because `ZAI_API_KEY` is absent; green workflow status is not review approval.
 

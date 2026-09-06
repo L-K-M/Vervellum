@@ -249,9 +249,9 @@ implements four messages — `initialize`, `notifications/initialized`, `tools/l
   (`{"success": false, "code": N}`) returned with HTTP 200, so a request can fail
   before it ever reaches the protocol layer.
 
-Known web-search tool names are preferred. Otherwise, selection requires one tool
-explicitly advertising web search with a string query field. Arbitrary single tools
-and ambiguous matches are rejected; provider-controlled names never enter diagnostics.
+Only recognized web-search tool names are selected, in a fixed preference order.
+Descriptions and query-shaped arguments cannot establish an unknown operation's
+purpose. Unknown tools are rejected; provider-controlled names never enter diagnostics.
 The model sees the actual input schema; required and unknown argument names are
 checked before calling the tool. This is not full JSON Schema validation.
 
@@ -267,6 +267,8 @@ its own 70,000-byte ceiling. These are not tokenizer guarantees. Historic answer
 are shortened explicitly, then whole older turns are omitted as needed; both produce
 a `contextTrimmed` notice. Evidence drops a suffix and reports it, preserving numbering.
 Obsolete citation markers are removed from historic answers and finding claims.
+Document validation uses the renderer's block and table-cell boundaries; inline
+rendering validates only inline syntax, so backticks cannot suppress unrelated citations.
 
 If fixed context still exceeds the ceiling, the request fails locally rather than
 silently truncating the current question, answer, or evidence. Assessment failure
@@ -547,7 +549,7 @@ the test host does not register global shortcuts, add a status item, or read the
 user's preferences.
 
 Loopback CLI fixtures exercise the real transport: complete research, optional-field
-fallback, repeated rejection, premature EOF, malformed/error frames, whole-response
+fallback, repeated rejection, premature EOF, malformed/error frames and delta shapes, whole-response
 fallback, failed assessment, redirect refusal, and oversized context. GTK native-close
 is tested under Xvfb; macOS tests inspect citation link attributes and control runner
 callbacks and UI timers to reproduce Stop races without sleeps.

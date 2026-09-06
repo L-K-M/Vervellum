@@ -8,7 +8,8 @@ struct CitationMask {
     let sourceIndices: [[Int]]
 
     init(_ text: String, sourceCount: Int) {
-        let validation = CitationValidator.validate(answer: text, sourceCount: sourceCount)
+        // Blocks have already been parsed. A table cell's backticks are inline syntax.
+        let validation = CitationValidator.validate(answer: text, sourceCount: sourceCount, scope: .inline)
         var masked = ""
         var citations: [[Int]] = []
 

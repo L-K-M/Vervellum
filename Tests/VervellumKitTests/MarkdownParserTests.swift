@@ -9,6 +9,14 @@ import XCTest
 
 final class MarkdownParserTests: XCTestCase {
 
+    func testBlockRangesReferToTheOriginalUnicodeAndCRLFInput() {
+        let markdown = "# Héading\r\n\r\nπ paragraph\r\ncontinued\r\n\r\n```\r\n[9]\r\n```"
+        let blocks = MarkdownParser.parse(markdown)
+        XCTAssertEqual(blocks.map { String(markdown[$0.sourceRange]) },
+                       ["# Héading", "π paragraph\r\ncontinued", "```\r\n[9]\r\n```"])
+        XCTAssertEqual(blocks[1].text, "π paragraph\ncontinued")
+    }
+
     func testSplitsParagraphs() {
         let blocks = MarkdownParser.parse("First para.\nStill first.\n\nSecond para.")
         XCTAssertEqual(blocks.count, 2)

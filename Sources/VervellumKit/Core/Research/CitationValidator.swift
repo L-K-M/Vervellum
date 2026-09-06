@@ -17,6 +17,8 @@ import Foundation
 /// Pure and dependency-free, so it is fully unit-testable.
 enum CitationValidator {
 
+    enum Scope { case document, inline }
+
     /// One piece of a parsed answer: either literal text, or a citation referring to
     /// `sourceIndices` (already converted to zero-based positions in the source list).
     enum Span: Equatable {
@@ -51,7 +53,7 @@ enum CitationValidator {
     /// inventing source `[0]`, mark source 1 as "cited" by a code sample, and — for a
     /// backtick span — render a chip in the middle of the code. So markers inside code
     /// are left as text, and the validator, the renderers and the transcript agree.
-    static func validate(answer: String, sourceCount: Int) -> Result {
+    static func validate(answer: String, sourceCount: Int, scope: Scope = .document) -> Result {
         var spans: [Span] = []
         var cited: Set<Int> = []
         var outOfRange: [Int] = []
@@ -62,7 +64,7 @@ enum CitationValidator {
         }
 
         let full = NSRange(answer.startIndex..<answer.endIndex, in: answer)
-        let code = codeRanges(in: answer)
+        let code = scope == .document ? codeRanges(in: answer) : inlineCodeRanges(in: answer[...])
         var cursor = answer.startIndex
 
         for match in regex.matches(in: answer, range: full) {
@@ -118,38 +120,22 @@ enum CitationValidator {
     /// arrives — which is also what the renderer draws.
     static func codeRanges(in text: String) -> [Range<String.Index>] {
         var ranges: [Range<String.Index>] = []
-        var fenceStart: String.Index?
-        var lineStart = text.startIndex
-        var paragraphStart = text.startIndex
-
-        func flushInline(to end: String.Index) {
-            ranges.append(contentsOf: inlineCodeRanges(in: text[paragraphStart..<end]))
-        }
-
-        while lineStart < text.endIndex {
-            // CRLF is one Swift Character; searching only for LF misses the whole line.
-            let lineEnd = text[lineStart...].firstIndex(where: \.isNewline) ?? text.endIndex
-            let nextLine = lineEnd < text.endIndex ? text.index(after: lineEnd) : text.endIndex
-            let trimmed = text[lineStart..<lineEnd].drop(while: { $0 == " " || $0 == "\t" })
-            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                if let start = fenceStart {
-                    ranges.append(start..<lineEnd)
-                    fenceStart = nil
-                } else {
-                    flushInline(to: lineStart)
-                    fenceStart = lineStart
+        // Consume the renderer's parser, rather than maintaining a second set of
+        // block rules that can pair backticks across headings, bullets, or cells.
+        for block in MarkdownParser.parse(text) {
+            let raw = text[block.sourceRange]
+            switch block.kind {
+            case .code:
+                ranges.append(block.sourceRange)
+            case .table:
+                for line in raw.split(whereSeparator: \.isNewline) {
+                    for cell in MarkdownParser.tableCells(in: line) {
+                        ranges.append(contentsOf: inlineCodeRanges(in: cell))
+                    }
                 }
-                paragraphStart = nextLine
-            } else if fenceStart == nil, trimmed.isEmpty {
-                flushInline(to: lineStart)
-                paragraphStart = nextLine
+            default:
+                ranges.append(contentsOf: inlineCodeRanges(in: raw))
             }
-            lineStart = nextLine
-        }
-        if let start = fenceStart {
-            ranges.append(start..<text.endIndex)
-        } else {
-            flushInline(to: text.endIndex)
         }
         return ranges
     }

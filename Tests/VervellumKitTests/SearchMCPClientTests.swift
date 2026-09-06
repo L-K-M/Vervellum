@@ -50,7 +50,7 @@ final class SearchMCPClientTests: XCTestCase {
     }
 
     func testASingleUnknownToolIsNotAssumedToBeWebSearch() {
-        for name in ["lookup", "delete_everything", "search_history"] {
+        for name in ["lookup", "delete_everything", "search_history", "delete_web_search_history"] {
             XCTAssertNil(SearchMCPClient.resolveSearchTool(from: [tool(name)]))
         }
     }
@@ -60,13 +60,12 @@ final class SearchMCPClientTests: XCTestCase {
         XCTAssertNil(SearchMCPClient.resolveSearchTool(from: tools))
     }
 
-    /// Among several unknown tools, the one that says "search" and takes a query wins.
-    func testFallsBackToAToolThatSearchesWithAQuery() {
+    func testUnknownToolsNeedMoreThanASearchDescription() {
         let tools = [
             tool("get_page", description: "Fetch a URL", properties: ["url": ["type": "string"]]),
             tool("find_pages", description: "Search the web", properties: ["query": ["type": "string"]]),
         ]
-        XCTAssertEqual(SearchMCPClient.resolveSearchTool(from: tools)?.name, "find_pages")
+        XCTAssertNil(SearchMCPClient.resolveSearchTool(from: tools))
     }
 
     /// "search" in the name is not enough on its own: a tool with no query argument is
@@ -80,9 +79,9 @@ final class SearchMCPClientTests: XCTestCase {
     }
 
     func testAQueryPropertyMayBeAUnionType() {
-        let tools = [tool("a"), tool("web_search_thing", description: "search",
+        let tools = [tool("a"), tool("web_search", description: "search",
                                      properties: ["query": ["type": ["string", "null"]]])]
-        XCTAssertEqual(SearchMCPClient.resolveSearchTool(from: tools)?.name, "web_search_thing")
+        XCTAssertEqual(SearchMCPClient.resolveSearchTool(from: tools)?.name, "web_search")
     }
 
     func testAnUnknownToolWithoutAQuerySchemaIsRejected() {
