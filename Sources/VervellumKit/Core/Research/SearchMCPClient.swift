@@ -40,11 +40,9 @@ final class SearchMCPClient {
             return Set(properties.keys)
         }
 
-        /// Whether the schema declares a string property that reads as the query text.
-        /// A schema with no `properties` at all counts: a bare tool cannot be checked,
-        /// and refusing it would lose a server that simply did not publish one.
-        var hasQueryProperty: Bool {
-            guard let properties = inputSchema["properties"] as? [String: Any] else { return true }
+        /// Unknown tools need a query schema before they can be selected automatically.
+        fileprivate var hasQueryProperty: Bool {
+            guard let properties = inputSchema["properties"] as? [String: Any] else { return false }
             return properties.contains { name, schema in
                 guard SearchMCPClient.queryPropertyNames.contains(name.lowercased()) else { return false }
                 let type = (schema as? [String: Any])?["type"]
@@ -64,10 +62,10 @@ final class SearchMCPClient {
 
     /// Tool names known to be a web search: z.ai's two spellings first, then the names
     /// the common MCP search servers ship. Matched exactly, before any guessing.
-    static let knownSearchToolNames: [String] = [
+    private static let knownSearchToolNames: [String] = [
         "web_search_prime", "webSearchPrime",
         "brave_web_search", "tavily-search", "tavily_search", "web_search_exa",
-        "searxng_web_search", "web_search", "search",
+        "searxng_web_search", "web_search",
     ]
 
     /// Argument names a search tool's schema uses for the query text.
@@ -104,16 +102,12 @@ final class SearchMCPClient {
         let listing = try await call("tools/list", params: [:])
         let tools = listing["tools"] as? [[String: Any]] ?? []
         guard let resolved = Self.resolveSearchTool(from: tools) else {
-            // Tool names are the server's public interface, not secrets, and naming them
-            // is what lets the user see that they pointed at the wrong kind of server.
-            let advertised = tools.compactMap { $0["name"] as? String }
-            let listed = advertised.isEmpty ? "no tools at all" : advertised.joined(separator: ", ")
-            throw ResearchError("The search provider did not advertise a web-search tool "
-                                + "(it offered \(listed)). Check the search endpoint in the "
-                                + "provider settings.")
+            // Names are provider-controlled too; never copy them into diagnostics.
+            throw ResearchError("The search provider did not advertise an unambiguous web-search tool. "
+                                + "Check the search endpoint in Settings.")
         }
         tool = resolved
-        trace.log("Search tool ready: \(resolved.name)")
+        trace.log("Search tool ready")
     }
 
     /// Picks the web-search tool out of a `tools/list` reply.
@@ -121,11 +115,8 @@ final class SearchMCPClient {
     /// By shape rather than by one vendor's name, in this order:
     ///
     /// 1. A tool whose name is one of `knownSearchToolNames`, in that list's order.
-    /// 2. The only tool, if the server advertises exactly one — a search server with
-    ///    one tool is offering a search.
-    /// 3. The first tool whose name or description mentions "search" and whose schema
-    ///    has a string property that reads as the query, so a "search_history" or
-    ///    "research_notes" tool with no query cannot be mistaken for one.
+    /// 2. A unique tool explicitly advertising web search and a string query.
+    /// Never assume an arbitrary single tool is a search or choose among ambiguous tools.
     ///
     /// Pure, so the rules are unit-tested with fixture listings.
     static func resolveSearchTool(from tools: [[String: Any]]) -> Tool? {
@@ -138,11 +129,13 @@ final class SearchMCPClient {
         for known in knownSearchToolNames {
             if let match = candidates.first(where: { $0.name == known }) { return match }
         }
-        if candidates.count == 1 { return candidates[0] }
-        return candidates.first { tool in
+        let matches = candidates.filter { tool in
             let text = (tool.name + " " + (tool.description ?? "")).lowercased()
-            return text.contains("search") && tool.hasQueryProperty
+                .replacingOccurrences(of: "_", with: " ")
+                .replacingOccurrences(of: "-", with: " ")
+            return tool.hasQueryProperty && (text.contains("web search") || text.contains("search the web"))
         }
+        return matches.count == 1 ? matches.first : nil
     }
 
     // MARK: Search

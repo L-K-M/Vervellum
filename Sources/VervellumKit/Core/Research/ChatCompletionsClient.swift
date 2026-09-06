@@ -57,7 +57,7 @@ final class ChatCompletionsClient {
     /// object.
     func completeJSON(system: String, payload: Any, label: String) async throws -> [String: Any] {
         guard let userContent = Self.encodeUserContent(payload)
-        else { throw ResearchError("Vervellum could not encode the request context.") }
+        else { throw ResearchError.invalidContext }
 
         let response = try await withOptionalParameters(label: label) { optional in
             let body = Self.requestBody(model: self.model, system: system, userContent: userContent,
@@ -92,7 +92,7 @@ final class ChatCompletionsClient {
                     label: String,
                     onDelta: @escaping (String) -> Void) async throws -> String {
         guard let userContent = Self.encodeUserContent(payload)
-        else { throw ResearchError("Vervellum could not encode the request context.") }
+        else { throw ResearchError.invalidContext }
 
         trace.log("\(label) started")
         let began = Date()
@@ -154,18 +154,19 @@ final class ChatCompletionsClient {
         mutating func apply(_ event: [String: Any]) throws -> String? {
             // The provider's own message is discarded, never surfaced: gateway errors
             // have been seen echoing request data and credentials.
-            if event["error"] is [String: Any] || event["error"] is String {
+            if let error = event["error"], !(error is NSNull) {
                 throw ResearchError.streamInterrupted
-            }
-            // A gateway that ignored `stream: true` sends one complete response
-            // object; take its message content wholesale.
-            if text.isEmpty, let whole = try? ChatCompletionsClient.messageContent(from: event), !whole.isEmpty {
-                text = whole
-                return whole
             }
             guard let choices = event["choices"] as? [[String: Any]],
                   let first = choices.first else { return nil }
             if let reason = first["finish_reason"] as? String { finishReason = reason }
+            // Whole-response fallback must retain its finish reason and validation errors.
+            if first["message"] != nil {
+                guard text.isEmpty else { throw ResearchError.invalidResponse }
+                let whole = try ChatCompletionsClient.messageContent(from: event)
+                text = whole
+                return whole
+            }
             guard let delta = first["delta"] as? [String: Any],
                   let chunk = delta["content"] as? String, !chunk.isEmpty else { return nil }
             text += chunk
@@ -227,7 +228,8 @@ final class ChatCompletionsClient {
     /// `question`, which is also where long-context guidance says the query belongs.
     static func encodeUserContent(_ payload: Any) -> String? {
         guard JSONSerialization.isValidJSONObject(payload),
-              let encoded = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+              let encoded = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              encoded.count <= ResearchContext.maxCharacters
         else { return nil }
         return String(data: encoded, encoding: .utf8)
     }
@@ -257,8 +259,10 @@ final class ChatCompletionsClient {
                                 + "Try a shorter question or a model with a larger output limit.")
         case "content_filter":
             throw ResearchError("The model's provider filtered the reply. Try rephrasing the question.")
-        default:
+        case "stop":
             return
+        default:
+            throw ResearchError.streamInterrupted
         }
     }
 
@@ -267,6 +271,8 @@ final class ChatCompletionsClient {
     /// a sentence of commentary, and — for a reasoning model served through a gateway
     /// that leaks its scratchpad — preceding it with a `<think>` block.
     static func decodeJSONObject(from text: String) -> [String: Any]? {
+        // Parse valid JSON before recovery so literal reasoning tags remain data.
+        if let object = parseObject(text) { return object }
         var candidate = stripReasoning(text).trimmingCharacters(in: .whitespacesAndNewlines)
         if candidate.hasPrefix("```") {
             candidate = stripFence(candidate)
@@ -300,7 +306,7 @@ final class ChatCompletionsClient {
     }
 
     private static let reasoningBlock = try? NSRegularExpression(
-        pattern: #"(?is)<(think|reasoning)>.*?</\1>"#)
+        pattern: #"(?is)^\s*<(think|reasoning)>.*?</\1>\s*"#)
 
     /// Removes a surrounding ``` fence.
     ///

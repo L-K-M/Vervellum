@@ -118,10 +118,28 @@ final class ChatCompletionsClientTests: XCTestCase {
                        #"{"evidence":[1],"question":"q","today":"2026-09-06"}"#)
     }
 
+    func testOversizedFixedContextIsRejectedBeforeAnyRequest() {
+        let oversized = String(repeating: "x", count: ResearchContext.maxCharacters)
+        XCTAssertNil(ChatCompletionsClient.encodeUserContent(["answer": oversized, "question": "Q"]))
+        XCTAssertNil(ChatCompletionsClient.encodeUserContent(["question": oversized]))
+    }
+
+    func testUnknownFinishReasonsCannotCompleteAnAnswer() {
+        for reason in ["", "tool_calls", "function_call", "future_reason"] {
+            XCTAssertThrowsError(try ChatCompletionsClient.checkFinishReason(reason))
+        }
+    }
+
+    func testReasoningTagsInsideJSONStringsArePreserved() {
+        let json = #"{"reading":"Explain <think>this text</think>","searches":[]}"#
+        XCTAssertEqual(ChatCompletionsClient.decodeJSONObject(from: json)?["reading"] as? String,
+                       "Explain <think>this text</think>")
+    }
+
     // MARK: Response shaping
 
     func testExtractsTheMessageContent() throws {
-        let response: [String: Any] = ["choices": [["message": ["content": "  hello  "]]]]
+        let response: [String: Any] = ["choices": [["message": ["content": "  hello  "], "finish_reason": "stop"]]]
         XCTAssertEqual(try ChatCompletionsClient.messageContent(from: response), "hello")
     }
 
@@ -140,7 +158,7 @@ final class ChatCompletionsClientTests: XCTestCase {
         XCTAssertThrowsError(try ChatCompletionsClient.checkFinishReason("length"))
         XCTAssertThrowsError(try ChatCompletionsClient.checkFinishReason("content_filter"))
         XCTAssertNoThrow(try ChatCompletionsClient.checkFinishReason("stop"))
-        XCTAssertNoThrow(try ChatCompletionsClient.checkFinishReason(nil))
+        XCTAssertThrowsError(try ChatCompletionsClient.checkFinishReason(nil))
     }
 
     // MARK: SSE frames

@@ -229,7 +229,7 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
                     var finished = false
                     try await Self.readLines(from: body, limit: Self.maxStreamBytes) { line in
                         try Task.checkCancellation()
-                        let step = assembler.consume(line)
+                        let step = try assembler.consume(line)
                         if let object = step.frame { continuation.yield(object) }
                         if step.done {
                             finished = true
@@ -238,7 +238,7 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
                         return true
                     }
                     // A stream that ends without a trailing blank line still has a frame.
-                    if !finished, let object = assembler.flush() { continuation.yield(object) }
+                    if !finished, let object = try assembler.flush() { continuation.yield(object) }
                     continuation.finish()
                 } catch is CancellationError {
                     continuation.finish(throwing: ResearchError.cancelled)
@@ -392,7 +392,7 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         var found: [String: Any]?
         do {
             try await Self.readLines(from: body, limit: Self.maxResponseBytes) { line in
-                let step = assembler.consume(line)
+                let step = try assembler.consume(line)
                 if let object = step.frame, Self.matches(object, expectedID: expectedID) {
                     found = object
                     return false
@@ -407,7 +407,7 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
             throw Self.sanitized(error)
         }
         if let found { return found }
-        if let object = assembler.flush(), Self.matches(object, expectedID: expectedID) {
+        if let object = try assembler.flush(), Self.matches(object, expectedID: expectedID) {
             return object
         }
         return nil
@@ -521,21 +521,26 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
 
         /// Feeds one line. Returns the frame that line completed, if any, and whether
         /// the stream has announced its end.
-        mutating func consume(_ line: String) -> (frame: [String: Any]?, done: Bool) {
-            if line.isEmpty { return (flush(), false) }
+        mutating func consume(_ line: String) throws -> (frame: [String: Any]?, done: Bool) {
+            if line.isEmpty { return (try flush(), false) }
             if line.hasPrefix(":") { return (nil, false) }
             guard line.hasPrefix("data:") else { return (nil, false) }
             let value = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-            if value == "[DONE]" { return (flush(), true) }
+            if value == "[DONE]" { return (try flush(), true) }
             payload.append(value)
             return (nil, false)
         }
 
         /// Decodes and clears whatever has been gathered — the frame a blank line
         /// dispatches, or the one a stream ends on without a trailing blank line.
-        mutating func flush() -> [String: Any]? {
+        mutating func flush() throws -> [String: Any]? {
             defer { payload.removeAll(keepingCapacity: true) }
-            return HTTPTransport.decodeFrame(payload)
+            guard !payload.isEmpty else { return nil }
+            // Dropping a malformed delta would silently remove part of the answer.
+            guard let frame = HTTPTransport.decodeFrame(payload) else {
+                throw ResearchError.invalidResponse
+            }
+            return frame
         }
     }
 

@@ -66,6 +66,14 @@ final class StreamingReplyTests: XCTestCase {
         let whole: [String: Any] = ["choices": [["message": ["content": "  All at once  "], "finish_reason": "stop"]]]
         XCTAssertEqual(try reply.apply(whole), "All at once")
         XCTAssertEqual(reply.text, "All at once")
+        XCTAssertEqual(reply.finishReason, "stop")
+    }
+
+    func testEveryNonNullErrorEnvelopeInterruptsTheReply() {
+        for value: Any in [true, 42, ["error"]] {
+            var reply = ChatCompletionsClient.StreamingReply()
+            XCTAssertThrowsError(try reply.apply(["error": value]))
+        }
     }
 
     func testIgnoresFramesWithoutChoices() throws {
@@ -78,10 +86,16 @@ final class StreamingReplyTests: XCTestCase {
 /// Server-Sent Events framing, independent of the network.
 final class SSEFrameAssemblerTests: XCTestCase {
 
-    func testABlankLineDispatchesTheFrame() {
+    func testMalformedDataCannotDisappearBeforeAValidFinish() throws {
         var assembler = HTTPTransport.SSEFrameAssembler()
-        XCTAssertNil(assembler.consume(#"data: {"a": 1}"#).frame)
-        let step = assembler.consume("")
+        _ = try assembler.consume("data: {broken")
+        XCTAssertThrowsError(try assembler.flush())
+    }
+
+    func testABlankLineDispatchesTheFrame() throws {
+        var assembler = HTTPTransport.SSEFrameAssembler()
+        XCTAssertNil(try assembler.consume(#"data: {"a": 1}"#).frame)
+        let step = try assembler.consume("")
         XCTAssertEqual(step.frame?["a"] as? Int, 1)
         XCTAssertFalse(step.done)
     }
@@ -89,37 +103,37 @@ final class SSEFrameAssemblerTests: XCTestCase {
     /// The bug this guards against: a `[DONE]` that follows the last delta without a
     /// blank line between them used to drop that delta — typically the one carrying
     /// `finish_reason`.
-    func testTheDoneSentinelFlushesThePendingFrameFirst() {
+    func testTheDoneSentinelFlushesThePendingFrameFirst() throws {
         var assembler = HTTPTransport.SSEFrameAssembler()
-        _ = assembler.consume(#"data: {"last": true}"#)
-        let step = assembler.consume("data: [DONE]")
+        _ = try assembler.consume(#"data: {"last": true}"#)
+        let step = try assembler.consume("data: [DONE]")
         XCTAssertEqual(step.frame?["last"] as? Bool, true)
         XCTAssertTrue(step.done)
     }
 
-    func testTheDoneSentinelAloneIsJustDone() {
+    func testTheDoneSentinelAloneIsJustDone() throws {
         var assembler = HTTPTransport.SSEFrameAssembler()
-        let step = assembler.consume("data: [DONE]")
+        let step = try assembler.consume("data: [DONE]")
         XCTAssertNil(step.frame)
         XCTAssertTrue(step.done)
     }
 
-    func testCommentsAndOtherFieldsAreIgnored() {
+    func testCommentsAndOtherFieldsAreIgnored() throws {
         var assembler = HTTPTransport.SSEFrameAssembler()
-        XCTAssertNil(assembler.consume(": keep-alive").frame)
-        XCTAssertNil(assembler.consume("event: message").frame)
-        XCTAssertNil(assembler.consume("id: 7").frame)
-        _ = assembler.consume(#"data: {"b": 2}"#)
-        XCTAssertEqual(assembler.consume("").frame?["b"] as? Int, 2)
+        XCTAssertNil(try assembler.consume(": keep-alive").frame)
+        XCTAssertNil(try assembler.consume("event: message").frame)
+        XCTAssertNil(try assembler.consume("id: 7").frame)
+        _ = try assembler.consume(#"data: {"b": 2}"#)
+        XCTAssertEqual(try assembler.consume("").frame?["b"] as? Int, 2)
     }
 
     /// A stream that ends without a trailing blank line still has a frame.
-    func testFlushReturnsAFrameLeftAtTheEndOfTheStream() {
+    func testFlushReturnsAFrameLeftAtTheEndOfTheStream() throws {
         var assembler = HTTPTransport.SSEFrameAssembler()
-        _ = assembler.consume(#"data: {"c":"#)
-        _ = assembler.consume("data: 3}")
-        XCTAssertEqual(assembler.flush()?["c"] as? Int, 3)
-        XCTAssertNil(assembler.flush(), "flushing clears the pending lines")
+        _ = try assembler.consume(#"data: {"c":"#)
+        _ = try assembler.consume("data: 3}")
+        XCTAssertEqual(try assembler.flush()?["c"] as? Int, 3)
+        XCTAssertNil(try assembler.flush(), "flushing clears the pending lines")
     }
 }
 

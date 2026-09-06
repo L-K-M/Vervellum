@@ -49,10 +49,15 @@ final class SearchMCPClientTests: XCTestCase {
         }
     }
 
-    /// A server that offers exactly one tool is offering a search, whatever it is called.
-    func testASingleUnknownToolIsAccepted() {
-        let tools = [tool("lookup", properties: ["q": ["type": "string"]])]
-        XCTAssertEqual(SearchMCPClient.resolveSearchTool(from: tools)?.name, "lookup")
+    func testASingleUnknownToolIsNotAssumedToBeWebSearch() {
+        for name in ["lookup", "delete_everything", "search_history"] {
+            XCTAssertNil(SearchMCPClient.resolveSearchTool(from: [tool(name)]))
+        }
+    }
+
+    func testAmbiguousWebSearchToolsRequireAnExplicitKnownName() {
+        let tools = [tool("web_search_alpha"), tool("web_search_beta")]
+        XCTAssertNil(SearchMCPClient.resolveSearchTool(from: tools))
     }
 
     /// Among several unknown tools, the one that says "search" and takes a query wins.
@@ -80,11 +85,9 @@ final class SearchMCPClientTests: XCTestCase {
         XCTAssertEqual(SearchMCPClient.resolveSearchTool(from: tools)?.name, "web_search_thing")
     }
 
-    /// A schema without `properties` cannot be checked and is given the benefit of the
-    /// doubt.
-    func testAToolWithoutASchemaIsAccepted() {
+    func testAnUnknownToolWithoutAQuerySchemaIsRejected() {
         let tools = [tool("a"), tool("web_search_beta", description: "search", properties: nil)]
-        XCTAssertEqual(SearchMCPClient.resolveSearchTool(from: tools)?.name, "web_search_beta")
+        XCTAssertNil(SearchMCPClient.resolveSearchTool(from: tools))
     }
 
     func testAnEmptyOrNamelessListingResolvesNothing() {
