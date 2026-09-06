@@ -439,6 +439,8 @@ its own window, cannot raise it above others, and has no layer-shell protocol to
 back on. `gtk_window_move`, `set_position` and `set_keep_above` were removed in GTK4
 outright. So the Linux front end is an ordinary window that the compositor places, not
 an edge-docked overlay, and the documentation says so rather than implying parity.
+Native close, Escape, and the panel's Close button hide the window rather than
+destroying it; the next shortcut reuses the same window and thread. Quit is separate.
 
 The shortcut is registered *with the desktop* instead of grabbed by the app: the
 GlobalShortcuts portal has no GNOME backend before GNOME 48, and Mutter no longer

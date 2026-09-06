@@ -46,6 +46,7 @@ final class LinuxPanel {
         self.environment = environment
 
         window = gtk_application_window_new(application)!
+        GTK.hideOnClose(window)
         gtk_window_set_title(vv_window(window), "Vervellum")
         gtk_window_set_default_size(vv_window(window), 560, 680)
 
