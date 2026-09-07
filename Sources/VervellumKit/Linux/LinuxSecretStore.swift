@@ -155,7 +155,7 @@ final class LinuxSecretStore: SecretStore {
 
     // MARK: secret-tool
 
-    /// The environment variable a key may be supplied in, for the two documented
+    /// The environment variable a key may be supplied in, for the three documented
     /// accounts.
     ///
     /// Only those three have one. A provider profile added in the macOS interface gets
@@ -167,6 +167,7 @@ final class LinuxSecretStore: SecretStore {
         switch account.rawValue {
         case SecretAccount.modelAPIKey.rawValue: return "VERVELLUM_MODEL_KEY"
         case SecretAccount.searchAPIKey.rawValue: return "VERVELLUM_SEARCH_KEY"
+        case SecretAccount.readerAPIKey.rawValue: return "VERVELLUM_READER_KEY"
         default: return nil
         }
     }

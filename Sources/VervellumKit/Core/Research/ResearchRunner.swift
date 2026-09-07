@@ -33,11 +33,16 @@ final class ResearchRunner: ResearchRunning {
         var settings: ProviderSettings
         var modelKey: String?
         var searchKey: String?
+        var readerKey: String?
 
-        init(settings: ProviderSettings, modelKey: String?, searchKey: String?) {
+        init(settings: ProviderSettings,
+             modelKey: String?,
+             searchKey: String?,
+             readerKey: String? = nil) {
             self.settings = settings
             self.modelKey = modelKey
             self.searchKey = searchKey
+            self.readerKey = readerKey
         }
 
         /// Reads the current settings and secrets. Called at the start of a turn.
@@ -51,7 +56,8 @@ final class ResearchRunner: ResearchRunning {
             let settings = preferences.providerSettings
             self.init(settings: settings,
                       modelKey: secrets.modelKey(for: settings),
-                      searchKey: secrets.searchKey(for: settings))
+                      searchKey: secrets.searchKey(for: settings),
+                      readerKey: secrets.value(for: .readerAPIKey))
         }
     }
 
@@ -265,18 +271,41 @@ final class ResearchRunner: ResearchRunning {
             update { $0.searchesCompleted = index + 1 }
         }
 
-        let harvested = EvidenceExtractor.sources(from: rawResults)
+        var harvested = EvidenceExtractor.sources(from: rawResults)
+
+        // 3b — read the pages behind the top sources, if the user asked for that.
+        //
+        // Before the budget, not after: what the model is shown has to be decided with
+        // the page text in hand, or a page would be fetched and then silently dropped.
+        // Still inside the searching stage — see `ResearchTurn.runningProgressLabel` for
+        // why this does not get a `ResearchStage` case of its own.
+        harvested = await readPages(harvested, settings: settings)
+        try Task.checkCancellation()
+
         // Trimmed to what fits the evidence budget *before* it becomes the turn's source
         // list. The model is only shown the kept prefix, so a turn that recorded the
         // full list would validate the answer's citations against sources the model
         // never saw, and would offer the reader a source list the answer could not have
         // used.
-        let (evidence, droppedSources) = ResearchContext.evidence(from: harvested)
-        let sources = Array(harvested.prefix(evidence.count))
-        update { $0.sources = sources }
+        let (evidence, droppedSources, withheldPageText) = ResearchContext.evidence(from: harvested)
+        var sources = Array(harvested.prefix(evidence.count))
+        // A page that did not fit is cleared from the source too, so the list the reader
+        // sees and the evidence the model saw agree about which pages were read.
+        for index in sources.indices where withheldPageText.contains(sources[index].number) {
+            sources[index].fullText = nil
+        }
+        let kept = sources
+        update { turn in
+            turn.sources = kept
+            turn.pagesRead = kept.filter { $0.wasRead }.count
+        }
         if droppedSources > 0 {
             trace.log("Evidence budget dropped \(droppedSources) sources")
             update { $0.addNotice(.evidenceTrimmed) }
+        }
+        if !withheldPageText.isEmpty {
+            trace.log("Evidence budget withheld \(withheldPageText.count) page texts")
+            update { $0.addNotice(.pageTextTrimmed) }
         }
         trace.log("Evidence: \(sources.count) sources from \(rawResults.count) results")
 
@@ -348,6 +377,49 @@ final class ResearchRunner: ResearchRunning {
         }
         trace.log("Assessment: \(assessment.findings.count) findings in "
                   + String(format: "%.1fs", trace.elapsed))
+    }
+
+    /// Reads the pages behind the highest-ranked sources, when page reading is on.
+    ///
+    /// Best-effort throughout, and deliberately so. A reader that cannot be built (a
+    /// missing key, an unusable endpoint), a handshake that fails, a page behind a
+    /// consent wall — none of those fails the turn. They leave every source with its
+    /// snippet, which is exactly the behaviour of the mode that is off, and the notice
+    /// says so rather than the run collapsing over an enrichment.
+    private func readPages(_ sources: [Source], settings: ProviderSettings) async -> [Source] {
+        guard settings.pageReading != .off, !sources.isEmpty else { return sources }
+
+        let reader: PageReading?
+        do {
+            reader = try PageReaderFactory.make(settings: settings, readerKey: environment.readerKey,
+                                                trace: trace, transport: transport)
+            try await reader?.connect()
+        } catch {
+            trace.warn("Page reading unavailable: \(ResearchError.safeLabel(for: error))")
+            update { $0.addNotice(.noPagesRead) }
+            return sources
+        }
+        guard let reader else { return sources }
+
+        let targets = Array(sources.prefix(PageReaderFactory.maxPages))
+        update { $0.pagesAttempted = targets.count }
+        // Not `trace.stage`, which is for throwing work: reading never throws, because
+        // a page that cannot be read is a source that keeps its snippet.
+        let started = trace.elapsed
+        let pages = await reader.read(targets)
+        trace.log(String(format: "Read pages via %@ in %.1fs", reader.readerName,
+                         trace.elapsed - started))
+
+        var enriched = sources
+        for index in enriched.indices {
+            guard let text = pages[enriched[index].number], !text.isEmpty else { continue }
+            enriched[index].fullText = text
+        }
+        let read = pages.values.filter { !$0.isEmpty }.count
+        update { $0.pagesRead = read }
+        trace.log("Pages read: \(read) of \(targets.count)")
+        if read == 0 { update { $0.addNotice(.noPagesRead) } }
+        return enriched
     }
 
     /// The `/direct` path: one streamed call, no search, no citations.

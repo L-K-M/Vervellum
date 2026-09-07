@@ -73,9 +73,19 @@ final class TranscriptFormatterTests: XCTestCase {
         let text = TranscriptFormatter.plainText(subject)
         XCTAssertTrue(text.contains("[3] Three — https://three.example.com"))
         XCTAssertEqual(text.components(separatedBy: "[1] One —").count, 2)
-        XCTAssertTrue(text.contains("[1] One — https://one.example.com\n"
-                                    + "[2] Two — https://two.example.com\n"
-                                    + "[3] Three — https://three.example.com"))
+        XCTAssertTrue(text.contains("[1] One — https://one.example.com (search summary)\n"
+                                    + "[2] Two — https://two.example.com (search summary)\n"
+                                    + "[3] Three — https://three.example.com (search summary)"))
+    }
+
+    /// A pasted transcript is read away from the panel, so it has to carry the same
+    /// distinction the source rows do — or every citation in it looks equally strong.
+    func testASourceSaysWhetherItsPageWasRead() {
+        var subject = turn()
+        subject.sources[0].fullText = "The page itself."
+        let text = TranscriptFormatter.plainText(subject)
+        XCTAssertTrue(text.contains("[1] One — https://one.example.com (page read)"))
+        XCTAssertTrue(text.contains("[2] Two — https://two.example.com (search summary)"))
     }
 
     func testAssessmentFailureKeepsTheAnswerEvidenceAndCaveats() {

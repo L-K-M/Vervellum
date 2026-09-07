@@ -102,6 +102,35 @@ struct SearchProfile: Codable, Equatable, Identifiable {
     }
 }
 
+/// How much of a source Vervellum reads before the model sees it.
+///
+/// A search result is a *summary*, and this whole app is built on not overstating what
+/// it knows — so reading the page is an explicit mode with an explicit cost, not a
+/// silent upgrade.
+enum PageReadingMode: String, Codable, CaseIterable, Identifiable, Equatable {
+    /// Snippets only. Nothing is fetched beyond the search call, which is what every
+    /// build before page reading did.
+    case off
+    /// Vervellum fetches the pages itself and extracts their text. The requests carry
+    /// no credentials, but the sites do learn the address they came from — this is the
+    /// only case in which Vervellum contacts a host the user did not configure.
+    case direct
+    /// A reader service fetches the pages instead — z.ai's Web Reader MCP server, or any
+    /// MCP server advertising a compatible tool. The sites see the service; the service
+    /// sees the URLs.
+    case reader
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .off: return "Snippets only"
+        case .direct: return "Fetch pages directly"
+        case .reader: return "Use a reader service"
+        }
+    }
+}
+
 /// One configured model provider.
 ///
 /// Several can exist, and which one answers is chosen at ask time — so a thread can be
@@ -192,18 +221,31 @@ struct ProviderSettings: Equatable, Codable {
     /// Which of them a run searches with. Same fallback rule as the model selection.
     var selectedSearchID: UUID?
 
+    /// How much of each source is read. See `PageReadingMode`.
+    var pageReading: PageReadingMode
+    /// The MCP endpoint used when `pageReading` is `.reader`.
+    var readerEndpoint: String
+
     static let defaultSearchEndpoint = "https://api.z.ai/api/mcp/web_search_prime/mcp"
+    /// z.ai's Web Reader MCP server, documented at
+    /// <https://docs.z.ai/devpack/mcp/reader-mcp-server>. Configurable so any MCP server
+    /// advertising a compatible reader tool can stand in.
+    static let defaultReaderEndpoint = "https://api.z.ai/api/mcp/web_reader/mcp"
 
     // MARK: Initializers
 
     init(modelProfiles: [ModelProfile],
          selectedModelID: UUID? = nil,
          searchProfiles: [SearchProfile] = [],
-         selectedSearchID: UUID? = nil) {
+         selectedSearchID: UUID? = nil,
+         pageReading: PageReadingMode = .direct,
+         readerEndpoint: String = ProviderSettings.defaultReaderEndpoint) {
         self.modelProfiles = modelProfiles
         self.selectedModelID = selectedModelID
         self.searchProfiles = searchProfiles
         self.selectedSearchID = selectedSearchID
+        self.pageReading = pageReading
+        self.readerEndpoint = readerEndpoint
     }
 
     /// The single-provider spelling: one model profile and one MCP search provider, on
@@ -215,7 +257,9 @@ struct ProviderSettings: Equatable, Codable {
     init(modelEndpoint: String = "",
          modelName: String = "",
          searchEndpoint: String = ProviderSettings.defaultSearchEndpoint,
-         searchKind: SearchProviderKind = .mcp) {
+         searchKind: SearchProviderKind = .mcp,
+         pageReading: PageReadingMode = .direct,
+         readerEndpoint: String = ProviderSettings.defaultReaderEndpoint) {
         let model = ModelProfile(name: "", endpoint: modelEndpoint, model: modelName,
                                  keyAccount: SecretAccount.modelAPIKey.rawValue)
         let search = SearchProfile(name: "", kind: searchKind, endpoint: searchEndpoint,
@@ -223,7 +267,9 @@ struct ProviderSettings: Equatable, Codable {
         self.init(modelProfiles: [model],
                   selectedModelID: model.id,
                   searchProfiles: [search],
-                  selectedSearchID: search.id)
+                  selectedSearchID: search.id,
+                  pageReading: pageReading,
+                  readerEndpoint: readerEndpoint)
     }
 
     // MARK: Selection
@@ -499,6 +545,7 @@ struct ProviderSettings: Equatable, Codable {
 
     enum CodingKeys: String, CodingKey {
         case modelProfiles, selectedModelID, searchProfiles, selectedSearchID
+        case pageReading, readerEndpoint
     }
 
     /// Lenient for the same reason `ModelProfile.init(from:)` is.
@@ -508,5 +555,9 @@ struct ProviderSettings: Equatable, Codable {
         selectedModelID = try container.decodeIfPresent(UUID.self, forKey: .selectedModelID)
         searchProfiles = try container.decodeIfPresent([SearchProfile].self, forKey: .searchProfiles) ?? []
         selectedSearchID = try container.decodeIfPresent(UUID.self, forKey: .selectedSearchID)
+        let rawMode = (try? container.decodeIfPresent(String.self, forKey: .pageReading)) ?? nil
+        pageReading = rawMode.flatMap { PageReadingMode(rawValue: $0) } ?? .direct
+        readerEndpoint = try container.decodeIfPresent(String.self, forKey: .readerEndpoint)
+            ?? Self.defaultReaderEndpoint
     }
 }

@@ -31,10 +31,15 @@ enum ResearchPrompts {
         would be satisfying to read, and not what the user seems to want to hear. \
         Distinguish established fact from contested claim, from opinion, from \
         prediction. State plainly when evidence is thin, mixed, or absent — an absence \
-        of results is never evidence that a claim is false. Search results are short \
-        summaries, not full articles: never claim to have read a page, never invent a \
-        quotation, and never assert a specific detail that only the full article could \
-        contain.
+        of results is never evidence that a claim is false.
+
+        Each piece of evidence says what it is, and the difference is not cosmetic. An \
+        entry with only a "snippet" is a short search summary, NOT the article: never \
+        claim to have read that page, never invent a quotation from it, and never \
+        assert a specific detail that only the full article could contain. An entry \
+        that also carries "page_text" is text retrieved from the page itself — you may \
+        rely on it and quote it, and it may be truncated, in which case it ends with \
+        "[…]" and says nothing about what followed.
         """
 
     /// Appended to the calls whose reply is parsed as JSON.
@@ -150,6 +155,10 @@ enum ResearchPrompts {
         none; "opinion" normally cites nothing. Cite only numbers that appear in the \
         supplied evidence. Do not manufacture a disagreement where there is none, and \
         do not upgrade a thin summary to "supported" because the claim sounds right. \
+        A snippet shows what a search engine said a page is about, not what the page \
+        says: a claim that only the article could settle is "insufficient" when its \
+        only evidence is a snippet, and may be "supported" when the evidence carries \
+        that page's own "page_text". \
         A claim about the current state of affairs that rests only on undated sources, \
         or on sources that predate a change the question could plausibly turn on, is \
         "insufficient", not "supported" — say which date the evidence reaches.

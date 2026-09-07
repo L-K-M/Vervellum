@@ -65,6 +65,10 @@ struct SecretAccount: Hashable {
     static let modelAPIKey = SecretAccount(rawValue: "model-api-key")
     /// The web-search key.
     static let searchAPIKey = SecretAccount(rawValue: "search-api-key")
+    /// The page-reader service's key. A separate slot even when it holds the same z.ai
+    /// Coding Plan credential as the search key: two services, two items, so revoking
+    /// or rotating one does not silently break the other.
+    static let readerAPIKey = SecretAccount(rawValue: "reader-api-key")
 
     /// A slot for a provider profile added after the first.
     ///

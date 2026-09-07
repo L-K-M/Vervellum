@@ -156,11 +156,15 @@ VervellumTests/              macOS-only tests (hotkeys, panel geometry, Accessib
 
 `Sources/VervellumKit/Core/`:
 
-- `Research/` — the pipeline. `ResearchRunner` orchestrates the four stages and is
+- `Research/` — the pipeline. `ResearchRunner` orchestrates the stages and is
   driven by both front ends; `ChatCompletionsClient` talks to the model over
   `HTTPTransport`, and search goes through the `SearchBackend` seam —
   `SearchMCPClient` for an MCP server, `SearXNGClient` for a SearXNG instance's own
-  JSON API, chosen by `SearchBackendFactory`; `ResearchPrompts` holds the prompts; `PlanParser` /
+  JSON API, chosen by `SearchBackendFactory`. `MCPSession` is the shared
+  MCP-over-HTTP transport those clients and the page reader all speak; `PageReading`
+  and `PageReaderFactory` (`DirectPageReader`, `ReaderMCPClient`) fetch the pages behind
+  the top sources, and `HTMLTextExtractor` turns them into text.
+  `ResearchPrompts` holds the prompts; `PlanParser` /
   `AssessmentParser`, `CitationValidator`, `SourceHarvester`, `EvidenceExtractor`,
   `ResearchContext` and `ProviderSettings` are pure and carry the validation rules.
 - `Store/` — `ThreadLibrary` (the versioned document) and `ThreadArchive`.
@@ -245,7 +249,18 @@ dependency tree would end that.
   `ResearchError` Vervellum wrote. `ResearchError.safeLabel(for:)` is the only thing
   that may reach the log for a foreign error, and it emits a type name.
 - **Never follow a redirect.** `HTTPTransport` refuses every one, because `URLSession`
-  would re-send the `Authorization` header to the new host.
+  would re-send the `Authorization` header to the new host. The one place a redirect is
+  *honoured* is `DirectPageReader`, which reads the `Location` off the refused 3xx and
+  starts a **fresh, credential-free** request — at most twice, re-validating each hop as
+  an absolute `http(s)` URL. That preserves the rule's actual reason rather than
+  relaxing it, and applies only to requests that carry no key. Nothing that sends a
+  credential may use `HTTPTransport.fetch`.
+- **A page Vervellum read is still untrusted data.** Extracted page text goes into the
+  same evidence block, under the same prompt, and cannot become a citation — Vervellum
+  still owns the numbered list. And a source is marked as read **only when the model
+  actually saw its text**: when the evidence budget withholds a page, `ResearchRunner`
+  clears `Source.fullText` so the panel, the transcript and the model agree. Do not
+  "optimise" that by keeping the text for display.
 - **A search backend never leaves the model guessing at a schema.** An MCP server
   advertises its tool and `SearchMCPClient` fetches it rather than assuming; a plain
   JSON API has nothing to advertise, so `SearXNGClient` supplies a schema and checks
@@ -358,7 +373,10 @@ dependency tree would end that.
   fact-checked in review — state what is implemented, never what is aspirational.
 - **Do** treat every prompt in `ResearchPrompts` as product surface. Each one enforces
   a named property, documented at the top of the file. Changing a prompt without
-  saying which property it defends is a regression waiting to happen.
+  saying which property it defends is a regression waiting to happen. The `trust`
+  prompt's evidence paragraph is per-*entry* for a reason: `snippet` alone is a search
+  summary and may not be quoted, `page_text` is the page and may be. Do not collapse
+  the two back into one rule in either direction.
 - **Do** assume Developer ID + notarization, not the App Store — the sandbox cannot
   grant the Accessibility access the selection feature needs.
 - **Don't** add dependencies; prefer system frameworks.

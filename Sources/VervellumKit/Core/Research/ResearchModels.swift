@@ -12,6 +12,19 @@ struct Source: Codable, Identifiable, Equatable {
     var snippet: String
     /// Explicitly defaulted so the memberwise initializer can omit it.
     var publishedAt: String? = nil
+    /// The page's own text, when Vervellum read the page rather than only its summary.
+    ///
+    /// Nil is the normal state and means exactly one thing: **the answer could only have
+    /// seen the snippet.** It is cleared rather than kept when a page was read but its
+    /// text did not fit the model's context, because a source shown as read that the
+    /// model never read is precisely the overstatement this app exists to avoid.
+    ///
+    /// Optional, so the synthesized decoder reads it with `decodeIfPresent` and a thread
+    /// written before page reading still loads.
+    var fullText: String? = nil
+
+    /// Whether the answer could have been written from the page rather than a summary.
+    var wasRead: Bool { !(fullText ?? "").isEmpty }
 
     /// The registrable-looking host, for a compact source chip ("apple.com").
     var domain: String {
@@ -19,7 +32,9 @@ struct Source: Codable, Identifiable, Equatable {
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
-    enum CodingKeys: String, CodingKey { case id, number, url, title, snippet, publishedAt }
+    enum CodingKeys: String, CodingKey {
+        case id, number, url, title, snippet, publishedAt, fullText
+    }
 }
 
 /// A search the model asked for, with the arguments it wrote.
@@ -177,6 +192,12 @@ enum TurnNotice: String, Codable, Equatable {
     case unreadableVerdictDropped
     /// The assessment call failed, so the answer's claims were never checked.
     case assessmentUnavailable
+    /// Page reading was on, but no page could be read — so every source is a summary,
+    /// exactly as if it were off.
+    case noPagesRead
+    /// A page was read but its text did not fit the model's context, so the answer saw
+    /// that source's summary only.
+    case pageTextTrimmed
     /// A notice written by a newer build that this one does not know. Kept rather than
     /// failing the whole document: a `notices` array that refused to decode used to make
     /// an older build start from an empty library and overwrite the newer file.
@@ -210,6 +231,12 @@ enum TurnNotice: String, Codable, Equatable {
         case .assessmentUnavailable:
             return "The answer's claims could not be checked, because the assessment call failed. "
                 + "Nothing below the answer has been verified."
+        case .noPagesRead:
+            return "No page could be read in full, so every source below is a search summary. "
+                + "A summary cannot show that a page says what the answer claims it says."
+        case .pageTextTrimmed:
+            return "A page was read but did not fit the model's context, so the answer saw that "
+                + "source's summary only. It is listed as a summary."
         case .unknown:
             return "This turn carries a note recorded by a newer version of Vervellum."
         }
@@ -230,6 +257,11 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// trail while the searching stage lasts; meaningless once the stage has passed.
     var searchesCompleted: Int = 0
     var sources: [Source] = []
+    /// How many pages Vervellum tried to read, and how many it got. Zero for a turn
+    /// where page reading was off, which is also what a thread written before page
+    /// reading decodes to.
+    var pagesAttempted: Int = 0
+    var pagesRead: Int = 0
     /// The streamed markdown answer, with `[n]` citations.
     var answer: String = ""
     var findings: [Finding] = []
@@ -255,14 +287,15 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     // property defaults and requires *every* key, so the first field ever added to
     // `ResearchTurn` would make every existing threads.json unreadable — and both the
     // file and its `.bak` have the same shape, so the whole library would silently
-    // reset. Only `searchesCompleted` is tolerant of absence today; every other field
-    // still fails loudly, and a field added later must be given the same treatment
-    // here or old documents stop loading again.
+    // reset. `searchesCompleted`, `pagesAttempted` and `pagesRead` are tolerant of
+    // absence; every other field still fails loudly, and a field added later must be
+    // given the same treatment here or old documents stop loading again.
     //
     // `encode(to:)` stays synthesized: with this `CodingKeys` covering every stored
     // property, the existing round-trip test catches a field that goes missing from it.
     enum CodingKeys: String, CodingKey {
         case id, question, askedAt, stage, reading, searches, searchesCompleted, sources
+        case pagesAttempted, pagesRead
         case answer, findings, limitations, followups, notices, failure, duration, model
     }
 
@@ -276,6 +309,8 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         searches = try container.decode([PlannedSearch].self, forKey: .searches)
         searchesCompleted = try container.decodeIfPresent(Int.self, forKey: .searchesCompleted) ?? 0
         sources = try container.decode([Source].self, forKey: .sources)
+        pagesAttempted = try container.decodeIfPresent(Int.self, forKey: .pagesAttempted) ?? 0
+        pagesRead = try container.decodeIfPresent(Int.self, forKey: .pagesRead) ?? 0
         answer = try container.decode(String.self, forKey: .answer)
         findings = try container.decode([Finding].self, forKey: .findings)
         limitations = try container.decode(String.self, forKey: .limitations)
@@ -300,8 +335,20 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// The stage label for a running turn, with live progress where there is any:
     /// "Searching the web · 2 of 3" rather than a static label for the whole stage.
     /// Terminal stages fall through to `stage.label`, which is also what logs use.
+    ///
+    /// Page reading reports through the searching stage rather than through a stage of
+    /// its own. A new `ResearchStage` case would be an enum value an older build cannot
+    /// decode, and `ResearchStage` — unlike `TurnNotice` — has no lenient decoder, so it
+    /// would make a thread written here unreadable there. A label is not worth that.
     var runningProgressLabel: String {
-        guard case .searching = stage, !searches.isEmpty else { return stage.label }
+        guard case .searching = stage else { return stage.label }
+        // No "2 of 3" here, unlike the searches: the direct reader fetches the pages
+        // concurrently, so there is no meaningful running count to report — only how
+        // many are being read.
+        if pagesAttempted > 0 {
+            return "Reading \(pagesAttempted) page\(pagesAttempted == 1 ? "" : "s")"
+        }
+        guard !searches.isEmpty else { return stage.label }
         let attempted = min(max(searchesCompleted, 1), searches.count)
         return "Searching the web · \(attempted) of \(searches.count)"
     }

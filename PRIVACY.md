@@ -44,7 +44,8 @@ your IP address.
 - **API keys.** In your login Keychain on macOS, one item per configured provider, so
   one provider's key is never sent to another. On Linux, explicit `VERVELLUM_MODEL_KEY`
   and `VERVELLUM_SEARCH_KEY` override reads for the first model provider and the search
-  server; otherwise the keyring is tried before the mode-0600 file. Writes prefer the keyring, then the file. In every case they are never written to
+  server, and `VERVELLUM_READER_KEY` for a reader service; otherwise the keyring is
+  tried before the mode-0600 file. Writes prefer the keyring, then the file. In every case they are never written to
   preferences, never included as configuration in a stored thread, and never logged.
   Typed or pasted secrets are still ordinary user text; review what you send.
 
