@@ -35,13 +35,28 @@ struct ComposerView: NSViewRepresentable {
 
     /// One line of padding plus one line of text; the field never starts taller.
     ///
-    /// Both bounds scale with the text: a fixed 30pt minimum clips the first line at the
-    /// largest setting, and a fixed maximum would show fewer and fewer lines as the text
-    /// grew. Six lines stays six lines.
-    static func minimumHeight(_ scale: Double) -> CGFloat { 30 * scale }
+    /// Both bounds scale with the text, *proportionally*: a fixed 30pt minimum clips the
+    /// first line at the largest setting, and a fixed maximum would show fewer and fewer
+    /// lines as the text grew. Scaling both by the same factor is what makes six lines
+    /// stay six lines.
+    static func minimumHeight(_ scale: Double) -> CGFloat { 30 * sane(scale) }
     /// Roughly six lines. Past that the thread above disappears, which is worse than
     /// scrolling inside the composer.
-    static func maximumHeight(_ scale: Double) -> CGFloat { 132 * scale }
+    static func maximumHeight(_ scale: Double) -> CGFloat { 132 * sane(scale) }
+
+    /// A scale that can safely become a font size and a frame height.
+    ///
+    /// `CorePreferences` clamps the preference on read, so nothing odd should reach here.
+    /// It is clamped again anyway because this end is where it would hurt: a NaN scale
+    /// becomes a NaN frame height, which is layout warnings and a field nobody can see,
+    /// and a zero becomes a composer of no height that cannot be typed into or fixed.
+    /// Clamping on read as well as on write is the same rule every bounded value in
+    /// `CorePreferences` already follows, for the same reason — a settings file a crash
+    /// interrupted must not be able to produce an app the user cannot recover.
+    private static func sane(_ scale: Double) -> Double {
+        guard scale.isFinite else { return 1 }
+        return min(max(scale, 0.5), 3)
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -51,7 +66,7 @@ struct ComposerView: NSViewRepresentable {
         textView.coordinator = context.coordinator
         textView.isRichText = false
         textView.allowsUndo = true
-        textView.font = .systemFont(ofSize: Self.baseFontSize * scale)
+        textView.font = .systemFont(ofSize: Self.baseFontSize * Self.sane(scale))
         textView.textContainerInset = NSSize(width: 4, height: 6)
         textView.drawsBackground = false
         textView.isVerticallyResizable = true
@@ -91,7 +106,7 @@ struct ComposerView: NSViewRepresentable {
         // from the same scale in the same frame — so if it ever did not, the box and the
         // glyphs inside it would disagree until the draft was retyped. This makes that
         // impossible to get wrong rather than relying on the setter's reach.
-        let wanted = NSFont.systemFont(ofSize: Self.baseFontSize * scale)
+        let wanted = NSFont.systemFont(ofSize: Self.baseFontSize * Self.sane(scale))
         if textView.font != wanted {
             textView.font = wanted
             let whole = NSRange(location: 0, length: (textView.string as NSString).length)
@@ -111,7 +126,7 @@ struct ComposerView: NSViewRepresentable {
     /// The height the composer wants for its current content, clamped.
     static func height(for text: String, width: CGFloat, scale: Double = 1.0) -> CGFloat {
         let storage = NSTextStorage(string: text.isEmpty ? " " : text,
-                                    attributes: [.font: NSFont.systemFont(ofSize: baseFontSize * scale)])
+                                    attributes: [.font: NSFont.systemFont(ofSize: baseFontSize * sane(scale))])
         let container = NSTextContainer(size: NSSize(width: max(width - 8, 1),
                                                     height: .greatestFiniteMagnitude))
         container.lineFragmentPadding = 5

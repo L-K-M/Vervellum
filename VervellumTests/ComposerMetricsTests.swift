@@ -37,7 +37,30 @@ final class ComposerMetricsTests: XCTestCase {
                        ComposerView.maximumHeight(1.0), accuracy: 0.5)
         XCTAssertEqual(ComposerView.height(for: many, width: width, scale: 1.4),
                        ComposerView.maximumHeight(1.4), accuracy: 0.5)
-        XCTAssertGreaterThan(ComposerView.maximumHeight(1.4), ComposerView.maximumHeight(1.0))
+
+        // "The line count holds" is proportionality, not merely growth: a ceiling that
+        // inched up by half a point would satisfy a bare `>` while fitting fewer lines at
+        // the larger size. Pinning the ratio of ceiling to floor says exactly what the
+        // name promises — the box holds the same number of lines at every scale.
+        for scale in [0.85, 1.0, 1.4] {
+            XCTAssertEqual(ComposerView.maximumHeight(scale) / ComposerView.minimumHeight(scale),
+                           ComposerView.maximumHeight(1.0) / ComposerView.minimumHeight(1.0),
+                           accuracy: 0.001,
+                           "the ceiling must scale with the floor, at scale \(scale)")
+        }
+    }
+
+    /// The preference is clamped on read, so nothing odd should reach the metric. It is
+    /// pinned here anyway because this end is where it would hurt: a NaN scale becomes a
+    /// NaN frame height — layout warnings and a field nobody can see — and a zero becomes
+    /// a composer of no height that cannot be typed into or fixed.
+    func testAHostileScaleStillProducesUsableGeometry() {
+        for scale in [0.0, -1.0, .nan, .infinity, 1000.0] {
+            let height = ComposerView.height(for: "A question", width: width, scale: scale)
+            XCTAssertFalse(height.isNaN, "at scale \(scale)")
+            XCTAssertGreaterThan(height, 0, "at scale \(scale)")
+            XCTAssertLessThanOrEqual(height, ComposerView.maximumHeight(3), "at scale \(scale)")
+        }
     }
 
     /// Unscaled by default, so anything measuring the composer without an opinion gets
