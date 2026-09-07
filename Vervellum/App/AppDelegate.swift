@@ -46,6 +46,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         engine.onThreadChanged = { [weak self] thread in
             self?.store.save(thread)
         }
+        // A Stop, or a run that failed, cancels the questions still waiting behind it.
+        // They go back to the composer rather than being dropped — the same channel the
+        // selection shortcut uses, which already appends to whatever is being typed.
+        engine.onQueueReturned = { questions in
+            guard !questions.isEmpty else { return }
+            NotificationCenter.default.post(
+                name: .vervellumSeedComposer, object: nil,
+                userInfo: ["text": questions.joined(separator: "\n\n")])
+        }
 
         let panelController = makePanelController()
         self.panelController = panelController
