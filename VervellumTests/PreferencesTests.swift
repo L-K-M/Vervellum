@@ -97,4 +97,35 @@ final class PreferencesTests: XCTestCase {
         preferences.providerSettings = settings
         XCTAssertEqual(Preferences(defaults: defaults).providerSettings, settings)
     }
+
+    // MARK: Change notification
+
+    /// `onChanged` is what re-places an open panel, so it has to fire for the settings
+    /// the panel's geometry is built from — including the ones that live in
+    /// `CorePreferences` and reach here through its own callback.
+    func testEveryKindOfSettingAnnouncesItsChange() {
+        let preferences = Preferences(defaults: defaults)
+        var announcements = 0
+        preferences.onChanged = { announcements += 1 }
+
+        preferences.panelWidth = 500          // a macOS-only number
+        preferences.panelSide = .leading      // a macOS-only string
+        preferences.dismissOnFocusLoss = true // a macOS-only flag
+        preferences.textScale = 1.2           // a shared setting, via CorePreferences
+
+        XCTAssertEqual(announcements, 4)
+    }
+
+    /// The whole reason `onChanged` exists rather than `objectWillChange`: a subscriber
+    /// has to be able to read the value it was told about. `objectWillChange` fires
+    /// before the write and would hand back the old width, which would place the panel
+    /// one drag-step behind the slider forever.
+    func testTheChangeIsAlreadyStoredWhenItIsAnnounced() {
+        let preferences = Preferences(defaults: defaults)
+        var widthWhenAnnounced: CGFloat?
+        // Weakly, or the closure and the object it is stored on would retain each other.
+        preferences.onChanged = { [weak preferences] in widthWhenAnnounced = preferences?.panelWidth }
+        preferences.panelWidth = 512
+        XCTAssertEqual(widthWhenAnnounced, 512)
+    }
 }
