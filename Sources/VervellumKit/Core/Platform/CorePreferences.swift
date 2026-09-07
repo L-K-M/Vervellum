@@ -82,6 +82,8 @@ final class CorePreferences {
         /// How much of each source is read, and where a reader service lives.
         static let pageReading = "pageReading"
         static let readerEndpoint = "readerEndpoint"
+        /// The panel's theme, JSON-encoded. See `PanelPalette`.
+        static let panelPalette = "panelPalette"
         static let historyEnabled = "historyEnabled"
         static let showProcessTrail = "showProcessTrail"
         static let submitOnReturn = "submitOnReturn"
@@ -196,6 +198,25 @@ final class CorePreferences {
     var redactSecrets: Bool {
         get { store.bool(for: Key.redactSecrets) ?? Default.redactSecrets }
         set { store.setBool(newValue, for: Key.redactSecrets); onChange?() }
+    }
+
+    /// How the panel looks.
+    ///
+    /// Stored as one JSON blob rather than a key per colour: a theme is a set that has
+    /// to be applied or replaced whole, and twenty loose keys would let a half-written
+    /// file produce a palette that is half Terminal and half Paper. Unreadable text
+    /// falls back to the default for the same reason `modelProviders` does — losing a
+    /// theme is a bad afternoon, refusing to launch is worse.
+    var panelPalette: PanelPalette {
+        get {
+            guard let text = store.string(for: Key.panelPalette),
+                  let decoded = PanelPalette.decode(text) else { return .ember }
+            return decoded
+        }
+        set {
+            store.setString(PanelPalette.encode(newValue), for: Key.panelPalette)
+            onChange?()
+        }
     }
 
     var textScale: Double {

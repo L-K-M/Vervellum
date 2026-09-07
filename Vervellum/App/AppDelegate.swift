@@ -68,7 +68,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // rather than at the next summon. Width and edge used to be sampled once per
         // show, so the only way to see what the width slider did was to close the panel
         // and open it again — with the previous width no longer on screen to compare to.
-        preferences.onChanged = { [weak self] in self?.panelController?.preferencesDidChange() }
+        // The theme is read through a stored value rather than the environment — see
+        // `PanelTheme.palette` — so the composition root is what keeps it in step. Set
+        // here as well as on change, because the panel can be built before anything is
+        // edited.
+        PanelTheme.palette = preferences.panelPalette
+        preferences.onChanged = { [weak self] in
+            guard let self else { return }
+            PanelTheme.palette = self.preferences.panelPalette
+            self.panelController?.preferencesDidChange()
+        }
         observePanelPreview()
 
         installMainMenu()

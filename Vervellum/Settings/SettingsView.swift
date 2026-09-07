@@ -1,10 +1,11 @@
 import SwiftUI
 
-/// The settings window: four panes, in the order a new user needs them.
+/// The settings window: five panes, in the order a new user needs them.
 ///
 /// Providers comes first because nothing works until it is filled in — a settings
 /// window whose first pane is "Appearance" makes an unconfigured app look broken
-/// rather than unfinished.
+/// rather than unfinished. Appearance comes last before About for the same reason: it
+/// is the pane people spend the longest in and the one they need least on day one.
 struct SettingsView: View {
 
     @ObservedObject var preferences: Preferences
@@ -20,6 +21,8 @@ struct SettingsView: View {
                 .tabItem { Label("Shortcuts", systemImage: "command") }
             GeneralView(preferences: preferences, store: store, updateChecker: updateChecker)
                 .tabItem { Label("General", systemImage: "gearshape") }
+            AppearanceView(preferences: preferences)
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }
             AboutView(updateChecker: updateChecker)
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
