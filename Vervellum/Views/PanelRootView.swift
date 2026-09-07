@@ -29,6 +29,14 @@ struct PanelRootView: View {
     @State private var queueFullNote = false
     /// Earlier questions, newest first, for ↑/↓ recall in the composer.
     @State private var recallIndex: Int?
+
+    /// Which command in the completion list the keyboard has highlighted, if any.
+    ///
+    /// Starts nil, and typing returns it to nil. Nothing is preselected on purpose: with
+    /// a highlighted row Return *accepts* the completion, so preselecting the first one
+    /// would mean typing `/new` and pressing Return filled the field instead of starting
+    /// a thread — the command would become harder to run, not easier.
+    @State private var completionIndex: Int?
     /// Whether the thread is scrolled to its end. Streams auto-scroll only while
     /// pinned, so reading back during an answer is never undone by the next token.
     @State private var isPinnedToBottom = true
@@ -177,6 +185,12 @@ struct PanelRootView: View {
                 guard isPinnedToBottom else { return }
                 scrollToBottom(proxy)
             }
+            .onChange(of: draft) { _, _ in
+                // Any edit invalidates the highlight: the list is filtered by what has
+                // been typed, so an index kept across a keystroke could point past the
+                // end of the shorter list, or at a command the user has just filtered out.
+                completionIndex = nil
+            }
             .onChange(of: engine.thread.turns.count) { _, _ in
                 scrollToBottom(proxy)
             }
@@ -237,17 +251,22 @@ struct PanelRootView: View {
             if !engine.queue.isEmpty {
                 QueuedQuestionsView(queued: engine.queue) { engine.removeQueued($0) }
             }
-            if let completions = ComposerCommand.completions(for: draft) {
-                CommandCompletionsView(completions: completions) { name in
-                    draft = "/\(name) "
+            if let completions = visibleCompletions {
+                CommandCompletionsView(completions: completions,
+                                       selected: completionIndex,
+                                       onHover: { completionIndex = $0 }) { name in
+                    accept(completion: name)
                 }
             }
             HStack(alignment: .bottom, spacing: PanelTheme.Space.small) {
                 ComposerView(text: $draft,
                              placeholder: placeholder,
                              submitOnReturn: preferences.submitOnReturn,
-                             onSubmit: { submit(draft) },
-                             onArrow: recall)
+                             // Return takes the highlighted command when there is one,
+                             // and otherwise asks. The send button below always asks:
+                             // clicking it is not a way to pick from a list.
+                             onSubmit: { submitFromComposer() },
+                             onArrow: moveThroughCompletionsOrHistory)
                     // The composer's height for its content, laid out at the width the
                     // row will actually give it: the measured row width minus what the
                     // send button and its spacing take. Measured rather than derived
@@ -419,11 +438,16 @@ struct PanelRootView: View {
 
     private struct CommandCompletionsView: View {
         let completions: [ComposerCommand.Entry]
+        /// The keyboard-highlighted row, or nil while the user is still typing.
+        var selected: Int?
+        /// Pointing at a row highlights it, so the mouse and the arrow keys cannot
+        /// disagree about which command Return would take.
+        var onHover: (Int?) -> Void = { _ in }
         var onSelect: (String) -> Void
 
         var body: some View {
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(completions) { command in
+                ForEach(Array(completions.enumerated()), id: \.element.id) { index, command in
                     Button { onSelect(command.name) } label: {
                         HStack(spacing: PanelTheme.Space.small) {
                             Text("/\(command.name)")
@@ -437,9 +461,13 @@ struct PanelRootView: View {
                         }
                         .padding(.horizontal, PanelTheme.Space.small)
                         .padding(.vertical, 3)
+                        .background(index == selected
+                            ? PanelTheme.Palette.accent.opacity(0.18)
+                            : Color.clear)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .onHover { inside in onHover(inside ? index : nil) }
                 }
             }
             .padding(.vertical, PanelTheme.Space.tight)
@@ -530,7 +558,11 @@ struct PanelRootView: View {
     /// leave the history list, then clear a draft, then close the panel. Closing on
     /// the first press would throw away a half-typed question.
     private func backOut() {
-        if showsHistory {
+        if completionIndex != nil {
+            // Undoes the highlight before anything else, so Escape steps back out of the
+            // command list without also throwing away the question being typed.
+            completionIndex = nil
+        } else if showsHistory {
             showsHistory = false
         } else if notice != nil {
             notice = nil
@@ -605,6 +637,48 @@ struct PanelRootView: View {
     /// ↑/↓ walk back through this thread's earlier questions, the way a shell does.
     /// Only acts on an empty or recalled draft, so it never eats an arrow press in
     /// the middle of editing a long question.
+    /// The command list currently on screen, if any.
+    private var visibleCompletions: [ComposerCommand.Entry]? {
+        ComposerCommand.completions(for: draft)
+    }
+
+    /// Fills the composer with the chosen command, exactly as clicking the row does.
+    ///
+    /// It does not *run* the command. A completion is a way to finish typing, and
+    /// several of these take an argument — `/model gpt-4o`, `/direct <question>` — so
+    /// running on selection would make the argument unreachable for half the list. The
+    /// trailing space is where the argument goes; a command that takes none is one more
+    /// Return away, which is what clicking has always cost.
+    private func accept(completion name: String) {
+        draft = "/\(name) "
+        completionIndex = nil
+    }
+
+    /// Return from the composer: take the highlighted command, or ask.
+    private func submitFromComposer() {
+        if let completions = visibleCompletions,
+           let index = completionIndex, completions.indices.contains(index) {
+            accept(completion: completions[index].name)
+            return
+        }
+        submit(draft)
+    }
+
+    /// ↑/↓ drive the command list while it is open, and the question history otherwise.
+    ///
+    /// The list wins because it is the thing on screen: an arrow key that walked past a
+    /// visible list to change the text underneath it would be startling. Nothing is lost
+    /// — history recall already declines to run while the draft is non-empty, and a
+    /// visible completion list means the draft starts with a slash.
+    private func moveThroughCompletionsOrHistory(_ up: Bool) -> Bool {
+        guard let completions = visibleCompletions, !completions.isEmpty else {
+            return recall(up)
+        }
+        completionIndex = ComposerCommand.moveSelection(completionIndex, up: up,
+                                                        count: completions.count)
+        return true
+    }
+
     private func recall(_ up: Bool) -> Bool {
         let questions = engine.thread.turns.map(\.question).reversed().map { $0 }
         guard !questions.isEmpty else { return false }

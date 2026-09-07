@@ -95,6 +95,30 @@ enum ComposerCommand: Equatable {
         return matches.isEmpty ? nil : matches
     }
 
+    /// Where ↑/↓ moves the highlight in a completion list of `count` rows.
+    ///
+    /// Pure and here rather than in the view so the edges are testable on both platforms,
+    /// because the edges are the whole design:
+    ///
+    /// * **Nothing is highlighted to begin with.** Return *accepts* a highlighted row, so
+    ///   preselecting the first would mean typing `/new` and pressing Return filled the
+    ///   field instead of starting a thread.
+    /// * **↓ enters at the top, ↑ enters at the bottom**, the way a menu opened upward
+    ///   behaves.
+    /// * **↑ off the top returns to nothing highlighted** rather than wrapping. Wrapping
+    ///   would leave no way back to plain typing without the mouse.
+    /// * **↓ off the bottom stays**, because there is nowhere below the list to go.
+    static func moveSelection(_ current: Int?, up: Bool, count: Int) -> Int? {
+        guard count > 0 else { return nil }
+        let last = count - 1
+        switch (up, current) {
+        case (false, nil): return 0
+        case (true, nil): return last
+        case (false, let index?): return min(index + 1, last)
+        case (true, let index?): return index == 0 ? nil : index - 1
+        }
+    }
+
     /// The configured model providers as markdown, for a bare `/model`.
     ///
     /// Lives here rather than on `ProviderSettings` so both front ends print the same
