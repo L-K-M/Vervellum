@@ -407,8 +407,10 @@ final class ResearchRunner: ResearchRunning {
         // a page that cannot be read is a source that keeps its snippet.
         let started = trace.elapsed
         let pages = await reader.read(targets)
-        trace.log(String(format: "Read pages via %@ in %.1fs", reader.readerName,
-                         trace.elapsed - started))
+        // Interpolate the name, format only the number — the shape the other trace lines
+        // in this file already use.
+        trace.log("Read pages via \(reader.readerName) in "
+                  + String(format: "%.1fs", trace.elapsed - started))
 
         var enriched = sources
         for index in enriched.indices {
