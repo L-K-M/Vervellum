@@ -84,8 +84,21 @@ struct ComposerView: NSViewRepresentable {
         if textView.string != text { textView.string = text }
         // Applied on every update, not only at construction: the text-size slider moves
         // while the panel is open, and an NSTextView keeps whatever font it was given.
+        //
+        // The font is then applied to the storage explicitly as well. With
+        // `isRichText = false` the text view holds one font for everything and setting
+        // `font` should already reach it, but the panel measures the composer's height
+        // from the same scale in the same frame — so if it ever did not, the box and the
+        // glyphs inside it would disagree until the draft was retyped. This makes that
+        // impossible to get wrong rather than relying on the setter's reach.
         let wanted = NSFont.systemFont(ofSize: Self.baseFontSize * scale)
-        if textView.font != wanted { textView.font = wanted }
+        if textView.font != wanted {
+            textView.font = wanted
+            let whole = NSRange(location: 0, length: (textView.string as NSString).length)
+            if whole.length > 0 {
+                textView.textStorage?.addAttribute(.font, value: wanted, range: whole)
+            }
+        }
         // Never made read-only, not even while a turn is running. The moment a
         // clarification or a follow-up occurs to you is *while* the answer is arriving,
         // and a field that refuses the keystroke loses the thought. What a submitted

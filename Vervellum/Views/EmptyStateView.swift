@@ -78,6 +78,7 @@ struct EmptyStateView: View {
                 .foregroundStyle(PanelTheme.Palette.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Button("Open Settings", action: onOpenSettings)
+                .font(PanelTheme.Font.body(textScale))
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .tint(PanelTheme.Palette.accent)

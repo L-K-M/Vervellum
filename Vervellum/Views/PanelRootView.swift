@@ -9,7 +9,15 @@ import AppKit
 /// scroll away.
 struct PanelRootView: View {
 
-    @Environment(\.panelTextScale) private var textScale
+    /// Read from the preference rather than the environment.
+    ///
+    /// This view is the one that *publishes* the panel-wide value, and `.environment`
+    /// only reaches descendants — a view's own `@Environment` resolves against what its
+    /// parent injected, which here is the unscaled default. Reading it back would have
+    /// left this body's own chrome (the notices, the model chip) fixed at 1.0 while
+    /// everything below it scaled: the exact bug this change exists to remove. The
+    /// nested views below keep their `@Environment` reads, because they are descendants.
+    private var textScale: Double { preferences.textScale }
 
     @ObservedObject var engine: ResearchEngine
     @ObservedObject var store: ThreadStore
