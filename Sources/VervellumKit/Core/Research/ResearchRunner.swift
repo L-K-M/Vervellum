@@ -51,7 +51,7 @@ final class ResearchRunner: ResearchRunning {
             let settings = preferences.providerSettings
             self.init(settings: settings,
                       modelKey: secrets.modelKey(for: settings),
-                      searchKey: secrets.value(for: .searchAPIKey))
+                      searchKey: secrets.searchKey(for: settings))
         }
     }
 
@@ -181,28 +181,26 @@ final class ResearchRunner: ResearchRunning {
 
         // 1 — connect to search first. A missing or rejected search key should fail
         // before the (billable, slower) planning call, not after it.
-        guard let searchKey = environment.searchKey,
-              let searchEndpoint = ProviderSettings.validatedEndpointURL(settings.searchEndpoint) else {
-            throw ResearchError("The web-search key or endpoint is missing. Check the provider settings.")
+        //
+        // Which backend that is comes from the selected search provider: an MCP server
+        // that advertises its own tool, or a SearXNG instance answering its JSON API
+        // directly. Everything below this line is written against `SearchBackend` and
+        // does not know which — the planner writes arguments against whatever schema was
+        // advertised, and `EvidenceExtractor` walks any result shape.
+        guard let searchProfile = settings.selectedSearch else {
+            throw ResearchError("No web-search provider is configured. Check the provider settings.")
         }
         update { $0.stage = .planning }
-        let search = SearchMCPClient(endpoint: searchEndpoint, apiKey: searchKey,
-                                     trace: trace, transport: transport)
+        let search = try SearchBackendFactory.make(profile: searchProfile,
+                                                  apiKey: environment.searchKey,
+                                                  trace: trace, transport: transport)
         try await search.connect()
         try Task.checkCancellation()
 
         // 2 — plan.
-        // Built up rather than written as a nested literal: a heterogeneous literal in
-        // an `Any` position cannot be inferred.
-        var toolDescriptor: [String: Any] = ["name": search.tool?.name ?? ""]
-        if let description = search.tool?.description, !description.isEmpty {
-            toolDescriptor["description"] = description
-        }
-        toolDescriptor["inputSchema"] = search.tool?.inputSchema ?? [String: Any]()
-
         let planContext = ResearchContext.assemble(
             question: question, history: history, today: today,
-            extra: ["search_tool": toolDescriptor])
+            extra: ["search_tool": search.toolDescriptor])
         if planContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
 
         let planObject = try await chat.completeJSON(

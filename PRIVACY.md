@@ -14,9 +14,10 @@ Vervellum makes network requests in exactly three cases, each with a fixed purpo
   retrieved evidence to the model provider selected when you asked — and to no other
   configured provider. `/direct` uses that same provider without searching. Provider
   handling is governed by its own policy; Vervellum cannot recall what was sent.
-- **Search queries.** Model-written queries derived from your question and context
-  go to your configured search server. They are shown to you in the panel's process
-  trail before the answer arrives.
+- **Search queries.** Model-written queries derived from your question and context go
+  to the search provider selected when you asked — an MCP server, or a SearXNG instance
+  queried directly — and to no other configured provider. They are shown to you in the
+  panel's process trail before the answer arrives.
 - **Update checks.** Vervellum asks GitHub's public releases API whether a newer version
   exists — on launch and about once a day while automatic checks are enabled (they can
   be turned off in Settings), or when you choose Check for Updates. The request contains

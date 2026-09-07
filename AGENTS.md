@@ -157,8 +157,10 @@ VervellumTests/              macOS-only tests (hotkeys, panel geometry, Accessib
 `Sources/VervellumKit/Core/`:
 
 - `Research/` — the pipeline. `ResearchRunner` orchestrates the four stages and is
-  driven by both front ends; `ChatCompletionsClient` and `SearchMCPClient` talk to the
-  providers over `HTTPTransport`; `ResearchPrompts` holds the prompts; `PlanParser` /
+  driven by both front ends; `ChatCompletionsClient` talks to the model over
+  `HTTPTransport`, and search goes through the `SearchBackend` seam —
+  `SearchMCPClient` for an MCP server, `SearXNGClient` for a SearXNG instance's own
+  JSON API, chosen by `SearchBackendFactory`; `ResearchPrompts` holds the prompts; `PlanParser` /
   `AssessmentParser`, `CitationValidator`, `SourceHarvester`, `EvidenceExtractor`,
   `ResearchContext` and `ProviderSettings` are pure and carry the validation rules.
 - `Store/` — `ThreadLibrary` (the versioned document) and `ThreadArchive`.
@@ -244,6 +246,12 @@ dependency tree would end that.
   that may reach the log for a foreign error, and it emits a type name.
 - **Never follow a redirect.** `HTTPTransport` refuses every one, because `URLSession`
   would re-send the `Authorization` header to the new host.
+- **A search backend never leaves the model guessing at a schema.** An MCP server
+  advertises its tool and `SearchMCPClient` fetches it rather than assuming; a plain
+  JSON API has nothing to advertise, so `SearXNGClient` supplies a schema and checks
+  the model's arguments back against it. Both go through
+  `SearchBackend.validate(_:required:properties:)`. Do not add a backend that sends
+  model-written arguments unchecked.
 - **Keys live in the Keychain only.** Never in `UserDefaults`, never in a thread,
   never in a log line, never in a URL's userinfo. **One item per configured provider**:
   `SecretAccount.modelAPIKey` / `.searchAPIKey` are the accounts every pre-profiles

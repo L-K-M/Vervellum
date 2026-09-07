@@ -31,9 +31,11 @@ struct ProvidersView: View {
     /// the click — see the type's documentation.
     @State private var accountsToDelete: [SecretAccount] = []
 
-    @State private var searchEndpoint = ""
-    @State private var searchKeyEntry = ""
-    @State private var hasSearchKey = false
+    @State private var searchProfiles: [SearchProfile] = []
+    @State private var selectedSearchID: UUID?
+    @State private var searchKeyEntries: [UUID: String] = [:]
+    @State private var storedSearchKeys: Set<UUID> = []
+
     @State private var status: String?
     @State private var statusIsProblem = false
 
@@ -76,20 +78,31 @@ struct ProvidersView: View {
 
             SettingsSection(
                 title: "Web search",
-                footnote: "Vervellum searches through a Model Context Protocol server. The default "
-                    + "is z.ai's hosted web-search endpoint, which needs a Coding Plan key.") {
-                LabeledContent("Endpoint") {
-                    TextField(ProviderSettings.defaultSearchEndpoint, text: $searchEndpoint)
-                        .textFieldStyle(.roundedBorder)
+                footnote: "An MCP server — z.ai's hosted web search is the default and needs a "
+                    + "Coding Plan key — or a SearXNG instance queried directly. A SearXNG "
+                    + "instance must list `json` under `search.formats` in its settings.yml; most "
+                    + "do not by default, and one that does not answers HTTP 403.") {
+
+                if searchProfiles.count > 1 {
+                    Picker("Search with", selection: Binding(
+                        get: { selectedSearchID ?? searchProfiles.first?.id },
+                        set: { selectedSearchID = $0 })) {
+                        ForEach(searchProfiles) { profile in
+                            Text(profile.displayName).tag(Optional(profile.id))
+                        }
+                    }
                 }
-                keyRow(title: "Search key",
-                       entry: $searchKeyEntry,
-                       hasStored: hasSearchKey,
-                       note: "Required. Research cannot run without it.") {
-                    try? keychain.delete(.searchAPIKey)
-                    hasSearchKey = keychain.hasValue(for: .searchAPIKey)
-                    statusIsProblem = false
-                    status = "Key removed."
+
+                ForEach($searchProfiles) { $profile in
+                    searchCard($profile)
+                }
+
+                Button {
+                    let added = SearchProfile.new(kind: .searxng)
+                    searchProfiles.append(added)
+                    selectedSearchID = added.id
+                } label: {
+                    Label("Add a search provider", systemImage: "plus")
                 }
             }
 
@@ -152,6 +165,51 @@ struct ProvidersView: View {
                     in: RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 
+    /// One search provider's fields. The protocol picker comes first, because it decides
+    /// what the address below it means and whether a key is needed at all.
+    @ViewBuilder
+    private func searchCard(_ profile: Binding<SearchProfile>) -> some View {
+        let id = profile.wrappedValue.id
+        let kind = profile.wrappedValue.kind
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                TextField("Name (optional)", text: profile.name)
+                    .textFieldStyle(.roundedBorder)
+                Picker("", selection: profile.kind) {
+                    ForEach(SearchProviderKind.allCases) { kind in
+                        Text(kind.label).tag(kind)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                if searchProfiles.count > 1 {
+                    Button("Remove") { removeSearch(id) }
+                        .help("Remove this provider and, on Save, its stored key")
+                }
+            }
+            LabeledContent(kind == .searxng ? "Address" : "Endpoint") {
+                TextField(kind.endpointPlaceholder, text: profile.endpoint)
+                    .textFieldStyle(.roundedBorder)
+            }
+            keyRow(title: kind.requiresKey ? "Search key" : "Token",
+                   entry: Binding(get: { searchKeyEntries[id] ?? "" },
+                                  set: { searchKeyEntries[id] = $0 }),
+                   hasStored: storedSearchKeys.contains(id),
+                   note: kind.requiresKey
+                       ? "Required. Research cannot run without it."
+                       : "Optional — only for an instance behind an authenticating proxy. "
+                         + "SearXNG itself takes no key.") {
+                try? keychain.delete(profile.wrappedValue.secretAccount)
+                storedSearchKeys.remove(id)
+                statusIsProblem = false
+                status = "Key removed."
+            }
+        }
+        .padding(10)
+        .background(Color.primary.opacity(0.04),
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
     @ViewBuilder
     private func keyRow(title: String,
                         entry: Binding<String>,
@@ -187,11 +245,17 @@ struct ProvidersView: View {
                             keyAccount: SecretAccount.modelAPIKey.rawValue)]
             : settings.modelProfiles
         selectedID = settings.selectedModel?.id ?? profiles.first?.id
-        searchEndpoint = settings.searchEndpoint
+        searchProfiles = settings.searchProfiles.isEmpty
+            ? [SearchProfile(name: "", kind: .mcp, endpoint: ProviderSettings.defaultSearchEndpoint,
+                             keyAccount: SecretAccount.searchAPIKey.rawValue)]
+            : settings.searchProfiles
+        selectedSearchID = settings.selectedSearch?.id ?? searchProfiles.first?.id
         keyEntries = [:]
+        searchKeyEntries = [:]
         accountsToDelete = []
         storedKeys = Set(profiles.filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
-        hasSearchKey = keychain.hasValue(for: .searchAPIKey)
+        storedSearchKeys = Set(searchProfiles
+            .filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
     }
 
     private func remove(_ id: UUID) {
@@ -205,11 +269,22 @@ struct ProvidersView: View {
         if selectedID == id { selectedID = profiles.first?.id }
     }
 
+    private func removeSearch(_ id: UUID) {
+        guard let index = searchProfiles.firstIndex(where: { $0.id == id }),
+              searchProfiles.count > 1 else { return }
+        accountsToDelete.append(searchProfiles[index].secretAccount)
+        searchProfiles.remove(at: index)
+        searchKeyEntries[id] = nil
+        storedSearchKeys.remove(id)
+        if selectedSearchID == id { selectedSearchID = searchProfiles.first?.id }
+    }
+
     private func save() {
         var settings = preferences.providerSettings
         settings.modelProfiles = profiles
         settings.selectedModelID = selectedID ?? profiles.first?.id
-        settings.searchEndpoint = searchEndpoint
+        settings.searchProfiles = searchProfiles
+        settings.selectedSearchID = selectedSearchID ?? searchProfiles.first?.id
         preferences.providerSettings = settings
 
         do {
@@ -224,11 +299,13 @@ struct ProvidersView: View {
                 guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 try keychain.set(typed, for: profile.secretAccount)
             }
-            keyEntries = [:]
-            if !searchKeyEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                try keychain.set(searchKeyEntry, for: .searchAPIKey)
+            for profile in searchProfiles {
+                let typed = searchKeyEntries[profile.id] ?? ""
+                guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                try keychain.set(typed, for: profile.secretAccount)
             }
-            searchKeyEntry = ""
+            keyEntries = [:]
+            searchKeyEntries = [:]
         } catch {
             status = error.localizedDescription
             statusIsProblem = true
@@ -240,9 +317,12 @@ struct ProvidersView: View {
         // back on the same call stack is not a documented guarantee. Getting it wrong
         // would report "The web-search key is missing." on the very save that supplied it.
         storedKeys = Set(profiles.filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
-        let searchKeyPresent = keychain.hasValue(for: .searchAPIKey)
-        hasSearchKey = searchKeyPresent
+        storedSearchKeys = Set(searchProfiles
+            .filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
+        // Re-read: `normalized()` may have filled in the default MCP endpoint, and the
+        // form should show what was stored rather than what was typed.
         let saved = preferences.providerSettings
+        searchProfiles = saved.searchProfiles
 
         // Report configuration problems now rather than at the first question, but do
         // not try to reach the providers: a connectivity check here would cost a
@@ -250,7 +330,7 @@ struct ProvidersView: View {
         // Only the selected provider is checked, which is what `problems` validates —
         // a second one the user is halfway through configuring is not an error yet.
         let problems = saved.problems(hasModelKey: keychain.hasModelKey(for: saved),
-                                      hasSearchKey: searchKeyPresent)
+                                      hasSearchKey: keychain.hasSearchKey(for: saved))
         statusIsProblem = !problems.isEmpty
         status = problems.isEmpty ? "Saved." : problems.joined(separator: " ")
     }

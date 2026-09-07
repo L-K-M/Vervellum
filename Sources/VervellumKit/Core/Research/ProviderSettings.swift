@@ -1,5 +1,107 @@
 import Foundation
 
+/// How Vervellum reaches a web-search backend.
+///
+/// Two kinds, because the two are genuinely different protocols and pretending
+/// otherwise would mean guessing: an MCP server is a JSON-RPC session that advertises
+/// its own tool schema, while a SearXNG instance is a plain `GET /search?format=json`
+/// with a schema Vervellum has to supply itself. See `SearchBackend`.
+enum SearchProviderKind: String, Codable, CaseIterable, Identifiable, Equatable {
+    /// A Model Context Protocol server over HTTP — z.ai, Brave, Tavily, Exa, or a
+    /// SearXNG-to-MCP bridge. The tool and its argument schema are discovered.
+    case mcp
+    /// A SearXNG instance's own JSON API, with no MCP server in between. The instance
+    /// must list `json` under `search.formats`; it is not enabled by default.
+    case searxng
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .mcp: return "MCP server"
+        case .searxng: return "SearXNG"
+        }
+    }
+
+    /// Whether a run is refused without a key. A SearXNG instance is usually open, or
+    /// fronted by a proxy rather than a token, so demanding one there would block the
+    /// most common self-hosted setup; a key is still sent when there is one.
+    var requiresKey: Bool {
+        switch self {
+        case .mcp: return true
+        case .searxng: return false
+        }
+    }
+
+    /// The placeholder its endpoint field shows.
+    var endpointPlaceholder: String {
+        switch self {
+        case .mcp: return ProviderSettings.defaultSearchEndpoint
+        case .searxng: return "https://searx.example.org"
+        }
+    }
+}
+
+/// One configured web-search provider.
+///
+/// The same shape as `ModelProfile` and for the same reasons — its own endpoint, its
+/// own key slot, a name for the picker — plus the protocol it speaks, which is the one
+/// thing a search provider has that a model provider does not.
+struct SearchProfile: Codable, Equatable, Identifiable {
+
+    var id: UUID
+    var name: String
+    var kind: SearchProviderKind
+    /// An MCP endpoint, or a SearXNG instance's address.
+    var endpoint: String
+    /// The `SecretAccount` raw value holding this provider's key.
+    var keyAccount: String
+
+    init(id: UUID = UUID(), name: String, kind: SearchProviderKind, endpoint: String, keyAccount: String) {
+        self.id = id
+        self.name = name
+        self.kind = kind
+        self.endpoint = endpoint
+        self.keyAccount = keyAccount
+    }
+
+    static func new(name: String = "",
+                    kind: SearchProviderKind = .mcp,
+                    endpoint: String = "") -> SearchProfile {
+        let id = UUID()
+        return SearchProfile(id: id, name: name, kind: kind, endpoint: endpoint,
+                             keyAccount: SecretAccount.derived(from: .searchAPIKey, for: id).rawValue)
+    }
+
+    var secretAccount: SecretAccount { SecretAccount(rawValue: keyAccount) }
+
+    var displayName: String {
+        let named = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !named.isEmpty { return named }
+        return ProviderSettings.host(of: endpoint) ?? kind.label
+    }
+
+    // MARK: Codable
+
+    enum CodingKeys: String, CodingKey { case id, name, kind, endpoint, keyAccount }
+
+    /// Lenient, for the reason `ModelProfile.init(from:)` is.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        self.id = id
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        // An unrecognised kind reads as `.mcp` rather than failing the whole list: that
+        // is what a settings file written by a build with more backends looks like, and
+        // one unknown entry must not cost the user every other provider.
+        let rawKind = (try? container.decodeIfPresent(String.self, forKey: .kind)) ?? nil
+        kind = rawKind.flatMap { SearchProviderKind(rawValue: $0) } ?? .mcp
+        endpoint = try container.decodeIfPresent(String.self, forKey: .endpoint) ?? ""
+        keyAccount = try container.decodeIfPresent(String.self, forKey: .keyAccount)
+            ?? SecretAccount.derived(from: .searchAPIKey, for: id).rawValue
+    }
+}
+
 /// One configured model provider.
 ///
 /// Several can exist, and which one answers is chosen at ask time — so a thread can be
@@ -84,9 +186,11 @@ struct ProviderSettings: Equatable, Codable {
     /// Which of them a new turn uses. Nil, or an id no longer in the list, falls back to
     /// the first: a settings file that lost its selection must not stop research.
     var selectedModelID: UUID?
-    /// The web-search MCP endpoint. Configurable so a self-hosted or proxied gateway can
-    /// be substituted, but it defaults to the documented one.
-    var searchEndpoint: String
+
+    /// Configured web-search providers, in the order the picker shows them.
+    var searchProfiles: [SearchProfile]
+    /// Which of them a run searches with. Same fallback rule as the model selection.
+    var selectedSearchID: UUID?
 
     static let defaultSearchEndpoint = "https://api.z.ai/api/mcp/web_search_prime/mcp"
 
@@ -94,26 +198,32 @@ struct ProviderSettings: Equatable, Codable {
 
     init(modelProfiles: [ModelProfile],
          selectedModelID: UUID? = nil,
-         searchEndpoint: String = ProviderSettings.defaultSearchEndpoint) {
+         searchProfiles: [SearchProfile] = [],
+         selectedSearchID: UUID? = nil) {
         self.modelProfiles = modelProfiles
         self.selectedModelID = selectedModelID
-        self.searchEndpoint = searchEndpoint
+        self.searchProfiles = searchProfiles
+        self.selectedSearchID = selectedSearchID
     }
 
-    /// The single-provider spelling: one model profile, on the account every
-    /// pre-profiles build wrote.
+    /// The single-provider spelling: one model profile and one MCP search provider, on
+    /// the two accounts every pre-profiles build wrote.
     ///
     /// Both the migration path for an existing settings file and the shape the Linux
     /// front end and the tests construct, so it is a real initializer rather than a
     /// test helper.
     init(modelEndpoint: String = "",
          modelName: String = "",
-         searchEndpoint: String = ProviderSettings.defaultSearchEndpoint) {
-        let profile = ModelProfile(name: "", endpoint: modelEndpoint, model: modelName,
-                                   keyAccount: SecretAccount.modelAPIKey.rawValue)
-        self.init(modelProfiles: [profile],
-                  selectedModelID: profile.id,
-                  searchEndpoint: searchEndpoint)
+         searchEndpoint: String = ProviderSettings.defaultSearchEndpoint,
+         searchKind: SearchProviderKind = .mcp) {
+        let model = ModelProfile(name: "", endpoint: modelEndpoint, model: modelName,
+                                 keyAccount: SecretAccount.modelAPIKey.rawValue)
+        let search = SearchProfile(name: "", kind: searchKind, endpoint: searchEndpoint,
+                                   keyAccount: SecretAccount.searchAPIKey.rawValue)
+        self.init(modelProfiles: [model],
+                  selectedModelID: model.id,
+                  searchProfiles: [search],
+                  selectedSearchID: search.id)
     }
 
     // MARK: Selection
@@ -123,6 +233,10 @@ struct ProviderSettings: Equatable, Codable {
     /// configured".
     var selectedModel: ModelProfile? {
         modelProfiles.first { $0.id == selectedModelID } ?? modelProfiles.first
+    }
+
+    var selectedSearch: SearchProfile? {
+        searchProfiles.first { $0.id == selectedSearchID } ?? searchProfiles.first
     }
 
     /// Selects the profile whose name or model identifier matches `name`, exactly first
@@ -159,6 +273,19 @@ struct ProviderSettings: Equatable, Codable {
         set { mutateSelectedModel { $0.model = newValue } }
     }
 
+    /// The selected search provider's endpoint. Same rules as `modelEndpoint`: this is
+    /// what the Linux settings file and every older one speak.
+    var searchEndpoint: String {
+        get { selectedSearch?.endpoint ?? Self.defaultSearchEndpoint }
+        set { mutateSelectedSearch { $0.endpoint = newValue } }
+    }
+
+    /// The protocol the selected search provider speaks.
+    var searchKind: SearchProviderKind {
+        get { selectedSearch?.kind ?? .mcp }
+        set { mutateSelectedSearch { $0.kind = newValue } }
+    }
+
     private mutating func mutateSelectedModel(_ body: (inout ModelProfile) -> Void) {
         if let selected = selectedModel,
            let index = modelProfiles.firstIndex(where: { $0.id == selected.id }) {
@@ -173,6 +300,40 @@ struct ProviderSettings: Equatable, Codable {
         body(&profile)
         modelProfiles = [profile]
         selectedModelID = profile.id
+    }
+
+    private mutating func mutateSelectedSearch(_ body: (inout SearchProfile) -> Void) {
+        if let selected = selectedSearch,
+           let index = searchProfiles.firstIndex(where: { $0.id == selected.id }) {
+            body(&searchProfiles[index])
+            selectedSearchID = searchProfiles[index].id
+            return
+        }
+        var profile = SearchProfile(name: "", kind: .mcp, endpoint: Self.defaultSearchEndpoint,
+                                    keyAccount: SecretAccount.searchAPIKey.rawValue)
+        body(&profile)
+        searchProfiles = [profile]
+        selectedSearchID = profile.id
+    }
+
+    /// Applies the rules that must hold however the value was assembled, before it is
+    /// stored.
+    ///
+    /// One rule today: an **MCP** search endpoint left blank reverts to the documented
+    /// default, because an app with no search at all is worse than one pointed at z.ai.
+    /// A blank SearXNG address stays blank — there is no default instance, and quietly
+    /// substituting an MCP endpoint would research against a provider the row does not
+    /// name, which is the worst of both.
+    func normalized() -> ProviderSettings {
+        var copy = self
+        for index in copy.searchProfiles.indices {
+            let trimmed = copy.searchProfiles[index].endpoint
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            copy.searchProfiles[index].endpoint = trimmed.isEmpty && copy.searchProfiles[index].kind == .mcp
+                ? Self.defaultSearchEndpoint
+                : trimmed
+        }
+        return copy
     }
 
     // MARK: Validation
@@ -197,10 +358,18 @@ struct ProviderSettings: Equatable, Codable {
             problems.append("The model name is empty.")
         }
         if requiresSearch {
-            if Self.validatedEndpointURL(searchEndpoint) == nil {
-                problems.append("The search endpoint must be an HTTPS URL.")
+            let kind = searchKind
+            let usable = kind == .searxng
+                ? Self.searxngSearchURL(from: searchEndpoint) != nil
+                : Self.validatedEndpointURL(searchEndpoint) != nil
+            if !usable {
+                problems.append(kind == .searxng
+                    ? "The SearXNG address must be an HTTPS URL (HTTP is allowed only for localhost)."
+                    : "The search endpoint must be an HTTPS URL.")
             }
-            if !hasSearchKey {
+            // A SearXNG instance is usually open, or fronted by a proxy rather than a
+            // token; demanding a key there would block the most common self-hosted setup.
+            if kind.requiresKey, !hasSearchKey {
                 problems.append("The web-search key is missing.")
             }
         }
@@ -231,6 +400,18 @@ struct ProviderSettings: Equatable, Codable {
         return try? JSONDecoder().decode([ModelProfile].self, from: data)
     }
 
+    static func encodeSearchProfiles(_ profiles: [SearchProfile]) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(profiles) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decodeSearchProfiles(_ text: String) -> [SearchProfile]? {
+        guard let data = text.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode([SearchProfile].self, from: data)
+    }
+
     // MARK: URL shaping
 
     /// The Chat Completions URL to POST to.
@@ -253,6 +434,27 @@ struct ProviderSettings: Equatable, Codable {
     }
 
     private static let versionSuffix = try! NSRegularExpression(pattern: #"/v[0-9]+$"#)
+
+    /// The SearXNG JSON search URL for an instance address.
+    ///
+    /// Users paste the instance's home page (`https://searx.example.org`), because that
+    /// is what a SearXNG instance advertises, so `/search` is appended when it is not
+    /// already there. A full path is used as typed, which is what an instance behind a
+    /// prefix (`https://example.org/searx/search`) needs, without a second setting.
+    ///
+    /// Any query string or fragment the user pasted along with the address is dropped:
+    /// merging it with the search arguments would send a filter nobody asked for, and a
+    /// pasted `?q=test` would fight the real query.
+    static func searxngSearchURL(from raw: String) -> URL? {
+        guard var components = validatedURLComponents(raw) else { return nil }
+        var path = components.path
+        while path.hasSuffix("/") { path.removeLast() }
+        if !path.hasSuffix("/search") { path += "/search" }
+        components.path = path
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
 
     /// A validated absolute endpoint URL, or nil.
     static func validatedEndpointURL(_ raw: String) -> URL? {
@@ -295,14 +497,16 @@ struct ProviderSettings: Equatable, Codable {
 
     // MARK: Codable
 
-    enum CodingKeys: String, CodingKey { case modelProfiles, selectedModelID, searchEndpoint }
+    enum CodingKeys: String, CodingKey {
+        case modelProfiles, selectedModelID, searchProfiles, selectedSearchID
+    }
 
     /// Lenient for the same reason `ModelProfile.init(from:)` is.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         modelProfiles = try container.decodeIfPresent([ModelProfile].self, forKey: .modelProfiles) ?? []
         selectedModelID = try container.decodeIfPresent(UUID.self, forKey: .selectedModelID)
-        searchEndpoint = try container.decodeIfPresent(String.self, forKey: .searchEndpoint)
-            ?? Self.defaultSearchEndpoint
+        searchProfiles = try container.decodeIfPresent([SearchProfile].self, forKey: .searchProfiles) ?? []
+        selectedSearchID = try container.decodeIfPresent(UUID.self, forKey: .selectedSearchID)
     }
 }

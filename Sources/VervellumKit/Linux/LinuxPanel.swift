@@ -445,7 +445,7 @@ final class LinuxPanel {
         let settings = environment.preferences.providerSettings
         let problems = settings.problems(
             hasModelKey: environment.secrets.hasModelKey(for: settings),
-            hasSearchKey: environment.secrets.hasValue(for: .searchAPIKey))
+            hasSearchKey: environment.secrets.hasSearchKey(for: settings))
         guard problems.isEmpty else {
             return "<span weight=\"bold\">Not configured yet</span>\n\n"
                 + GTK.escape(problems.joined(separator: " ")) + "\n\n"

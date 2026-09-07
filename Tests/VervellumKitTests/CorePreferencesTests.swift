@@ -146,6 +146,50 @@ final class CorePreferencesTests: XCTestCase {
         XCTAssertEqual(settings.providerSettings.selectedModel?.name, "Added")
     }
 
+    /// The search half migrates on its own: a settings file can have a model list and
+    /// no search list, because the two arrived in different releases.
+    func testTheSearchHalfMigratesIndependentlyOfTheModelHalf() {
+        let store = MemorySettingsStore(["searchEndpoint": "https://search.example.com/mcp"])
+        let model = ModelProfile.new(name: "Only", endpoint: "https://a.example.com/v1", model: "a")
+        store.setString(ProviderSettings.encodeModelProfiles([model]), for: "modelProviders")
+
+        let settings = CorePreferences(store: store).providerSettings
+        XCTAssertEqual(settings.modelProfiles.count, 1)
+        XCTAssertEqual(settings.searchProfiles.count, 1)
+        XCTAssertEqual(settings.searchEndpoint, "https://search.example.com/mcp")
+        XCTAssertEqual(settings.searchKind, .mcp)
+    }
+
+    /// A hand-edited Linux settings file is the only way to reach SearXNG there, so the
+    /// scalar `searchProvider` key has to be honoured on the no-list path.
+    func testAHandEditedSearchProviderKindIsHonouredWithoutAList() {
+        let settings = preferences(["searchEndpoint": "https://searx.example.org",
+                                    "searchProvider": "searxng"]).providerSettings
+        XCTAssertEqual(settings.searchKind, .searxng)
+        XCTAssertEqual(settings.searchEndpoint, "https://searx.example.org")
+    }
+
+    func testSearchProvidersRoundTripAndMirrorTheSelectedOne() {
+        let store = MemorySettingsStore()
+        let settings = CorePreferences(store: store)
+        let hosted = SearchProfile.new(name: "z.ai", kind: .mcp,
+                                       endpoint: ProviderSettings.defaultSearchEndpoint)
+        let mine = SearchProfile.new(name: "Mine", kind: .searxng,
+                                     endpoint: "https://searx.example.org")
+        var value = ProviderSettings(modelEndpoint: "https://a.example.com/v1", modelName: "m")
+        value.searchProfiles = [hosted, mine]
+        value.selectedSearchID = mine.id
+        settings.providerSettings = value
+
+        XCTAssertEqual(store.string(for: "searchEndpoint"), "https://searx.example.org")
+        XCTAssertEqual(store.string(for: "searchProvider"), "searxng")
+
+        let reloaded = CorePreferences(store: store).providerSettings
+        XCTAssertEqual(reloaded.searchProfiles.map(\.name), ["z.ai", "Mine"])
+        XCTAssertEqual(reloaded.selectedSearch?.id, mine.id)
+        XCTAssertEqual(reloaded.searchKind, .searxng)
+    }
+
     /// The file store must survive a number that round-tripped as an integer, which is
     /// what happens to `1.0` in a hand-edited settings file — and what JSON gives back
     /// for `1`. Tested against the real file store, because the in-memory one does no

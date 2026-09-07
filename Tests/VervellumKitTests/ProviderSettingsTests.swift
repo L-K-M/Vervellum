@@ -245,4 +245,97 @@ final class ProviderSettingsTests: XCTestCase {
             .displayName, "api.example.com")
         XCTAssertEqual(ModelProfile.new().displayName, "Unnamed provider")
     }
+
+    // MARK: Search providers
+
+    /// The migration path for the search half: a settings file that predates the list
+    /// becomes one MCP provider on the account its Keychain item is already under.
+    func testTheSingleProviderInitializerMakesAnMCPSearchProviderOnTheLegacyAccount() {
+        let settings = ProviderSettings(modelEndpoint: "https://api.example.com/v1", modelName: "m")
+        XCTAssertEqual(settings.searchProfiles.count, 1)
+        XCTAssertEqual(settings.searchProfiles.first?.kind, .mcp)
+        XCTAssertEqual(settings.searchProfiles.first?.keyAccount, SecretAccount.searchAPIKey.rawValue)
+        XCTAssertEqual(settings.searchEndpoint, ProviderSettings.defaultSearchEndpoint)
+    }
+
+    /// A SearXNG instance is usually open, or fronted by a proxy rather than a token.
+    /// Demanding a key would block the most common self-hosted setup.
+    func testSearXNGDoesNotRequireAKeyButMCPDoes() {
+        var settings = ProviderSettings(modelEndpoint: "https://api.example.com/v1", modelName: "m",
+                                        searchEndpoint: "https://searx.example.org",
+                                        searchKind: .searxng)
+        XCTAssertTrue(settings.problems(hasModelKey: true, hasSearchKey: false).isEmpty)
+
+        settings.searchKind = .mcp
+        settings.searchEndpoint = ProviderSettings.defaultSearchEndpoint
+        XCTAssertEqual(settings.problems(hasModelKey: true, hasSearchKey: false),
+                       ["The web-search key is missing."])
+    }
+
+    /// The address is validated the way SearXNG will be reached, not as a bare endpoint:
+    /// a home-page URL is valid for SearXNG and would otherwise have to be typed with
+    /// `/search` by hand.
+    func testASearXNGAddressIsValidatedAsAnInstanceAddress() {
+        var settings = ProviderSettings(modelEndpoint: "https://api.example.com/v1", modelName: "m",
+                                        searchEndpoint: "https://searx.example.org",
+                                        searchKind: .searxng)
+        XCTAssertTrue(settings.problems(hasModelKey: true, hasSearchKey: false).isEmpty)
+
+        settings.searchEndpoint = "http://searx.example.org"
+        XCTAssertEqual(settings.problems(hasModelKey: true, hasSearchKey: false).count, 1)
+    }
+
+    /// An app with no search at all is worse than one pointed at the documented default
+    /// — but a blank SearXNG address must stay blank, or the row would name one provider
+    /// and research against another.
+    func testNormalizationFillsInABlankMCPEndpointOnly() {
+        let mcp = ProviderSettings(modelEndpoint: "https://a.example.com/v1", modelName: "m",
+                                   searchEndpoint: "   ").normalized()
+        XCTAssertEqual(mcp.searchEndpoint, ProviderSettings.defaultSearchEndpoint)
+
+        let searxng = ProviderSettings(modelEndpoint: "https://a.example.com/v1", modelName: "m",
+                                       searchEndpoint: "   ", searchKind: .searxng).normalized()
+        XCTAssertEqual(searxng.searchEndpoint, "")
+    }
+
+    func testSearchProfilesRoundTripThroughTheEncodedForm() throws {
+        let profiles = [
+            SearchProfile.new(name: "z.ai", kind: .mcp, endpoint: ProviderSettings.defaultSearchEndpoint),
+            SearchProfile.new(name: "Mine", kind: .searxng, endpoint: "https://searx.example.org"),
+        ]
+        let encoded = try XCTUnwrap(ProviderSettings.encodeSearchProfiles(profiles))
+        XCTAssertEqual(ProviderSettings.decodeSearchProfiles(encoded), profiles)
+    }
+
+    /// A settings file written by a build that knows more backends must not cost the
+    /// user every provider in it.
+    func testAnUnknownSearchKindReadsAsMCPRatherThanFailingTheList() {
+        let listing = #"[{"name":"Future","kind":"quantum","endpoint":"https://x.example.org"}]"#
+        let decoded = ProviderSettings.decodeSearchProfiles(listing)
+        XCTAssertEqual(decoded?.count, 1)
+        XCTAssertEqual(decoded?.first?.kind, .mcp)
+        XCTAssertEqual(decoded?.first?.name, "Future")
+    }
+
+    /// The two backends are told apart by protocol, not by guessing from the address.
+    func testTheBackendFactoryBuildsTheKindTheProfileNames() throws {
+        let trace = ResearchTrace(sink: SilentLog())
+        let mcp = try SearchBackendFactory.make(
+            profile: SearchProfile.new(kind: .mcp, endpoint: ProviderSettings.defaultSearchEndpoint),
+            apiKey: "k", trace: trace)
+        XCTAssertTrue(mcp is SearchMCPClient)
+
+        let searxng = try SearchBackendFactory.make(
+            profile: SearchProfile.new(kind: .searxng, endpoint: "https://searx.example.org"),
+            apiKey: nil, trace: trace)
+        XCTAssertTrue(searxng is SearXNGClient)
+    }
+
+    /// A missing MCP key fails before the billable planning call, which is why the
+    /// backend is built first.
+    func testTheBackendFactoryRefusesAnMCPProviderWithNoKey() {
+        XCTAssertThrowsError(try SearchBackendFactory.make(
+            profile: SearchProfile.new(kind: .mcp, endpoint: ProviderSettings.defaultSearchEndpoint),
+            apiKey: nil, trace: ResearchTrace(sink: SilentLog())))
+    }
 }

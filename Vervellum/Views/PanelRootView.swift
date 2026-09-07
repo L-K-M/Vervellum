@@ -451,7 +451,7 @@ struct PanelRootView: View {
         let settings = preferences.providerSettings
         isConfigured = settings
             .problems(hasModelKey: keychain.hasModelKey(for: settings),
-                      hasSearchKey: keychain.hasValue(for: .searchAPIKey))
+                      hasSearchKey: keychain.hasSearchKey(for: settings))
             .isEmpty
     }
 
