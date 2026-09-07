@@ -8,13 +8,20 @@ struct GeneralView: View {
     @ObservedObject var updateChecker: UpdateChecker
 
     @State private var showsEraseConfirmation = false
+    /// Whether the panel is on screen so these settings can be watched taking effect.
+    /// Not persisted: it is a state of this window, not a preference.
+    @State private var previewsPanel = false
 
     var body: some View {
         SettingsPane {
             SettingsSection(
                 title: "Panel",
                 footnote: "The panel opens on whichever screen your pointer is on, and floats above "
-                    + "full-screen apps without switching Spaces.") {
+                    + "full-screen apps without switching Spaces. Opening Settings dismisses it, "
+                    + "because it would otherwise cover this window — so put it back with Preview "
+                    + "to watch these settings take effect. Every change below applies to an open "
+                    + "panel immediately.") {
+                Toggle("Preview the panel while I adjust these", isOn: $previewsPanel)
                 Picker("Position", selection: Binding(
                     get: { preferences.panelSide },
                     set: { preferences.panelSide = $0 })) {
@@ -34,6 +41,24 @@ struct GeneralView: View {
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(.secondary)
                             .frame(width: 52, alignment: .trailing)
+                    }
+                }
+
+                if preferences.panelSide == .center {
+                    // Only the centered layout has a height of its own — an edge panel
+                    // fills the screen's visible height — so the control appears with the
+                    // layout it belongs to rather than sitting there doing nothing.
+                    LabeledContent("Height") {
+                        HStack {
+                            Slider(value: Binding(
+                                get: { Double(preferences.panelHeight) },
+                                set: { preferences.panelHeight = CGFloat($0) }),
+                                   in: Double(PanelPlacement.minimumHeight)...2000)
+                            Text("\(Int(preferences.panelHeight)) pt")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 52, alignment: .trailing)
+                        }
                     }
                 }
 
@@ -115,6 +140,19 @@ struct GeneralView: View {
                     Spacer()
                 }
             }
+        }
+        // The panel is a window, not a view in this hierarchy, so the toggle asks the
+        // object that owns it. See `PanelController.setPreviewing(_:)`.
+        .onChange(of: previewsPanel) { _, previewing in
+            NotificationCenter.default.post(name: .vervellumPanelPreviewChanged, object: nil,
+                                            userInfo: ["previewing": previewing])
+        }
+        // The Settings window is kept alive when it closes, so this view — and this
+        // toggle's state — survives with it. Closing the window takes the preview panel
+        // away; without this the switch would still read "on" the next time Settings was
+        // opened, describing a panel that is not there.
+        .onReceive(NotificationCenter.default.publisher(for: .vervellumSettingsDidClose)) { _ in
+            previewsPanel = false
         }
         .confirmationDialog("Delete every stored thread?",
                             isPresented: $showsEraseConfirmation) {
