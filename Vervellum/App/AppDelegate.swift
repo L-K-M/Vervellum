@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let selectionHotkey = CarbonHotkey(identifier: 2)
     private var statusItem: NSStatusItem?
     private var runningObserver: AnyCancellable?
+    private var previewObserver: NSObjectProtocol?
 
     // MARK: Lifecycle
 
@@ -54,6 +55,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             updateChecker: updateChecker,
             onShortcutsChanged: { [weak self] in self?.registerHotkeys() })
 
+        // Every setting the panel reads is applied to the open panel as it changes,
+        // rather than at the next summon. Width and edge used to be sampled once per
+        // show, so the only way to see what the width slider did was to close the panel
+        // and open it again — with the previous width no longer on screen to compare to.
+        preferences.onChanged = { [weak self] in self?.panelController?.preferencesDidChange() }
+        observePanelPreview()
+
         installMainMenu()
         installStatusItem()
         registerHotkeys()
@@ -72,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.flush()
         summonHotkey.unregister()
         selectionHotkey.unregister()
+        if let previewObserver { NotificationCenter.default.removeObserver(previewObserver) }
     }
 
     /// The app has no windows to restore, so a re-open should summon the panel rather
@@ -260,6 +269,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image?.isTemplate = true
         item.menu = makeMenu()
         statusItem = item
+    }
+
+    /// Lets the General pane put the panel on screen while its settings are adjusted.
+    /// See `PanelController.setPreviewing(_:)` for why Settings is allowed to do this.
+    private func observePanelPreview() {
+        previewObserver = NotificationCenter.default.addObserver(
+            forName: .vervellumPanelPreviewChanged, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let previewing = note.userInfo?["previewing"] as? Bool else { return }
+            self?.panelController?.setPreviewing(previewing)
+        }
     }
 
     /// Keep run state visible when the panel is hidden, without unsolicited sounds.

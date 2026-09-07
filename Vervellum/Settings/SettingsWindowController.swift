@@ -6,6 +6,13 @@ extension Notification.Name {
     /// might have changed — chiefly whether the providers are configured, which needs a
     /// Keychain hit and so is sampled rather than computed.
     static let vervellumSettingsDidClose = Notification.Name("VervellumSettingsDidCloseNotification")
+    /// Raised by the General pane to put the panel on screen (or take it away) while
+    /// the panel settings are being adjusted. Carries a `Bool` in `userInfo["previewing"]`.
+    ///
+    /// A notification rather than a closure threaded through `SettingsView`: the pane
+    /// that raises it is three `TabView` levels below the window controller, and the
+    /// object that can act on it — `AppDelegate`, which owns the panel — is above both.
+    static let vervellumPanelPreviewChanged = Notification.Name("VervellumPanelPreviewChangedNotification")
 }
 
 /// Hosts the SwiftUI settings in a standard titled window.
@@ -74,6 +81,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        // Take the preview panel back before anything else: it was put up by this
+        // window, and a preview left floating after Settings closed would look like a
+        // panel that had summoned itself.
+        NotificationCenter.default.post(name: .vervellumPanelPreviewChanged, object: nil,
+                                        userInfo: ["previewing": false])
         NotificationCenter.default.post(name: .vervellumSettingsDidClose, object: nil)
         let restore = appToRestoreOnClose
         appToRestoreOnClose = nil

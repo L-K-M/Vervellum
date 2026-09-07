@@ -24,12 +24,25 @@ final class Preferences: ObservableObject {
     /// The settings shared with the Linux build.
     let core: CorePreferences
 
+    /// Invoked after any setting has been written, with the new value already stored.
+    ///
+    /// Distinct from `objectWillChange`, and that is the whole point: `objectWillChange`
+    /// fires *before* the write, so a subscriber that read a value from it would get the
+    /// old one. The panel has to re-place itself from the *new* width the moment the
+    /// slider moves, so it needs a hook on the other side of the store.
+    var onChanged: (() -> Void)?
+
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         core = CorePreferences(store: UserDefaultsSettingsStore(defaults: defaults))
-        core.onChange = { [weak self] in self?.objectWillChange.send() }
+        // `CorePreferences.onChange` already fires after its write, so it can drive both
+        // halves: the SwiftUI republish and the after-the-fact notification.
+        core.onChange = { [weak self] in
+            self?.objectWillChange.send()
+            self?.onChanged?()
+        }
     }
 
     // MARK: macOS-only defaults
@@ -174,6 +187,7 @@ final class Preferences: ObservableObject {
                 NSLog("Vervellum: could not change the login item (status "
                       + "\(SMAppService.mainApp.status.rawValue))")
             }
+            onChanged?()
         }
     }
 
@@ -182,11 +196,13 @@ final class Preferences: ObservableObject {
     private func set(_ value: Bool, _ key: String) {
         objectWillChange.send()
         defaults.set(value, forKey: key)
+        onChanged?()
     }
 
     private func set(_ value: String, _ key: String) {
         objectWillChange.send()
         defaults.set(value, forKey: key)
+        onChanged?()
     }
 
     /// One numeric setter only: `CGFloat` and `Double` convert implicitly in Swift, so
@@ -194,6 +210,7 @@ final class Preferences: ObservableObject {
     private func setNumber(_ value: Double, _ key: String) {
         objectWillChange.send()
         defaults.set(value, forKey: key)
+        onChanged?()
     }
 }
 
