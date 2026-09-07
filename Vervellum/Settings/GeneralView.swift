@@ -8,6 +8,11 @@ struct GeneralView: View {
     /// `ThreadLibrary.keptThreadsRange`.
     static let threadLimits = [25, 50, 100, 200, 500, 1000]
 
+    /// The rounds numbers, plus whatever the limit actually is right now.
+    private var offeredThreadLimits: [Int] {
+        Array(Set(GeneralView.threadLimits + [preferences.keptThreads])).sorted()
+    }
+
 
     @ObservedObject var preferences: Preferences
     @ObservedObject var store: ThreadStore
@@ -120,7 +125,12 @@ struct GeneralView: View {
                             preferences.keptThreads = limit
                             store.keptThreads = limit
                         })) {
-                        ForEach(GeneralView.threadLimits, id: \.self) { limit in
+                        // The stored value is clamped, not snapped to this list, so a
+                        // settings file holding 7 reads back as 10 — which has no row
+                        // here, and a Picker whose selection matches no option renders
+                        // blank. Offering the current value too means the control always
+                        // shows where it actually is.
+                        ForEach(offeredThreadLimits, id: \.self) { limit in
                             Text("\(limit) threads").tag(limit)
                         }
                     }

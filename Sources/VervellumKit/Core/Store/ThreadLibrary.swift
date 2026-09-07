@@ -33,8 +33,12 @@ struct ThreadLibrary: Codable, Equatable {
     /// Inserts or replaces `thread`, keeping the list newest-first and bounded.
     /// An empty thread is never stored: summoning the panel and dismissing it
     /// without asking anything should leave no trace.
-    mutating func upsert(_ thread: ResearchThread,
-                         keeping limit: Int = ThreadLibrary.defaultKeptThreads) {
+    /// `limit` is deliberately not defaulted. A call site that forgot it would silently
+    /// enforce 200 — pruning a reader who chose 1000 down to the default — and the
+    /// compiler would say nothing. Making it explicit costs a few characters at each of
+    /// the handful of call sites and removes a whole class of quiet data loss from any
+    /// future import, merge or migration path.
+    mutating func upsert(_ thread: ResearchThread, keeping limit: Int) {
         threads.removeAll { $0.id == thread.id }
         guard !thread.isEmpty else { return }
         threads.insert(thread, at: 0)

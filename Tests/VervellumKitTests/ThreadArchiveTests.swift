@@ -20,17 +20,17 @@ final class ThreadLibraryTests: XCTestCase {
 
     func testUpsertPutsTheNewestFirst() {
         var library = ThreadLibrary()
-        library.upsert(thread("first"))
-        library.upsert(thread("second"))
+        library.upsert(thread("first"), keeping: ThreadLibrary.defaultKeptThreads)
+        library.upsert(thread("second"), keeping: ThreadLibrary.defaultKeptThreads)
         XCTAssertEqual(library.threads.map(\.title), ["second", "first"])
     }
 
     func testUpsertReplacesRatherThanDuplicates() {
         var library = ThreadLibrary()
         var subject = thread("original")
-        library.upsert(subject)
+        library.upsert(subject, keeping: ThreadLibrary.defaultKeptThreads)
         subject.turns[0].question = "edited"
-        library.upsert(subject)
+        library.upsert(subject, keeping: ThreadLibrary.defaultKeptThreads)
         XCTAssertEqual(library.threads.count, 1)
         XCTAssertEqual(library.threads.first?.title, "edited")
     }
@@ -39,7 +39,7 @@ final class ThreadLibraryTests: XCTestCase {
     /// trace on disk.
     func testAnEmptyThreadIsNeverStored() {
         var library = ThreadLibrary()
-        library.upsert(ResearchThread())
+        library.upsert(ResearchThread(), keeping: ThreadLibrary.defaultKeptThreads)
         XCTAssertTrue(library.threads.isEmpty)
     }
 
@@ -47,7 +47,7 @@ final class ThreadLibraryTests: XCTestCase {
         var library = ThreadLibrary()
         let overfill = ThreadLibrary.defaultKeptThreads + 20
         for index in 0..<overfill {
-            library.upsert(thread("q\(index)"))
+            library.upsert(thread("q\(index)"), keeping: ThreadLibrary.defaultKeptThreads)
         }
         XCTAssertEqual(library.threads.count, ThreadLibrary.defaultKeptThreads)
         XCTAssertEqual(library.threads.first?.title, "q\(ThreadLibrary.defaultKeptThreads + 19)")
@@ -55,8 +55,8 @@ final class ThreadLibraryTests: XCTestCase {
 
     func testSearchMatchesQuestionsAndAnswers() {
         var library = ThreadLibrary()
-        library.upsert(thread("photosynthesis"))
-        library.upsert(thread("tectonics"))
+        library.upsert(thread("photosynthesis"), keeping: ThreadLibrary.defaultKeptThreads)
+        library.upsert(thread("tectonics"), keeping: ThreadLibrary.defaultKeptThreads)
         XCTAssertEqual(library.search("PHOTO").count, 1)
         XCTAssertEqual(library.search("an answer about").count, 2)
         XCTAssertEqual(library.search("nothing here").count, 0)
@@ -84,7 +84,7 @@ final class ThreadArchiveTests: XCTestCase {
         var thread = ResearchThread()
         thread.turns = [turn]
         var library = ThreadLibrary()
-        library.upsert(thread)
+        library.upsert(thread, keeping: ThreadLibrary.defaultKeptThreads)
         library.finishInterruptedTurns()
         let recovered = library.threads.first?.turns.first
         XCTAssertEqual(recovered?.stage, .failed)
@@ -489,6 +489,27 @@ final class ThreadArchiveTests: XCTestCase {
         archive.keptThreads = 15
         XCTAssertEqual(archive.library.threads.count, 15)
         XCTAssertEqual(archive.library.threads.first?.title, "q39")
+    }
+
+    /// The path production uses most: an archive built with a low limit, whose `save`
+    /// prunes through `upsert(keeping:)`. Without this, `save` forgetting to forward the
+    /// limit would go unnoticed.
+    func testSavingRespectsTheConfiguredLimit() {
+        let archive = ThreadArchive(fileURL: fileURL, keptThreads: 25, debounce: 0)
+        for index in 0..<40 { archive.save(thread("q\(index)")) }
+        XCTAssertEqual(archive.library.threads.count, 25)
+        XCTAssertEqual(archive.library.threads.first?.title, "q39")
+    }
+
+    /// Turning history off empties the library in memory as well as on disk, so turning
+    /// it back on adopts nothing — there is no oversized list left to prune.
+    func testReEnablingHistoryStartsEmptyRatherThanReadoptingAFile() {
+        let archive = ThreadArchive(fileURL: fileURL, keptThreads: 15, debounce: 0)
+        for index in 0..<40 { archive.save(thread("q\(index)")) }
+        archive.isHistoryEnabled = false
+        XCTAssertTrue(archive.library.threads.isEmpty)
+        archive.isHistoryEnabled = true
+        XCTAssertTrue(archive.library.threads.isEmpty)
     }
 
     /// A file written when the limit was higher — or by a build that had no setting — is
