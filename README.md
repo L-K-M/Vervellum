@@ -70,6 +70,11 @@ runs the searches and answers based on current sources.
   a local server, a fast hosted model, a careful one — each with its own endpoint and
   its own key. Pick the one that answers next from the panel or with `/model`; every
   turn records the model that produced it.
+- **A failing provider hands the question on.** If the selected model doesn't respond,
+  rejects its key, or errors, the next provider you configured is tried, then the one
+  after it — so a rate limit somewhere else does not cost you the question. It is never
+  silent: the turn says it happened and names the model that actually answered. Off in
+  one switch, and a Stop is never re-sent to anyone.
 - **Three ways to read a page.** **Snippets only** is the old behaviour. **Fetch
   directly** is the default: Vervellum requests the page itself, with no key, no cookie
   and no referrer — the only thing it does that contacts a site you didn't configure, so

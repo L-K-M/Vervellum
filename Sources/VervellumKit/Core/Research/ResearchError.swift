@@ -20,6 +20,26 @@ struct ResearchError: LocalizedError, Equatable {
         (error as? ResearchError)?.message ?? String(describing: type(of: error))
     }
 
+    /// Whether handing the turn to the next provider in the chain could plausibly help.
+    ///
+    /// The default is yes, and the exceptions are the two failures that are *Vervellum's
+    /// own* rather than a provider's:
+    ///
+    /// * `cancelled` — the user pressed Stop. Re-asking a second provider would be the
+    ///   opposite of what they just asked for, and would spend a request to do it.
+    /// * `invalidContext` — the payload could not be encoded, or is larger than the
+    ///   context budget. That is measured before a byte leaves the machine and is the
+    ///   same at every endpoint, so every provider in the chain would fail identically.
+    ///
+    /// Everything else is worth another provider, including the ones that look like
+    /// configuration rather than weather. A rejected key, a 404 from a wrong path, a
+    /// model name the endpoint does not know: these are exactly the states a second
+    /// provider exists to cover, and the whole point of a chain is that the turn
+    /// survives one of them.
+    var isWorthAnotherProvider: Bool {
+        self != .cancelled && self != .invalidContext
+    }
+
     // MARK: Common failures
 
     static let notConfigured = ResearchError(

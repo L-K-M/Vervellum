@@ -34,6 +34,23 @@ extension SecretStore {
 
     func hasModelKey(for settings: ProviderSettings) -> Bool { modelKey(for: settings) != nil }
 
+    /// Every configured model provider's key, by profile id.
+    ///
+    /// Read in one pass at the start of a turn because the fallback chain may reach any
+    /// of them, and a key looked up lazily at the moment of the switch would be read
+    /// after the user had already had time to change it — a turn that sends one
+    /// provider's old key and another's new one is not reproducible.
+    ///
+    /// Providers with no key are simply absent: a local llama.cpp or Ollama server
+    /// takes none, and an absent entry sends no `Authorization` header at all.
+    func modelKeys(for settings: ProviderSettings) -> [UUID: String] {
+        var keys: [UUID: String] = [:]
+        for profile in settings.modelProfiles {
+            if let key = value(for: profile.secretAccount) { keys[profile.id] = key }
+        }
+        return keys
+    }
+
     /// The selected search provider's key, or nil. Same reasoning as `modelKey(for:)`.
     func searchKey(for settings: ProviderSettings) -> String? {
         settings.selectedSearch.flatMap { value(for: $0.secretAccount) }

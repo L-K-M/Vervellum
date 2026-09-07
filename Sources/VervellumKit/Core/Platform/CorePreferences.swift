@@ -48,6 +48,13 @@ final class CorePreferences {
         /// what every build before it did.
         static let pageReading = PageReadingMode.direct
         static let readerEndpoint = ProviderSettings.defaultReaderEndpoint
+        /// A failing model provider hands the turn to the next one configured.
+        ///
+        /// On, because the alternative is a turn lost to someone else's rate limit and a
+        /// question the user has to re-type. It is not a silent substitution: the turn
+        /// records the provider that answered and carries a notice saying it happened.
+        /// With one provider configured — which is most installs — it changes nothing.
+        static let modelFallback = true
         static let historyEnabled = true
         /// The search-plan and sources trail above each answer.
         static let showProcessTrail = true
@@ -79,6 +86,8 @@ final class CorePreferences {
         /// The full search-provider list, JSON-encoded. Authoritative when present.
         static let searchProviders = "searchProviders"
         static let selectedSearchProvider = "selectedSearchProvider"
+        /// Whether a failing model provider hands the turn to the next one configured.
+        static let modelFallback = "modelFallback"
         /// How much of each source is read, and where a reader service lives.
         static let pageReading = "pageReading"
         static let readerEndpoint = "readerEndpoint"
@@ -136,6 +145,7 @@ final class CorePreferences {
             store.setString(settings.modelName, for: Key.modelName)
             store.setString(settings.searchEndpoint, for: Key.searchEndpoint)
             store.setString(settings.searchKind.rawValue, for: Key.searchProvider)
+            store.setBool(settings.modelFallback, for: Key.modelFallback)
             store.setString(settings.pageReading.rawValue, for: Key.pageReading)
             store.setString(settings.readerEndpoint, for: Key.readerEndpoint)
 
@@ -153,6 +163,7 @@ final class CorePreferences {
             searchEndpoint: store.string(for: Key.searchEndpoint) ?? Default.searchEndpoint,
             searchKind: store.string(for: Key.searchProvider)
                 .flatMap { SearchProviderKind(rawValue: $0) } ?? .mcp,
+            modelFallback: store.bool(for: Key.modelFallback) ?? Default.modelFallback,
             pageReading: store.string(for: Key.pageReading)
                 .flatMap { PageReadingMode(rawValue: $0) } ?? Default.pageReading,
             readerEndpoint: store.string(for: Key.readerEndpoint) ?? Default.readerEndpoint)

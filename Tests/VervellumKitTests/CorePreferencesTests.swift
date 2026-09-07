@@ -233,4 +233,28 @@ final class CorePreferencesTests: XCTestCase {
         XCTAssertEqual(CorePreferences(store: JSONFileSettingsStore(url: file)).textScale,
                        1.0, accuracy: 0.001)
     }
+
+    // MARK: Fallback
+
+    /// On by default: a turn lost to someone else's rate limit, and a question the user
+    /// has to re-type, is the worse default. With one provider it changes nothing.
+    func testFallbackIsOnUntilItIsTurnedOff() {
+        let preferences = CorePreferences(store: MemorySettingsStore())
+        XCTAssertTrue(preferences.providerSettings.modelFallback)
+
+        var settings = preferences.providerSettings
+        settings.modelFallback = false
+        preferences.providerSettings = settings
+        XCTAssertFalse(preferences.providerSettings.modelFallback)
+    }
+
+    /// The memo in front of `providerSettings` is invalidated by its own setter and
+    /// nothing else, so a new field has to be proven to survive a real read-back.
+    func testFallbackSurvivesAFreshRead() {
+        let store = MemorySettingsStore()
+        var settings = CorePreferences(store: store).providerSettings
+        settings.modelFallback = false
+        CorePreferences(store: store).providerSettings = settings
+        XCTAssertFalse(CorePreferences(store: store).providerSettings.modelFallback)
+    }
 }

@@ -221,6 +221,14 @@ struct ProviderSettings: Equatable, Codable {
     /// Which of them a run searches with. Same fallback rule as the model selection.
     var selectedSearchID: UUID?
 
+    /// Whether a model provider that fails hands the turn to the next one configured.
+    ///
+    /// On by default, but never silent: the turn records the provider that actually
+    /// answered and carries a `modelFellBack` notice, because "which model said this"
+    /// is part of what an answer means here. Off restores the single-provider
+    /// behaviour, where a failing provider fails the turn.
+    var modelFallback: Bool
+
     /// How much of each source is read. See `PageReadingMode`.
     var pageReading: PageReadingMode
     /// The MCP endpoint used when `pageReading` is `.reader`.
@@ -238,12 +246,14 @@ struct ProviderSettings: Equatable, Codable {
          selectedModelID: UUID? = nil,
          searchProfiles: [SearchProfile] = [],
          selectedSearchID: UUID? = nil,
+         modelFallback: Bool = true,
          pageReading: PageReadingMode = .direct,
          readerEndpoint: String = ProviderSettings.defaultReaderEndpoint) {
         self.modelProfiles = modelProfiles
         self.selectedModelID = selectedModelID
         self.searchProfiles = searchProfiles
         self.selectedSearchID = selectedSearchID
+        self.modelFallback = modelFallback
         self.pageReading = pageReading
         self.readerEndpoint = readerEndpoint
     }
@@ -258,6 +268,7 @@ struct ProviderSettings: Equatable, Codable {
          modelName: String = "",
          searchEndpoint: String = ProviderSettings.defaultSearchEndpoint,
          searchKind: SearchProviderKind = .mcp,
+         modelFallback: Bool = true,
          pageReading: PageReadingMode = .direct,
          readerEndpoint: String = ProviderSettings.defaultReaderEndpoint) {
         let model = ModelProfile(name: "", endpoint: modelEndpoint, model: modelName,
@@ -268,6 +279,7 @@ struct ProviderSettings: Equatable, Codable {
                   selectedModelID: model.id,
                   searchProfiles: [search],
                   selectedSearchID: search.id,
+                  modelFallback: modelFallback,
                   pageReading: pageReading,
                   readerEndpoint: readerEndpoint)
     }
@@ -283,6 +295,22 @@ struct ProviderSettings: Equatable, Codable {
 
     var selectedSearch: SearchProfile? {
         searchProfiles.first { $0.id == selectedSearchID } ?? searchProfiles.first
+    }
+
+    /// The model providers a turn may use, in the order it will try them.
+    ///
+    /// The selected profile is always the head — a chain that did not start where the
+    /// picker points would make the picker a lie — and the rest follow in the order the
+    /// Providers list shows them, which is the only ordering the user can already see
+    /// and rearrange. There is deliberately no second, hidden ordering to configure.
+    ///
+    /// With fallback off this is just the selection, so every caller can be written
+    /// against a chain and the single-provider behaviour is the one-element case rather
+    /// than a separate path.
+    var modelChain: [ModelProfile] {
+        guard let selected = selectedModel else { return [] }
+        guard modelFallback else { return [selected] }
+        return [selected] + modelProfiles.filter { $0.id != selected.id }
     }
 
     /// Selects the profile whose name or model identifier matches `name`, exactly first
@@ -545,7 +573,7 @@ struct ProviderSettings: Equatable, Codable {
 
     enum CodingKeys: String, CodingKey {
         case modelProfiles, selectedModelID, searchProfiles, selectedSearchID
-        case pageReading, readerEndpoint
+        case modelFallback, pageReading, readerEndpoint
     }
 
     /// Lenient for the same reason `ModelProfile.init(from:)` is.
@@ -555,6 +583,9 @@ struct ProviderSettings: Equatable, Codable {
         selectedModelID = try container.decodeIfPresent(UUID.self, forKey: .selectedModelID)
         searchProfiles = try container.decodeIfPresent([SearchProfile].self, forKey: .searchProfiles) ?? []
         selectedSearchID = try container.decodeIfPresent(UUID.self, forKey: .selectedSearchID)
+        // Absent in anything written before the chain existed, and the default there is
+        // the same as the default for a fresh install: on.
+        modelFallback = try container.decodeIfPresent(Bool.self, forKey: .modelFallback) ?? true
         let rawMode = (try? container.decodeIfPresent(String.self, forKey: .pageReading)) ?? nil
         pageReading = rawMode.flatMap { PageReadingMode(rawValue: $0) } ?? .direct
         readerEndpoint = try container.decodeIfPresent(String.self, forKey: .readerEndpoint)

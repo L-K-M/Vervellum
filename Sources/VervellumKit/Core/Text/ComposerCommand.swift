@@ -114,7 +114,13 @@ enum ComposerCommand: Equatable {
             let suffix = profile.id == active ? " *(active)*" : ""
             return "\(mark) **\(profile.displayName)**\(detail)\(suffix)"
         }.joined(separator: "\n")
-        return "## Models\n\n\(rows)\n\nSwitch with `/model <name>`."
+        // Worth a line only when it can happen: with one provider, or with fallback off,
+        // saying nothing is the accurate description of what a failure will do.
+        let chain = settings.modelProfiles.count > 1 && settings.modelFallback
+            ? "\n\nIf one fails the next is tried, in the order above starting from the "
+                + "active one."
+            : ""
+        return "## Models\n\n\(rows)\n\nSwitch with `/model <name>`.\(chain)"
     }
 
     /// What to say when `/model <name>` matched nothing.

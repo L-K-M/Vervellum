@@ -338,4 +338,66 @@ final class ProviderSettingsTests: XCTestCase {
             profile: SearchProfile.new(kind: .mcp, endpoint: ProviderSettings.defaultSearchEndpoint),
             apiKey: nil, trace: ResearchTrace(sink: SilentLog())))
     }
+
+    // MARK: Fallback chain
+
+    private func chainProfile(_ name: String) -> ModelProfile {
+        ModelProfile.new(name: name, endpoint: "https://\(name).example.com/v1", model: name)
+    }
+
+    /// The chain starts at the selection, because the picker claims that provider
+    /// answers — and the rest follow in the order the Providers list shows.
+    func testTheChainStartsAtTheSelectionAndKeepsListOrder() {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let gamma = chainProfile("gamma")
+        var settings = ProviderSettings(modelProfiles: [alpha, beta, gamma],
+                                        selectedModelID: beta.id)
+        XCTAssertEqual(settings.modelChain.map(\.model), ["beta", "alpha", "gamma"])
+
+        settings.selectedModelID = alpha.id
+        XCTAssertEqual(settings.modelChain.map(\.model), ["alpha", "beta", "gamma"])
+    }
+
+    /// Off is the single-provider behaviour, expressed as a one-element chain so every
+    /// caller can be written against a chain rather than branching.
+    func testFallbackOffLeavesOnlyTheSelection() {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let settings = ProviderSettings(modelProfiles: [alpha, beta],
+                                        selectedModelID: beta.id,
+                                        modelFallback: false)
+        XCTAssertEqual(settings.modelChain.map(\.model), ["beta"])
+    }
+
+    /// A stale selection degrades to "the one at the top" everywhere else, and the chain
+    /// must not be the exception that researches with nothing.
+    func testAStaleSelectionStillProducesAChain() {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let settings = ProviderSettings(modelProfiles: [alpha, beta], selectedModelID: UUID())
+        XCTAssertEqual(settings.modelChain.map(\.model), ["alpha", "beta"])
+    }
+
+    func testNoProvidersIsAnEmptyChain() {
+        XCTAssertTrue(ProviderSettings(modelProfiles: []).modelChain.isEmpty)
+    }
+
+    /// The chain reaches endpoints the selected provider's key was never issued for, so
+    /// each profile's own slot has to be read.
+    func testEveryProvidersKeyIsCollectedByProfile() throws {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let unkeyed = chainProfile("local")
+        let settings = ProviderSettings(modelProfiles: [alpha, beta, unkeyed],
+                                        selectedModelID: alpha.id)
+        let secrets = EphemeralSecretStore()
+        try secrets.set("alpha-key", for: alpha.secretAccount)
+        try secrets.set("beta-key", for: beta.secretAccount)
+
+        let keys = secrets.modelKeys(for: settings)
+        XCTAssertEqual(keys[alpha.id], "alpha-key")
+        XCTAssertEqual(keys[beta.id], "beta-key")
+        XCTAssertNil(keys[unkeyed.id], "a local server takes no key, and sends no header")
+    }
 }

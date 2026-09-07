@@ -1,0 +1,247 @@
+import XCTest
+#if canImport(VervellumKit)
+// Linux: the portable code is its own SwiftPM module.
+@testable import VervellumKit
+#else
+// macOS: it is compiled straight into the app target, so there is no separate module.
+@testable import Vervellum
+#endif
+
+/// The fallback chain: which provider answers, when the turn moves on, and — just as
+/// important — when it must not.
+///
+/// No network anywhere. `ModelChain.perform` hands the body a `ChatCompletionsClient`,
+/// and a client is identified well enough by its `model`, so a test body can decide to
+/// fail or succeed per provider and the chain's own logic is what is under test.
+final class ModelChainTests: XCTestCase {
+
+    private func trace() -> ResearchTrace { ResearchTrace(sink: SilentLog()) }
+
+    private func profile(_ name: String, model: String? = nil) -> ModelProfile {
+        ModelProfile.new(name: name, endpoint: "https://\(name).example.com/v1",
+                         model: model ?? name)
+    }
+
+    private func chain(_ profiles: [ModelProfile]) -> ModelChain {
+        ModelChain(profiles: profiles, keys: [:], trace: trace())
+    }
+
+    // MARK: The head
+
+    /// The picker says which provider answers. A chain that started anywhere else would
+    /// make the picker wrong.
+    func testAsksTheFirstProviderWhenItAnswers() async throws {
+        let profiles = [profile("alpha"), profile("beta")]
+        var asked: [String] = []
+        let result = try await chain(profiles).perform("Plan") { client in
+            asked.append(client.model)
+            return "ok"
+        }
+        XCTAssertEqual(result, "ok")
+        XCTAssertEqual(asked, ["alpha"], "the second provider must not be contacted at all")
+    }
+
+    // MARK: Falling back
+
+    func testMovesToTheNextProviderWhenTheFirstFails() async throws {
+        let profiles = [profile("alpha"), profile("beta")]
+        var asked: [String] = []
+        let result = try await chain(profiles).perform("Plan") { client in
+            asked.append(client.model)
+            if client.model == "alpha" { throw ResearchError.connectionFailed }
+            return client.model
+        }
+        XCTAssertEqual(result, "beta")
+        XCTAssertEqual(asked, ["alpha", "beta"])
+    }
+
+    /// A rejected key is a configuration failure, not weather — and it is exactly the
+    /// state a second provider exists to cover.
+    func testARejectedKeyIsWorthAnotherProvider() async throws {
+        let profiles = [profile("alpha"), profile("beta")]
+        let result = try await chain(profiles).perform("Plan") { client in
+            if client.model == "alpha" { throw ResearchError.rejectedCredential(401) }
+            return client.model
+        }
+        XCTAssertEqual(result, "beta")
+    }
+
+    /// The switch is announced, so the runner can rename the turn's model and post the
+    /// notice. Announcing the head too would fire a "fell back" notice on every turn.
+    func testAnnouncesOnlyTheProvidersItMovesTo() async throws {
+        let profiles = [profile("alpha"), profile("beta"), profile("gamma")]
+        let subject = chain(profiles)
+        var announced: [String] = []
+        subject.onSwitch = { announced.append($0.model) }
+        _ = try await subject.perform("Plan") { client in
+            if client.model != "gamma" { throw ResearchError.connectionFailed }
+            return client.model
+        }
+        XCTAssertEqual(announced, ["beta", "gamma"], "the head is the selection, not a switch")
+    }
+
+    /// A provider that died mid-sentence has already streamed text into the turn. The
+    /// next one starts from the beginning, so the fragment has to go first.
+    func testRunsTheResetBeforeEachRetryAndNotBeforeTheFirstTry() async throws {
+        let profiles = [profile("alpha"), profile("beta")]
+        var resets = 0
+        var seenAtEntry: [Int] = []
+        _ = try await chain(profiles).perform("Answer", beforeRetry: { resets += 1 }) { client in
+            seenAtEntry.append(resets)
+            if client.model == "alpha" { throw ResearchError.streamInterrupted }
+            return client.model
+        }
+        XCTAssertEqual(seenAtEntry, [0, 1], "no reset before the first provider, one before the second")
+        XCTAssertEqual(resets, 1)
+    }
+
+    // MARK: Not falling back
+
+    /// A Stop is a Stop. Re-asking a second provider would be the opposite of what the
+    /// user just pressed, and would spend a request doing it.
+    func testACancellationIsNeverRetriedOnAnotherProvider() async {
+        let profiles = [profile("alpha"), profile("beta")]
+        var asked: [String] = []
+        do {
+            _ = try await chain(profiles).perform("Plan") { client in
+                asked.append(client.model)
+                throw ResearchError.cancelled
+            }
+            XCTFail("expected the cancellation to propagate")
+        } catch let error as ResearchError {
+            XCTAssertEqual(error, ResearchError.cancelled, "and unwrapped, not relabelled")
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+        XCTAssertEqual(asked, ["alpha"])
+    }
+
+    /// The payload is measured before a byte leaves the machine, so every provider in
+    /// the chain would fail on it identically.
+    func testAnUnencodableContextIsNeverRetriedOnAnotherProvider() async {
+        let profiles = [profile("alpha"), profile("beta")]
+        var asked: [String] = []
+        do {
+            _ = try await chain(profiles).perform("Plan") { client in
+                asked.append(client.model)
+                throw ResearchError.invalidContext
+            }
+            XCTFail("expected the error to propagate")
+        } catch let error as ResearchError {
+            XCTAssertEqual(error, ResearchError.invalidContext)
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+        XCTAssertEqual(asked, ["alpha"])
+    }
+
+    // MARK: Staying put
+
+    /// Re-testing a provider that already failed would cost a timeout per stage, and a
+    /// turn whose stages alternated between two models would be incoherent.
+    func testStaysOnTheProviderItMovedToForLaterCalls() async throws {
+        let profiles = [profile("alpha"), profile("beta")]
+        let subject = chain(profiles)
+        _ = try await subject.perform("Plan") { client in
+            if client.model == "alpha" { throw ResearchError.connectionFailed }
+            return client.model
+        }
+        var askedNext: [String] = []
+        let answer = try await subject.perform("Answer") { client in
+            askedNext.append(client.model)
+            return client.model
+        }
+        XCTAssertEqual(answer, "beta")
+        XCTAssertEqual(askedNext, ["beta"], "the failed provider is not tried again this turn")
+    }
+
+    /// The same client instance, because it remembers whether this endpoint rejected the
+    /// optional request parameters — rediscovering that on each of a turn's three calls
+    /// is what that memory exists to avoid.
+    func testReusesOneClientPerProviderAcrossCalls() async throws {
+        let profiles = [profile("alpha")]
+        let subject = chain(profiles)
+        let first = try await subject.perform("Plan") { ObjectIdentifier($0) }
+        let second = try await subject.perform("Answer") { ObjectIdentifier($0) }
+        XCTAssertEqual(first, second)
+    }
+
+    // MARK: Half-configured providers
+
+    /// A spare the user is halfway through adding must not fail a turn the providers
+    /// around it can serve.
+    func testSkipsAProviderThatIsNotConfigured() async throws {
+        let profiles = [profile("alpha"),
+                        ModelProfile.new(name: "blank", endpoint: "", model: ""),
+                        profile("gamma")]
+        var asked: [String] = []
+        let result = try await chain(profiles).perform("Plan") { client in
+            asked.append(client.model)
+            if client.model == "alpha" { throw ResearchError.connectionFailed }
+            return client.model
+        }
+        XCTAssertEqual(result, "gamma")
+        XCTAssertEqual(asked, ["alpha", "gamma"])
+    }
+
+    /// An endpoint that is not HTTPS never becomes a request.
+    func testSkipsAProviderWhoseEndpointIsUnusable() async throws {
+        let profiles = [profile("alpha"),
+                        ModelProfile.new(name: "insecure", endpoint: "http://elsewhere.example.com",
+                                         model: "insecure"),
+                        profile("gamma")]
+        let result = try await chain(profiles).perform("Plan") { client in
+            if client.model == "alpha" { throw ResearchError.connectionFailed }
+            return client.model
+        }
+        XCTAssertEqual(result, "gamma")
+    }
+
+    // MARK: Exhaustion
+
+    /// The first error is the selected provider's, and that is the one the user will act
+    /// on — not whatever the least-preferred spare happened to say.
+    func testReportsHowManyWereTriedAndKeepsTheFirstReason() async {
+        let profiles = [profile("alpha"), profile("beta"), profile("gamma")]
+        do {
+            _ = try await chain(profiles).perform("Plan") { client in
+                throw client.model == "alpha"
+                    ? ResearchError.rejectedCredential(401)
+                    : ResearchError.connectionFailed
+            }
+            XCTFail("expected the chain to fail")
+        } catch let error as ResearchError {
+            XCTAssertTrue(error.message.contains("All 3 model providers failed"), error.message)
+            XCTAssertTrue(error.message.contains("HTTP 401"),
+                          "the selected provider's reason is the actionable one: \(error.message)")
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+    }
+
+    /// With one provider the message must read exactly as it did before there was a
+    /// chain at all — "All 1 model providers failed" would be a regression in prose.
+    func testASingleProvidersFailureIsReportedUnchanged() async {
+        do {
+            _ = try await chain([profile("alpha")]).perform("Plan") { _ in
+                throw ResearchError.connectionFailed
+            }
+            XCTFail("expected the chain to fail")
+        } catch let error as ResearchError {
+            XCTAssertEqual(error, ResearchError.connectionFailed)
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+    }
+
+    func testAnEmptyChainSaysNothingIsConfigured() async {
+        do {
+            _ = try await chain([]).perform("Plan") { _ in "unreachable" }
+            XCTFail("expected the chain to fail")
+        } catch let error as ResearchError {
+            XCTAssertTrue(error.message.contains("No model provider is configured"), error.message)
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+    }
+}
