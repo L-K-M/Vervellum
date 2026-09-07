@@ -18,7 +18,10 @@ struct PanelRootView: View {
 
     @State private var draft = ""
     @State private var showsHistory = false
-    @State private var showsHelp = false
+    /// Markdown shown above the thread in place of a turn — `/help`, and the `/model`
+    /// listing. One slot rather than a flag per command: they are mutually exclusive by
+    /// nature (each replaces the last), and Escape has one thing to back out of.
+    @State private var notice: String?
     /// How many credential-shaped spans were removed from seeded text, if any.
     @State private var redactionNote: Int?
     /// Set when a question could not be queued because the queue was full. Cleared by
@@ -79,7 +82,7 @@ struct PanelRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .vervellumSeedComposer)) { note in
             guard let text = note.userInfo?["text"] as? String, !text.isEmpty else { return }
             showsHistory = false
-            showsHelp = false
+            notice = nil
             // Appended, not replaced: a user who typed half a question and then hit
             // the selection shortcut meant to add to it.
             draft = draft.isEmpty ? text : draft + "\n\n" + text
@@ -97,7 +100,7 @@ struct PanelRootView: View {
         // is deliberately kept — a half-typed question should survive a dismissal.
         .onReceive(NotificationCenter.default.publisher(for: .vervellumPanelWillHide)) { _ in
             showsHistory = false
-            showsHelp = false
+            notice = nil
             recallIndex = nil
         }
         // Opening Settings returns immediately, so refreshing there would sample the
@@ -134,15 +137,15 @@ struct PanelRootView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: PanelTheme.Space.section) {
-                    if engine.thread.isEmpty && !showsHelp {
+                    if engine.thread.isEmpty && notice == nil {
                         EmptyStateView(isConfigured: isConfigured,
                                        summonShortcut: preferences.summonHotkey.displayString,
                                        onOpenSettings: onOpenSettings,
                                        onSeedComposer: { draft = $0 })
                             .padding(.top, PanelTheme.Space.section)
                     }
-                    if showsHelp {
-                        MarkdownBody(markdown: ComposerCommand.helpText,
+                    if let notice {
+                        MarkdownBody(markdown: notice,
                                      sources: [], scale: preferences.textScale)
                             .padding(.top, PanelTheme.Space.medium)
                     }
@@ -219,6 +222,9 @@ struct PanelRootView: View {
                     .font(PanelTheme.Font.caption)
                     .foregroundStyle(PanelTheme.Palette.verdict(.mixed))
                     .padding(.horizontal, PanelTheme.Space.small)
+            }
+            if preferences.providerSettings.modelProfiles.count > 1 {
+                modelPicker
             }
             if queueFullNote {
                 Label("Up to \(ResearchEngine.maxQueued) questions can wait at once. "
@@ -371,6 +377,46 @@ struct PanelRootView: View {
         }
     }
 
+    /// Which provider answers the next question, changed where the question is typed.
+    ///
+    /// Shown only when there is more than one to choose between: with a single provider
+    /// the control offers no choice, and the model that answered is already recorded on
+    /// every turn. `/model` reaches the same setting from the keyboard.
+    private var modelPicker: some View {
+        Menu {
+            ForEach(preferences.providerSettings.modelProfiles) { profile in
+                Button {
+                    var settings = preferences.providerSettings
+                    settings.selectedModelID = profile.id
+                    preferences.providerSettings = settings
+                    refreshConfiguredState()
+                } label: {
+                    if profile.id == preferences.providerSettings.selectedModel?.id {
+                        Label(profile.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(profile.displayName)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: PanelTheme.Space.tight) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 9))
+                Text(preferences.providerSettings.selectedModel?.displayName ?? "No model")
+                    .font(PanelTheme.Font.caption)
+                    .lineLimit(1)
+            }
+            .foregroundStyle(PanelTheme.Palette.secondaryText)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.visible)
+        .fixedSize()
+        .padding(.horizontal, PanelTheme.Space.small)
+        .help("The provider the next question is asked with (/model)")
+        .accessibilityLabel("Model provider")
+    }
+
     private struct CommandCompletionsView: View {
         let completions: [ComposerCommand.Entry]
         var onSelect: (String) -> Void
@@ -412,13 +458,13 @@ struct PanelRootView: View {
         case .none:
             return
         case .ask(let question):
-            showsHelp = false
+            notice = nil
             // The composer is live while the history list is open, and a question
             // asked from there must not run invisibly behind it.
             showsHistory = false
             handle(engine.ask(question, mode: .research))
         case .direct(let question):
-            showsHelp = false
+            notice = nil
             showsHistory = false
             handle(engine.ask(question, mode: .direct))
         case .newThread:
@@ -438,8 +484,31 @@ struct PanelRootView: View {
             NSPasteboard.general.setString(last.transcript, forType: .string)
         case .showHelp:
             draft = ""
-            showsHelp = true
+            notice = ComposerCommand.helpText
+        case .selectModel(let name):
+            draft = ""
+            selectModel(named: name)
         }
+    }
+
+    /// `/model` — list the configured providers, or switch to one by name.
+    ///
+    /// The switch is a preference write, not panel state: the next turn reads its
+    /// environment from `CorePreferences`, and a selection held only here would be
+    /// forgotten the moment the panel was rebuilt.
+    private func selectModel(named name: String) {
+        var settings = preferences.providerSettings
+        guard !name.isEmpty else {
+            notice = ComposerCommand.modelListing(settings)
+            return
+        }
+        guard settings.selectModel(named: name) else {
+            notice = ComposerCommand.unknownModel(name, in: settings)
+            return
+        }
+        preferences.providerSettings = settings
+        refreshConfiguredState()
+        notice = ComposerCommand.modelListing(settings)
     }
 
     /// Clears the composer only when the question was actually taken.
@@ -463,8 +532,8 @@ struct PanelRootView: View {
     private func backOut() {
         if showsHistory {
             showsHistory = false
-        } else if showsHelp {
-            showsHelp = false
+        } else if notice != nil {
+            notice = nil
         } else if !draft.isEmpty {
             draft = ""
             redactionNote = nil
@@ -479,8 +548,9 @@ struct PanelRootView: View {
 
     private func refreshConfiguredState() {
         let keychain: SecretStore = KeychainStore()
-        isConfigured = preferences.providerSettings
-            .problems(hasModelKey: keychain.hasValue(for: .modelAPIKey),
+        let settings = preferences.providerSettings
+        isConfigured = settings
+            .problems(hasModelKey: keychain.hasModelKey(for: settings),
                       hasSearchKey: keychain.hasValue(for: .searchAPIKey))
             .isEmpty
     }
@@ -502,7 +572,7 @@ struct PanelRootView: View {
     }
 
     private func newThread() {
-        showsHelp = false
+        notice = nil
         showsHistory = false
         queueFullNote = false
         // The engine first: `startNewThread` drops any waiting questions, and doing it
@@ -526,7 +596,7 @@ struct PanelRootView: View {
 
     private func openThread(_ thread: ResearchThread) {
         showsHistory = false
-        showsHelp = false
+        notice = nil
         recallIndex = nil
         draft = ""
         engine.replaceThread(with: thread)

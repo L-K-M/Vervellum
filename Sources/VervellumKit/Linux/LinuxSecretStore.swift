@@ -61,7 +61,8 @@ final class LinuxSecretStore: SecretStore {
     func value(for account: SecretAccount) -> String? {
         // The environment always wins: someone who exported a key meant it to be used,
         // and it is the documented way to run without a keyring.
-        if let fromEnvironment = ProcessInfo.processInfo.environment[Self.environmentKey(account)],
+        if let name = Self.environmentKey(account),
+           let fromEnvironment = ProcessInfo.processInfo.environment[name],
            !fromEnvironment.isEmpty {
             return fromEnvironment
         }
@@ -154,10 +155,19 @@ final class LinuxSecretStore: SecretStore {
 
     // MARK: secret-tool
 
-    private static func environmentKey(_ account: SecretAccount) -> String {
-        switch account {
-        case .modelAPIKey: return "VERVELLUM_MODEL_KEY"
-        case .searchAPIKey: return "VERVELLUM_SEARCH_KEY"
+    /// The environment variable a key may be supplied in, for the two documented
+    /// accounts.
+    ///
+    /// Only those three have one. A provider profile added in the macOS interface gets
+    /// a derived account with a UUID in it (`SecretAccount.derived(from:for:)`), and an
+    /// environment variable named after a UUID would be undocumentable — those profiles
+    /// use the keyring or the file tier. Returning nil rather than synthesising a name
+    /// keeps `value(for:)` from reading an unrelated variable that happens to collide.
+    private static func environmentKey(_ account: SecretAccount) -> String? {
+        switch account.rawValue {
+        case SecretAccount.modelAPIKey.rawValue: return "VERVELLUM_MODEL_KEY"
+        case SecretAccount.searchAPIKey.rawValue: return "VERVELLUM_SEARCH_KEY"
+        default: return nil
         }
     }
 

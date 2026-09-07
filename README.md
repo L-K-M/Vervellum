@@ -62,6 +62,10 @@ runs the searches and answers based on current sources.
   and SearXNG. Only recognized tool names are accepted. Model replies
   must finish with `finish_reason: stop`; malformed or unfinished replies remain
   incomplete. Keys live in your Keychain on macOS.
+- **As many models as you want, chosen per question.** Configure several providers —
+  a local server, a fast hosted model, a careful one — each with its own endpoint and
+  its own key. Pick the one that answers next from the panel or with `/model`; every
+  turn records the model that produced it.
 - **Native.** SwiftUI and AppKit, Liquid Glass on macOS 26, no dependencies.
 
 ## Getting started
@@ -71,7 +75,8 @@ runs the searches and answers based on current sources.
 1. Launch Vervellum. It appears as a magnifier in the menu bar.
 2. Open **Settings ▸ Providers** and fill in a model endpoint, a model name, and a
    web-search key. The panel offers this on first launch, because nothing works
-   without it.
+   without it. **Add a provider** puts a second model beside the first; the panel and
+   `/model` switch between them.
 3. Press **⌃⌥⌘Space** and ask something.
 
 ### Linux (Ubuntu 24.04+)
@@ -94,6 +99,12 @@ Configure it by editing `~/.config/vervellum/settings.json`:
 The behaviour toggles are the same keys the macOS Settings window writes:
 `historyEnabled`, `showProcessTrail`, `submitOnReturn` (booleans) and `textScale`
 (0.85–1.4). The file is read at launch.
+
+`modelEndpoint` and `modelName` describe one provider, which is all the Linux build
+writes and the shape shown above. The macOS app can configure several and stores them
+under `modelProviders` (a JSON list) with `selectedModelProvider`; when that list is
+present it wins, and `modelEndpoint`/`modelName` are kept as a mirror of whichever
+provider is selected. `/model` lists them and switches between them on Linux too.
 
 Then store the keys in your login keyring, or export them:
 

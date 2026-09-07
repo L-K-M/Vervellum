@@ -89,8 +89,9 @@ public enum VervellumLinuxApp {
     /// Runs one turn and prints it. Returns a shell-style exit code.
     private static func runHeadless(question: String, direct: Bool) -> Int32 {
         let environment = LinuxEnvironment()
-        let problems = environment.preferences.providerSettings.problems(
-            hasModelKey: environment.secrets.hasValue(for: .modelAPIKey),
+        let settings = environment.preferences.providerSettings
+        let problems = settings.problems(
+            hasModelKey: environment.secrets.hasModelKey(for: settings),
             hasSearchKey: environment.secrets.hasValue(for: .searchAPIKey),
             requiresSearch: !direct)
         guard problems.isEmpty else {

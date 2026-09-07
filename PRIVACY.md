@@ -11,9 +11,9 @@ Vervellum server: the app talks only to the endpoints you configure and to GitHu
 Vervellum makes network requests in exactly three cases, each with a fixed purpose.
 
 - **Research.** Requested research sends your question, earlier thread context, and
-  retrieved evidence to your configured model endpoint. `/direct` uses that endpoint
-  without searching. Provider handling is governed by its own policy; Vervellum cannot
-  recall what was sent.
+  retrieved evidence to the model provider selected when you asked — and to no other
+  configured provider. `/direct` uses that same provider without searching. Provider
+  handling is governed by its own policy; Vervellum cannot recall what was sent.
 - **Search queries.** Model-written queries derived from your question and context
   go to your configured search server. They are shown to you in the panel's process
   trail before the answer arrives.
@@ -40,9 +40,10 @@ your IP address.
 - **Preferences.** Panel position, size, text scale, shortcuts and behaviour toggles
   live in Vervellum's application preferences on macOS, and in
   `~/.config/vervellum/settings.json` on Linux.
-- **API keys.** In your login Keychain on macOS. On Linux, explicit
-  `VERVELLUM_MODEL_KEY` and `VERVELLUM_SEARCH_KEY` override reads; otherwise the keyring
-  is tried before the mode-0600 file. Writes prefer the keyring, then the file. In every case they are never written to
+- **API keys.** In your login Keychain on macOS, one item per configured provider, so
+  one provider's key is never sent to another. On Linux, explicit `VERVELLUM_MODEL_KEY`
+  and `VERVELLUM_SEARCH_KEY` override reads for the first model provider and the search
+  server; otherwise the keyring is tried before the mode-0600 file. Writes prefer the keyring, then the file. In every case they are never written to
   preferences, never included as configuration in a stored thread, and never logged.
   Typed or pasted secrets are still ordinary user text; review what you send.
 

@@ -219,6 +219,9 @@ final class LinuxPanel {
             GTK.setText(composer, "")
             appendNotice("Select the answer text and copy it — there is no clipboard "
                          + "command on Linux yet.")
+        case .selectModel(let name):
+            GTK.setText(composer, "")
+            selectModel(named: name)
         case .ask(let question):
             GTK.setText(composer, "")
             ask(question, mode: .research)
@@ -226,6 +229,25 @@ final class LinuxPanel {
             GTK.setText(composer, "")
             ask(question, mode: .direct)
         }
+    }
+
+    /// `/model` — list the configured providers, or switch to one.
+    ///
+    /// The switch is persisted rather than held for this window: `CorePreferences` is
+    /// the same object the next run reads its environment from, and a selection that
+    /// lived only in the panel would be forgotten by `vervellum --ask`.
+    private func selectModel(named name: String) {
+        var settings = environment.preferences.providerSettings
+        guard !name.isEmpty else {
+            appendNotice(ComposerCommand.modelListing(settings))
+            return
+        }
+        guard settings.selectModel(named: name) else {
+            appendNotice(ComposerCommand.unknownModel(name, in: settings))
+            return
+        }
+        environment.preferences.providerSettings = settings
+        appendNotice(ComposerCommand.modelListing(settings))
     }
 
     private func ask(_ question: String, mode: ResearchRunner.Mode) {
@@ -420,8 +442,9 @@ final class LinuxPanel {
     }
 
     private static func emptyStateMarkup(environment: LinuxEnvironment) -> String {
-        let problems = environment.preferences.providerSettings.problems(
-            hasModelKey: environment.secrets.hasValue(for: .modelAPIKey),
+        let settings = environment.preferences.providerSettings
+        let problems = settings.problems(
+            hasModelKey: environment.secrets.hasModelKey(for: settings),
             hasSearchKey: environment.secrets.hasValue(for: .searchAPIKey))
         guard problems.isEmpty else {
             return "<span weight=\"bold\">Not configured yet</span>\n\n"

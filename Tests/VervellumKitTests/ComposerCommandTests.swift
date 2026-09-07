@@ -70,4 +70,47 @@ final class ComposerCommandTests: XCTestCase {
                           "help text is missing /\(command.name)")
         }
     }
+
+    // MARK: /model
+
+    /// Unlike `/direct`, a bare `/model` is a complete request — "show me what there
+    /// is" — so it parses rather than waiting for an argument.
+    func testABareModelCommandParsesAsAListing() {
+        XCTAssertEqual(ComposerCommand.parse("/model"), .selectModel(""))
+        XCTAssertEqual(ComposerCommand.parse("/models"), .selectModel(""))
+    }
+
+    func testModelTakesTheRestOfTheLineAsAName() {
+        XCTAssertEqual(ComposerCommand.parse("/model gpt-4o"), .selectModel("gpt-4o"))
+        XCTAssertEqual(ComposerCommand.parse("  /model   The Fast One  "),
+                       .selectModel("The Fast One"))
+    }
+
+    func testModelIsOfferedInTheCompletionList() {
+        XCTAssertEqual(ComposerCommand.completions(for: "/mo")?.map(\.name), ["model"])
+    }
+
+    /// The listing marks the active provider, because "which model answered this" is
+    /// the question the whole panel exists to keep answerable.
+    func testTheModelListingMarksOnlyTheActiveProvider() {
+        let fast = ModelProfile.new(name: "Fast", endpoint: "https://a.example.com/v1", model: "mini")
+        let big = ModelProfile.new(name: "Careful", endpoint: "https://b.example.com/v1", model: "max")
+        let lines = ComposerCommand.modelListing(
+            ProviderSettings(modelProfiles: [fast, big], selectedModelID: big.id))
+            .components(separatedBy: "\n")
+
+        let fastLine = lines.first { $0.contains("Fast") }
+        let carefulLine = lines.first { $0.contains("Careful") }
+        XCTAssertNotNil(fastLine)
+        XCTAssertNotNil(carefulLine)
+        XCTAssertFalse(fastLine?.contains("(active)") ?? true)
+        XCTAssertTrue(carefulLine?.contains("(active)") ?? false)
+        // The identifier is shown too, so two providers on the same model are told apart.
+        XCTAssertTrue(carefulLine?.contains("max") ?? false)
+    }
+
+    func testTheModelListingSaysSoWhenNothingIsConfigured() {
+        let listing = ComposerCommand.modelListing(ProviderSettings(modelProfiles: []))
+        XCTAssertTrue(listing.contains("No model provider is configured"))
+    }
 }

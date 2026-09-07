@@ -21,6 +21,14 @@ final class CorePreferences {
 
     private let store: SettingsStore
 
+    /// The last assembled provider configuration.
+    ///
+    /// Assembling it now means decoding a JSON provider list, and the panel reads it on
+    /// every SwiftUI render — which during a streamed answer is many times a second.
+    /// This instance is the only thing that writes those keys, so the memo is invalidated
+    /// by its own setter and by nothing else.
+    private var cachedProviderSettings: ProviderSettings?
+
     init(store: SettingsStore) {
         self.store = store
     }
@@ -44,8 +52,17 @@ final class CorePreferences {
     }
 
     enum Key {
+        /// The selected provider's endpoint and model, kept as plain strings.
+        ///
+        /// These are the *only* provider keys a pre-profiles build ever wrote, and they
+        /// are still both the fallback this one migrates from and a mirror it maintains:
+        /// they are what `~/.config/vervellum/settings.json` documents for hand editing,
+        /// and what a build downgraded onto the same file would look for.
         static let modelEndpoint = "modelEndpoint"
         static let modelName = "modelName"
+        /// The full provider list, JSON-encoded. Authoritative when present.
+        static let modelProviders = "modelProviders"
+        static let selectedModelProvider = "selectedModelProvider"
         static let searchEndpoint = "searchEndpoint"
         static let historyEnabled = "historyEnabled"
         static let showProcessTrail = "showProcessTrail"
@@ -60,22 +77,63 @@ final class CorePreferences {
 
     // MARK: Providers
 
+    /// The provider configuration, assembled from the list when there is one and from
+    /// the single-provider keys when there is not.
+    ///
+    /// The fallback is the migration: a settings file written before model providers
+    /// were a list has only `modelEndpoint` and `modelName`, and
+    /// `ProviderSettings.init(modelEndpoint:modelName:searchEndpoint:)` turns those into
+    /// one profile on the `model-api-key` account — which is precisely where that
+    /// build's Keychain item already is, so an existing user upgrades without re-pasting
+    /// anything. It is also the path the Linux front end stays on, since it never writes
+    /// a list; hand-editing `settings.json` therefore keeps working there.
+    ///
+    /// A list that will not parse falls back the same way rather than throwing: losing
+    /// the extra profiles is bad, and refusing to launch over them is worse.
     var providerSettings: ProviderSettings {
         get {
-            ProviderSettings(
-                modelEndpoint: store.string(for: Key.modelEndpoint) ?? Default.modelEndpoint,
-                modelName: store.string(for: Key.modelName) ?? Default.modelName,
-                searchEndpoint: store.string(for: Key.searchEndpoint) ?? Default.searchEndpoint)
+            if let cachedProviderSettings { return cachedProviderSettings }
+            let assembled = readProviderSettings()
+            cachedProviderSettings = assembled
+            return assembled
         }
         set {
+            store.setString(ProviderSettings.encodeModelProfiles(newValue.modelProfiles),
+                            for: Key.modelProviders)
+            store.setString(newValue.selectedModel?.id.uuidString, for: Key.selectedModelProvider)
+            // The single-provider keys are mirrored, not merely left behind: they are what
+            // the Linux settings file documents, and what an older build downgraded onto
+            // the same file reads. Writing the *selected* profile into them means such a
+            // build finds the provider the user was last using rather than the first one
+            // in a list it cannot see.
             store.setString(newValue.modelEndpoint, for: Key.modelEndpoint)
             store.setString(newValue.modelName, for: Key.modelName)
             // An emptied search endpoint reverts to the documented default rather than
             // leaving the app with no search at all.
             let endpoint = newValue.searchEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
             store.setString(endpoint.isEmpty ? Default.searchEndpoint : endpoint, for: Key.searchEndpoint)
+            // Re-read rather than caching `newValue`: the store applied the empty-endpoint
+            // rule above, so what was written is not always what was handed in.
+            cachedProviderSettings = nil
             onChange?()
         }
+    }
+
+    private func readProviderSettings() -> ProviderSettings {
+        let searchEndpoint = store.string(for: Key.searchEndpoint) ?? Default.searchEndpoint
+        if let encoded = store.string(for: Key.modelProviders),
+           let profiles = ProviderSettings.decodeModelProfiles(encoded),
+           !profiles.isEmpty {
+            let selected = store.string(for: Key.selectedModelProvider)
+                .flatMap { UUID(uuidString: $0) }
+            return ProviderSettings(modelProfiles: profiles,
+                                    selectedModelID: selected,
+                                    searchEndpoint: searchEndpoint)
+        }
+        return ProviderSettings(
+            modelEndpoint: store.string(for: Key.modelEndpoint) ?? Default.modelEndpoint,
+            modelName: store.string(for: Key.modelName) ?? Default.modelName,
+            searchEndpoint: searchEndpoint)
     }
 
     // MARK: Behaviour

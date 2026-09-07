@@ -83,6 +83,69 @@ final class CorePreferencesTests: XCTestCase {
         XCTAssertEqual(announcements, 3)
     }
 
+    // MARK: Provider profiles
+
+    /// The upgrade path. A settings file written before providers were a list has only
+    /// `modelEndpoint` and `modelName`, and must become one profile on the account that
+    /// build's Keychain item is already under — or the user re-pastes their key.
+    func testASettingsFileWithoutAListMigratesToOneProfileOnTheLegacyAccount() {
+        let settings = preferences(["modelEndpoint": "https://api.example.com/v1",
+                                    "modelName": "legacy-model"]).providerSettings
+        XCTAssertEqual(settings.modelProfiles.count, 1)
+        XCTAssertEqual(settings.modelProfiles.first?.keyAccount, SecretAccount.modelAPIKey.rawValue)
+        XCTAssertEqual(settings.modelName, "legacy-model")
+        XCTAssertEqual(settings.modelEndpoint, "https://api.example.com/v1")
+    }
+
+    func testAStoredListIsAuthoritativeAndKeepsItsSelection() {
+        let store = MemorySettingsStore()
+        let settings = CorePreferences(store: store)
+        let first = ModelProfile.new(name: "First", endpoint: "https://a.example.com/v1", model: "a")
+        let second = ModelProfile.new(name: "Second", endpoint: "https://b.example.com/v1", model: "b")
+        settings.providerSettings = ProviderSettings(modelProfiles: [first, second],
+                                                     selectedModelID: second.id)
+
+        let reloaded = CorePreferences(store: store).providerSettings
+        XCTAssertEqual(reloaded.modelProfiles.map(\.name), ["First", "Second"])
+        XCTAssertEqual(reloaded.selectedModel?.id, second.id)
+        XCTAssertEqual(reloaded.modelName, "b")
+    }
+
+    /// The single-provider keys are mirrored so the Linux settings file stays readable
+    /// and a downgraded build still finds an endpoint — and it must be the *selected*
+    /// provider's, not the first in a list that build cannot see.
+    func testTheSelectedProviderIsMirroredIntoTheSingleProviderKeys() {
+        let store = MemorySettingsStore()
+        let settings = CorePreferences(store: store)
+        let first = ModelProfile.new(name: "First", endpoint: "https://a.example.com/v1", model: "a")
+        let second = ModelProfile.new(name: "Second", endpoint: "https://b.example.com/v1", model: "b")
+        settings.providerSettings = ProviderSettings(modelProfiles: [first, second],
+                                                     selectedModelID: second.id)
+
+        XCTAssertEqual(store.string(for: "modelEndpoint"), "https://b.example.com/v1")
+        XCTAssertEqual(store.string(for: "modelName"), "b")
+    }
+
+    /// Losing the extra profiles is bad; refusing to launch over them is worse.
+    func testAnUnreadableProviderListFallsBackToTheSingleProviderKeys() {
+        let settings = preferences(["modelProviders": "{ not json",
+                                    "modelEndpoint": "https://api.example.com/v1",
+                                    "modelName": "fallback"]).providerSettings
+        XCTAssertEqual(settings.modelProfiles.count, 1)
+        XCTAssertEqual(settings.modelName, "fallback")
+    }
+
+    /// The memo behind `providerSettings` must not outlive a write, or Settings would
+    /// save a new provider and the panel would keep asking with the old one.
+    func testAWriteIsVisibleToTheNextRead() {
+        let settings = preferences()
+        let added = ModelProfile.new(name: "Added", endpoint: "https://a.example.com/v1", model: "a")
+        XCTAssertNotEqual(settings.providerSettings.modelName, "a")
+        settings.providerSettings = ProviderSettings(modelProfiles: [added], selectedModelID: added.id)
+        XCTAssertEqual(settings.providerSettings.modelName, "a")
+        XCTAssertEqual(settings.providerSettings.selectedModel?.name, "Added")
+    }
+
     /// The file store must survive a number that round-tripped as an integer, which is
     /// what happens to `1.0` in a hand-edited settings file — and what JSON gives back
     /// for `1`. Tested against the real file store, because the in-memory one does no
