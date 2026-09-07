@@ -36,8 +36,14 @@ jobs:
         uses: L-K-M/zai-code-review@7d0ce7b0c226c70eed194615130fa5b632ba4798
         with:
           ZAI_API_KEY: ${{ env.ZAI_API_KEY }}
-          ZAI_MODEL: glm-5.3
-          ZAI_REVIEWER_NAME: GLM 5.3 Code Review
+          # Flash rather than plain glm-5.3. The action sends no `reasoning_effort`,
+          # and that parameter defaults to `max` -- so every review ran GLM-5.3 at
+          # maximum reasoning effort, non-streaming and with no token cap. Requests
+          # were accepted and then never answered inside the action's hardcoded
+          # 300s per-attempt timeout (see PR #70, run 34097800960: two clean 300s
+          # timeouts on an 18,958-char single-chunk prompt, then HTTP 429).
+          ZAI_MODEL: glm-5.3-flash
+          ZAI_REVIEWER_NAME: GLM 5.3 Flash Code Review
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Skip when Z.ai API key is unavailable
