@@ -24,6 +24,9 @@ struct PanelRootView: View {
     @State private var notice: String?
     /// How many credential-shaped spans were removed from seeded text, if any.
     @State private var redactionNote: Int?
+    /// Set when a question could not be queued because the queue was full. Cleared by
+    /// the next submission, so it never outlives the situation it describes.
+    @State private var queueFullNote = false
     /// Earlier questions, newest first, for ↑/↓ recall in the composer.
     @State private var recallIndex: Int?
     /// Whether the thread is scrolled to its end. Streams auto-scroll only while
@@ -223,6 +226,17 @@ struct PanelRootView: View {
             if preferences.providerSettings.modelProfiles.count > 1 {
                 modelPicker
             }
+            if queueFullNote {
+                Label("Up to \(ResearchEngine.maxQueued) questions can wait at once. "
+                      + "Stop the run, or remove one below.",
+                      systemImage: "exclamationmark.circle")
+                    .font(PanelTheme.Font.caption)
+                    .foregroundStyle(PanelTheme.Palette.verdict(.mixed))
+                    .padding(.horizontal, PanelTheme.Space.small)
+            }
+            if !engine.queue.isEmpty {
+                QueuedQuestionsView(queued: engine.queue) { engine.removeQueued($0) }
+            }
             if let completions = ComposerCommand.completions(for: draft) {
                 CommandCompletionsView(completions: completions) { name in
                     draft = "/\(name) "
@@ -232,7 +246,6 @@ struct PanelRootView: View {
                 ComposerView(text: $draft,
                              placeholder: placeholder,
                              submitOnReturn: preferences.submitOnReturn,
-                             isEnabled: !engine.isRunning,
                              onSubmit: { submit(draft) },
                              onArrow: recall)
                     // The composer's height for its content, laid out at the width the
@@ -248,24 +261,21 @@ struct PanelRootView: View {
                         width: (composerRowWidth ?? estimatedComposerRowWidth)
                             - Self.sendButtonReservation))
 
-                Button {
-                    if engine.isRunning { engine.cancel() } else { submit(draft) }
-                } label: {
-                    Image(systemName: engine.isRunning ? "stop.fill" : "arrow.up")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 24, height: 24)
-                        .background(engine.isRunning
-                                    ? PanelTheme.Palette.verdict(.contradicted)
-                                    : PanelTheme.Palette.accent,
-                                    in: Circle())
+                // Stop and Ask are both live during a run, side by side, because both
+                // are now reachable: the composer stays editable, so a question typed
+                // mid-run has somewhere to go. One button that changed meaning would
+                // make Stop unreachable the moment anything was typed.
+                if engine.isRunning {
+                    CircularComposerButton(symbol: "stop.fill",
+                                           tint: PanelTheme.Palette.verdict(.contradicted),
+                                           help: "Stop the research (⌘.)",
+                                           action: { engine.cancel() })
                 }
-                .buttonStyle(.plain)
-                .disabled(!engine.isRunning && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .opacity(!engine.isRunning && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                         ? 0.35 : 1)
-                .help(engine.isRunning ? "Stop the research (⌘.)" : "Ask")
-                .padding(.bottom, 3)
+                CircularComposerButton(symbol: "arrow.up",
+                                       tint: PanelTheme.Palette.accent,
+                                       help: engine.isRunning ? "Ask next" : "Ask",
+                                       isEnabled: !isDraftBlank,
+                                       action: { submit(draft) })
             }
             // Measured on the row, not the composer: the composer's own width already
             // excludes the send button, and subtracting the reservation from it too
@@ -287,8 +297,84 @@ struct PanelRootView: View {
         preferences.panelWidth - PanelTheme.Space.medium * 2
     }
 
+    private var isDraftBlank: Bool {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The placeholder says what a question typed *now* will do. "Researching…" used to
+    /// describe the panel's state, which was accurate and useless: the field was
+    /// disabled, so there was nothing the reader could act on.
     private var placeholder: String {
-        engine.isRunning ? "Researching…" : "Ask anything — / for commands"
+        guard engine.isRunning else { return "Ask anything — / for commands" }
+        return engine.queue.isEmpty ? "Ask a follow-up — it runs next" : "Ask another — it joins the queue"
+    }
+
+    /// One round composer button, styled once so Stop and Ask match.
+    private struct CircularComposerButton: View {
+        let symbol: String
+        let tint: Color
+        let help: String
+        var isEnabled = true
+        var action: () -> Void
+
+        var body: some View {
+            Button(action: action) {
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 24, height: 24)
+                    .background(tint, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!isEnabled)
+            .opacity(isEnabled ? 1 : 0.35)
+            .help(help)
+            .accessibilityLabel(help)
+            .padding(.bottom, 3)
+        }
+    }
+
+    /// The questions waiting their turn, each removable.
+    ///
+    /// Shown rather than merely counted: a question the user typed and can no longer
+    /// see is a question they will type again, and one they cannot withdraw is a
+    /// provider request they cannot call off.
+    private struct QueuedQuestionsView: View {
+        let queued: [ResearchEngine.QueuedQuestion]
+        var onRemove: (UUID) -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
+                ForEach(queued) { item in
+                    HStack(spacing: PanelTheme.Space.small) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 9))
+                            .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                        Text(item.mode == .direct ? "/direct \(item.question)" : item.question)
+                            .font(PanelTheme.Font.caption)
+                            .foregroundStyle(PanelTheme.Palette.secondaryText)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 0)
+                        Button { onRemove(item.id) } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Remove this waiting question")
+                        .accessibilityLabel("Remove the waiting question")
+                    }
+                    .padding(.horizontal, PanelTheme.Space.small)
+                    .padding(.vertical, 3)
+                    .background(PanelTheme.Palette.chipFill,
+                                in: RoundedRectangle(cornerRadius: PanelTheme.Radius.chip,
+                                                     style: .continuous))
+                }
+            }
+            .accessibilityLabel("\(queued.count) question\(queued.count == 1 ? "" : "s") waiting")
+        }
     }
 
     /// Which provider answers the next question, changed where the question is typed.
@@ -365,9 +451,9 @@ struct PanelRootView: View {
     // MARK: Actions
 
     private func submit(_ text: String) {
-        guard !engine.isRunning else { return }
         recallIndex = nil
         redactionNote = nil
+        queueFullNote = false
         switch ComposerCommand.parse(text) {
         case .none:
             return
@@ -376,13 +462,11 @@ struct PanelRootView: View {
             // The composer is live while the history list is open, and a question
             // asked from there must not run invisibly behind it.
             showsHistory = false
-            draft = ""
-            engine.ask(question, mode: .research)
+            handle(engine.ask(question, mode: .research))
         case .direct(let question):
             notice = nil
             showsHistory = false
-            draft = ""
-            engine.ask(question, mode: .direct)
+            handle(engine.ask(question, mode: .direct))
         case .newThread:
             draft = ""
             newThread()
@@ -427,6 +511,21 @@ struct PanelRootView: View {
         notice = ComposerCommand.modelListing(settings)
     }
 
+    /// Clears the composer only when the question was actually taken.
+    ///
+    /// A full queue keeps the text: emptying the field for a question that was refused
+    /// is how you lose one, and the note beside the composer says what to do about it.
+    private func handle(_ outcome: ResearchEngine.AskOutcome) {
+        switch outcome {
+        case .started, .queued:
+            draft = ""
+        case .queueFull:
+            queueFullNote = true
+        case .ignored:
+            break
+        }
+    }
+
     /// What Escape does, in the order a user expects to be able to undo things:
     /// leave the history list, then clear a draft, then close the panel. Closing on
     /// the first press would throw away a half-typed question.
@@ -438,6 +537,7 @@ struct PanelRootView: View {
         } else if !draft.isEmpty {
             draft = ""
             redactionNote = nil
+            queueFullNote = false
             // Dropping the draft also ends the recall walk, so the next ↑ starts at the
             // most recent question rather than resuming halfway up the list.
             recallIndex = nil
@@ -474,9 +574,12 @@ struct PanelRootView: View {
     private func newThread() {
         notice = nil
         showsHistory = false
+        queueFullNote = false
+        // The engine first: `startNewThread` drops any waiting questions, and doing it
+        // after clearing the draft keeps the two from racing over the composer.
+        engine.startNewThread()
         draft = ""
         recallIndex = nil
-        engine.startNewThread()
     }
 
     /// Deleting the open thread must take it out of the engine too, or the next

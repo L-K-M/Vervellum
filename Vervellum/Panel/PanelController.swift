@@ -41,6 +41,14 @@ final class PanelController {
 
     private(set) var isOpen = false
 
+    /// Whether the panel is on screen only so the user can watch a setting take effect.
+    ///
+    /// A preview is an ordinary open panel with one difference — it never took focus —
+    /// so everything else (placement, the thread, dismissal) behaves identically. The
+    /// flag exists so closing Settings can take back the window it put up, without
+    /// dismissing a panel the user had summoned themselves.
+    private(set) var isPreviewing = false
+
     /// Called when the panel is dismissed, so the owner can flush anything pending.
     var onDismiss: (() -> Void)?
     /// Asked for the text to seed the composer with, when summoned via the
@@ -86,6 +94,13 @@ final class PanelController {
     }
 
     func show() {
+        show(takingFocus: true)
+    }
+
+    /// - Parameter takingFocus: false shows the panel without activating Vervellum or
+    ///   making the panel key. Used by the Settings preview, where stealing focus would
+    ///   pull the caret out of the very field the user is editing.
+    private func show(takingFocus: Bool) {
         let frontmost = NSWorkspace.shared.frontmostApplication
         if !isOpen {
             appToRestoreOnClose = frontmost?.processIdentifier
@@ -96,12 +111,60 @@ final class PanelController {
         let panel = self.panel ?? makePanel()
         self.panel = panel
         place(panel, on: Self.screenUnderPointer(), animated: !isOpen)
-        focus(panel)
+        if takingFocus {
+            focus(panel)
+        } else {
+            panel.orderFrontRegardless()
+        }
 
         if !isOpen {
             installKeyMonitor()
             installResignObserver(for: panel)
             isOpen = true
+        }
+    }
+
+    // MARK: Live settings
+
+    /// Re-places an open panel from the current preferences.
+    ///
+    /// Without this, the panel's edge, width and height were read once per summon, so
+    /// the only way to see what a width slider did was to close the panel and summon it
+    /// again — which is exactly the moment the comparison is no longer in front of you.
+    ///
+    /// Unanimated, and a no-op when the frame is unchanged. A slider drag emits a change
+    /// per pixel; animating each one leaves several animations fighting over the same
+    /// window, and re-setting an identical frame makes AppKit redraw the hosted SwiftUI
+    /// tree for nothing.
+    func preferencesDidChange() {
+        guard isOpen, let panel, let screen = panel.screen ?? NSScreen.main else { return }
+        let frame = PanelPlacement.frame(in: screen.visibleFrame,
+                                         side: preferences.panelSide,
+                                         width: preferences.panelWidth,
+                                         height: preferences.panelHeight)
+        guard frame != panel.frame else { return }
+        panel.setFrame(frame, display: true)
+    }
+
+    /// Shows or hides the panel as a live preview for the Settings window.
+    ///
+    /// Settings dismisses the panel when it opens (see `AppDelegate.openSettings`),
+    /// because the panel floats above ordinary windows and would cover the window it
+    /// was opened from. That leaves the panel settings as the only ones a user cannot
+    /// watch take effect, so Settings can put it back — deliberately, and without focus.
+    ///
+    /// Turning the preview *off* only closes a panel this method opened. A panel the
+    /// user summoned while Settings was up is theirs, and closing it would be Settings
+    /// reaching outside its own window.
+    func setPreviewing(_ previewing: Bool) {
+        guard previewing != isPreviewing else { return }
+        if previewing {
+            guard !isOpen else { return }
+            isPreviewing = true
+            show(takingFocus: false)
+        } else {
+            isPreviewing = false
+            hide()
         }
     }
 
@@ -116,6 +179,7 @@ final class PanelController {
     func hide(restoringActivation: Bool = true) {
         guard isOpen, let panel else { return }
         isOpen = false
+        isPreviewing = false
         NotificationCenter.default.post(name: .vervellumPanelWillHide, object: nil)
         removeObservers()
 

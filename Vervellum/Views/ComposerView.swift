@@ -22,7 +22,6 @@ struct ComposerView: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
     var submitOnReturn: Bool
-    var isEnabled: Bool
     var onSubmit: () -> Void
     /// Return true to consume the key. Used for history recall on ↑/↓.
     var onArrow: (Bool) -> Bool = { _ in false }
@@ -72,7 +71,11 @@ struct ComposerView: NSViewRepresentable {
         // resets the insertion point, so doing it on every keystroke would make the
         // caret jump to the end mid-word.
         if textView.string != text { textView.string = text }
-        textView.isEditable = isEnabled
+        // Never made read-only, not even while a turn is running. The moment a
+        // clarification or a follow-up occurs to you is *while* the answer is arriving,
+        // and a field that refuses the keystroke loses the thought. What a submitted
+        // question does during a run is `ResearchEngine.ask`'s decision, not the text
+        // view's — it queues.
         textView.isSelectable = true
         textView.needsDisplay = true
     }
