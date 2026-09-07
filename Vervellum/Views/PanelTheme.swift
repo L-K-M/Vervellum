@@ -44,25 +44,36 @@ enum PanelTheme {
     // MARK: Type
 
     enum Font {
-        static func body(_ scale: Double) -> SwiftUI.Font { .system(size: 13 * scale) }
-        static func bodyEmphasis(_ scale: Double) -> SwiftUI.Font { .system(size: 13 * scale, weight: .semibold) }
+
+        /// The one place a point size becomes a font.
+        ///
+        /// Every size in the panel goes through here so the text-size preference cannot
+        /// be forgotten at a call site — which is exactly how the setting came to move
+        /// the answer prose and nothing else around it.
+        static func at(_ size: CGFloat,
+                       _ scale: Double,
+                       weight: SwiftUI.Font.Weight = .regular,
+                       design: SwiftUI.Font.Design = .default) -> SwiftUI.Font {
+            .system(size: size * scale, weight: weight, design: design)
+        }
+
+        static func body(_ scale: Double) -> SwiftUI.Font { at(13, scale) }
+        static func bodyEmphasis(_ scale: Double) -> SwiftUI.Font { at(13, scale, weight: .semibold) }
         static func heading(_ level: Int, _ scale: Double) -> SwiftUI.Font {
             switch level {
-            case 1: return .system(size: 16 * scale, weight: .semibold)
-            case 2: return .system(size: 14.5 * scale, weight: .semibold)
-            default: return .system(size: 13 * scale, weight: .semibold)
+            case 1: return at(16, scale, weight: .semibold)
+            case 2: return at(14.5, scale, weight: .semibold)
+            default: return at(13, scale, weight: .semibold)
             }
         }
-        static func code(_ scale: Double) -> SwiftUI.Font {
-            .system(size: 11.5 * scale, design: .monospaced)
-        }
+        static func code(_ scale: Double) -> SwiftUI.Font { at(11.5, scale, design: .monospaced) }
         static func citation(_ scale: Double) -> SwiftUI.Font {
-            .system(size: 10.5 * scale, weight: .medium, design: .monospaced)
+            at(10.5, scale, weight: .medium, design: .monospaced)
         }
         /// Section labels: small, uppercase, tracked out.
-        static let label: SwiftUI.Font = .system(size: 10, weight: .semibold)
-        static let caption: SwiftUI.Font = .system(size: 11)
-        static let question: SwiftUI.Font = .system(size: 13.5, weight: .medium)
+        static func label(_ scale: Double) -> SwiftUI.Font { at(10, scale, weight: .semibold) }
+        static func caption(_ scale: Double) -> SwiftUI.Font { at(11, scale) }
+        static func question(_ scale: Double) -> SwiftUI.Font { at(13.5, scale, weight: .medium) }
     }
 
     // MARK: Colour
@@ -133,5 +144,25 @@ struct PanelBackground: View {
 
     private var reduceTransparency: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+    }
+}
+
+/// The panel's text-size preference, as a multiplier.
+///
+/// An environment value rather than a parameter because the panel is roughly twenty
+/// small view structs deep in places — a header button, a citation chip, a source row —
+/// and threading a `scale` argument through every initializer is how the setting got
+/// dropped on the way down in the first place. Read it, multiply by it, and a new view
+/// cannot silently opt out.
+private struct PanelTextScaleKey: EnvironmentKey {
+    /// Unscaled, so a view rendered outside the panel — a preview, a test — looks
+    /// exactly as it always did.
+    static let defaultValue: Double = 1.0
+}
+
+extension EnvironmentValues {
+    var panelTextScale: Double {
+        get { self[PanelTextScaleKey.self] }
+        set { self[PanelTextScaleKey.self] = newValue }
     }
 }

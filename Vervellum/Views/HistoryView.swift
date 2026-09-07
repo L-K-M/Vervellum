@@ -8,6 +8,8 @@ import SwiftUI
 /// whole — questions, answers, verdicts and sources — rather than summarised.
 struct HistoryView: View {
 
+    @Environment(\.panelTextScale) private var textScale
+
     @ObservedObject var store: ThreadStore
     var onOpen: (ResearchThread) -> Void
     /// Deletion is the root view's, not the store's alone: the thread may be the one
@@ -34,15 +36,15 @@ struct HistoryView: View {
     private var searchField: some View {
         HStack(spacing: PanelTheme.Space.small) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 10))
+                .font(PanelTheme.Font.at(10, textScale))
                 .foregroundStyle(PanelTheme.Palette.tertiaryText)
             TextField("Search earlier threads", text: $query)
                 .textFieldStyle(.plain)
-                .font(PanelTheme.Font.body(1.0))
+                .font(PanelTheme.Font.body(textScale))
             if !query.isEmpty {
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10))
+                        .font(PanelTheme.Font.at(10, textScale))
                         .foregroundStyle(PanelTheme.Palette.tertiaryText)
                 }
                 .buttonStyle(.plain)
@@ -56,11 +58,11 @@ struct HistoryView: View {
         VStack(spacing: PanelTheme.Space.small) {
             Spacer()
             Text(store.isHistoryEnabled ? "No threads yet." : "History is turned off.")
-                .font(PanelTheme.Font.body(1.0))
+                .font(PanelTheme.Font.body(textScale))
                 .foregroundStyle(PanelTheme.Palette.secondaryText)
             if !store.isHistoryEnabled {
                 Text("Turn it on in Settings ▸ General to keep past research.")
-                    .font(PanelTheme.Font.caption)
+                    .font(PanelTheme.Font.caption(textScale))
                     .foregroundStyle(PanelTheme.Palette.tertiaryText)
             }
             Spacer()
@@ -78,7 +80,7 @@ struct HistoryView: View {
                 }
                 if results.isEmpty {
                     Text("Nothing matches “\(query)”.")
-                        .font(PanelTheme.Font.caption)
+                        .font(PanelTheme.Font.caption(textScale))
                         .foregroundStyle(PanelTheme.Palette.tertiaryText)
                         .padding(PanelTheme.Space.large)
                 }
@@ -90,6 +92,8 @@ struct HistoryView: View {
 
 /// One thread in the history list.
 private struct HistoryRow: View {
+    @Environment(\.panelTextScale) private var textScale
+
     let thread: ResearchThread
     var onOpen: () -> Void
     var onDelete: () -> Void
@@ -101,18 +105,18 @@ private struct HistoryRow: View {
             HStack(alignment: .top, spacing: PanelTheme.Space.small) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(thread.title)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(PanelTheme.Font.at(12, textScale, weight: .medium))
                         .foregroundStyle(PanelTheme.Palette.primaryText)
                         .lineLimit(1)
                     Text(subtitle)
-                        .font(.system(size: 10.5))
+                        .font(PanelTheme.Font.at(10.5, textScale))
                         .foregroundStyle(PanelTheme.Palette.tertiaryText)
                 }
                 Spacer(minLength: 0)
                 if isHovering {
                     Button(action: onDelete) {
                         Image(systemName: "trash")
-                            .font(.system(size: 10))
+                            .font(PanelTheme.Font.at(10, textScale))
                             .foregroundStyle(PanelTheme.Palette.tertiaryText)
                     }
                     .buttonStyle(.plain)

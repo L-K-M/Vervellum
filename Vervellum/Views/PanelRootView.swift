@@ -9,6 +9,8 @@ import AppKit
 /// scroll away.
 struct PanelRootView: View {
 
+    @Environment(\.panelTextScale) private var textScale
+
     @ObservedObject var engine: ResearchEngine
     @ObservedObject var store: ThreadStore
     @ObservedObject var preferences: Preferences
@@ -76,6 +78,11 @@ struct PanelRootView: View {
         }
         .background(PanelBackground())
         .clipShape(RoundedRectangle(cornerRadius: PanelTheme.Radius.panel, style: .continuous))
+        // The text-size preference, published to the whole panel from one place. Every
+        // view reads it out of the environment instead of being handed it, so a new one
+        // cannot quietly render at a fixed size the setting does not move — which is how
+        // the setting came to move the answer prose and nothing else.
+        .environment(\.panelTextScale, preferences.textScale)
         // The research-the-selection shortcut drops the frontmost app's selection
         // into the composer. It arrives as a notification because the panel's SwiftUI
         // tree is built once and reused, so there is no initializer to pass it to.
@@ -151,7 +158,6 @@ struct PanelRootView: View {
                     }
                     ForEach(engine.thread.turns) { turn in
                         TurnView(turn: turn,
-                                 scale: preferences.textScale,
                                  showsProcessTrail: preferences.showProcessTrail,
                                  onRetry: { engine.retry(turn.id) },
                                  onAskFollowup: askFollowup)
@@ -198,7 +204,7 @@ struct PanelRootView: View {
             scrollToBottom(proxy)
         } label: {
             Label("Latest", systemImage: "arrow.down")
-                .font(PanelTheme.Font.caption)
+                .font(PanelTheme.Font.caption(textScale))
                 .padding(.horizontal, PanelTheme.Space.medium)
                 .padding(.vertical, PanelTheme.Space.small)
                 .background(PanelTheme.Palette.accent,
@@ -219,7 +225,7 @@ struct PanelRootView: View {
                 Label("\(redactionNote) credential-shaped value\(redactionNote == 1 ? "" : "s") "
                       + "removed from the captured text.",
                       systemImage: "eye.slash")
-                    .font(PanelTheme.Font.caption)
+                    .font(PanelTheme.Font.caption(textScale))
                     .foregroundStyle(PanelTheme.Palette.verdict(.mixed))
                     .padding(.horizontal, PanelTheme.Space.small)
             }
@@ -230,7 +236,7 @@ struct PanelRootView: View {
                 Label("Up to \(ResearchEngine.maxQueued) questions can wait at once. "
                       + "Stop the run, or remove one below.",
                       systemImage: "exclamationmark.circle")
-                    .font(PanelTheme.Font.caption)
+                    .font(PanelTheme.Font.caption(textScale))
                     .foregroundStyle(PanelTheme.Palette.verdict(.mixed))
                     .padding(.horizontal, PanelTheme.Space.small)
             }
@@ -246,6 +252,7 @@ struct PanelRootView: View {
                 ComposerView(text: $draft,
                              placeholder: placeholder,
                              submitOnReturn: preferences.submitOnReturn,
+                             scale: preferences.textScale,
                              onSubmit: { submit(draft) },
                              onArrow: recall)
                     // The composer's height for its content, laid out at the width the
@@ -259,7 +266,8 @@ struct PanelRootView: View {
                     .frame(height: ComposerView.height(
                         for: draft,
                         width: (composerRowWidth ?? estimatedComposerRowWidth)
-                            - Self.sendButtonReservation))
+                            - Self.sendButtonReservation,
+                        scale: preferences.textScale))
 
                 // Stop and Ask are both live during a run, side by side, because both
                 // are now reachable: the composer stays editable, so a question typed
@@ -311,6 +319,8 @@ struct PanelRootView: View {
 
     /// One round composer button, styled once so Stop and Ask match.
     private struct CircularComposerButton: View {
+
+        @Environment(\.panelTextScale) private var textScale
         let symbol: String
         let tint: Color
         let help: String
@@ -320,7 +330,7 @@ struct PanelRootView: View {
         var body: some View {
             Button(action: action) {
                 Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .bold))
+                    .font(PanelTheme.Font.at(11, textScale, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 24, height: 24)
                     .background(tint, in: Circle())
@@ -340,6 +350,8 @@ struct PanelRootView: View {
     /// see is a question they will type again, and one they cannot withdraw is a
     /// provider request they cannot call off.
     private struct QueuedQuestionsView: View {
+
+        @Environment(\.panelTextScale) private var textScale
         let queued: [ResearchEngine.QueuedQuestion]
         var onRemove: (UUID) -> Void
 
@@ -348,17 +360,17 @@ struct PanelRootView: View {
                 ForEach(queued) { item in
                     HStack(spacing: PanelTheme.Space.small) {
                         Image(systemName: "clock")
-                            .font(.system(size: 9))
+                            .font(PanelTheme.Font.at(9, textScale))
                             .foregroundStyle(PanelTheme.Palette.tertiaryText)
                         Text(item.mode == .direct ? "/direct \(item.question)" : item.question)
-                            .font(PanelTheme.Font.caption)
+                            .font(PanelTheme.Font.caption(textScale))
                             .foregroundStyle(PanelTheme.Palette.secondaryText)
                             .lineLimit(1)
                             .truncationMode(.tail)
                         Spacer(minLength: 0)
                         Button { onRemove(item.id) } label: {
                             Image(systemName: "xmark")
-                                .font(.system(size: 8, weight: .semibold))
+                                .font(PanelTheme.Font.at(8, textScale, weight: .semibold))
                                 .foregroundStyle(PanelTheme.Palette.tertiaryText)
                                 .contentShape(Rectangle())
                         }
@@ -401,9 +413,9 @@ struct PanelRootView: View {
         } label: {
             HStack(spacing: PanelTheme.Space.tight) {
                 Image(systemName: "cpu")
-                    .font(.system(size: 9))
+                    .font(PanelTheme.Font.at(9, textScale))
                 Text(preferences.providerSettings.selectedModel?.displayName ?? "No model")
-                    .font(PanelTheme.Font.caption)
+                    .font(PanelTheme.Font.caption(textScale))
                     .lineLimit(1)
             }
             .foregroundStyle(PanelTheme.Palette.secondaryText)
@@ -418,6 +430,8 @@ struct PanelRootView: View {
     }
 
     private struct CommandCompletionsView: View {
+
+        @Environment(\.panelTextScale) private var textScale
         let completions: [ComposerCommand.Entry]
         var onSelect: (String) -> Void
 
@@ -427,10 +441,10 @@ struct PanelRootView: View {
                     Button { onSelect(command.name) } label: {
                         HStack(spacing: PanelTheme.Space.small) {
                             Text("/\(command.name)")
-                                .font(PanelTheme.Font.citation(1.0))
+                                .font(PanelTheme.Font.citation(textScale))
                                 .foregroundStyle(PanelTheme.Palette.accent)
                             Text(command.summary)
-                                .font(.system(size: 11))
+                                .font(PanelTheme.Font.at(11, textScale))
                                 .foregroundStyle(PanelTheme.Palette.secondaryText)
                                 .lineLimit(1)
                             Spacer(minLength: 0)
