@@ -114,8 +114,17 @@ enum ResearchContext {
     /// skipping it and carrying on. Skipping would leave gaps in the citation numbering
     /// the model is shown — 1, 2, 4 — and a gap is an invitation to cite the number that
     /// is missing.
-    static func evidence(from sources: [Source]) -> (entries: [[String: Any]], dropped: Int) {
+    ///
+    /// A page Vervellum read is added as `page_text` on top of an entry that already
+    /// fits, and only when it fits too. That ordering is the point: **a source is never
+    /// lost because its page was read**, and a page whose text did not fit is reported
+    /// in `withheldPageText` so the caller can clear it from the source list. A source
+    /// listed as read whose text the model never saw would be the one overstatement this
+    /// app cannot afford.
+    static func evidence(from sources: [Source])
+        -> (entries: [[String: Any]], dropped: Int, withheldPageText: Set<Int>) {
         var entries: [[String: Any]] = []
+        var withheld: Set<Int> = []
         var used = jsonArrayBoundaryBytes
         for source in sources {
             var entry: [String: Any] = [
@@ -125,12 +134,27 @@ enum ResearchContext {
                 "snippet": source.snippet,
             ]
             if let published = source.publishedAt, !published.isEmpty { entry["published"] = published }
-            let size = measure(entry) + (entries.isEmpty ? 0 : jsonSeparatorBytes)
-            guard used + size <= maxEvidenceCharacters else { break }
-            used += size
+            let separator = entries.isEmpty ? 0 : jsonSeparatorBytes
+            let bare = measure(entry) + separator
+            guard used + bare <= maxEvidenceCharacters else { break }
+
+            if source.wasRead, let text = source.fullText {
+                var withText = entry
+                withText["page_text"] = text
+                let full = measure(withText) + separator
+                if used + full <= maxEvidenceCharacters {
+                    entry = withText
+                    used += full
+                } else {
+                    withheld.insert(source.number)
+                    used += bare
+                }
+            } else {
+                used += bare
+            }
             entries.append(entry)
         }
-        return (entries, sources.count - entries.count)
+        return (entries, sources.count - entries.count, withheld)
     }
 
     /// The answer with every `[n]` marker removed, and the space that carried it.

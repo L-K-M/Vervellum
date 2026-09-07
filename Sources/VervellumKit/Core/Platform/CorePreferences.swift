@@ -39,6 +39,15 @@ final class CorePreferences {
         static let modelEndpoint = ""
         static let modelName = ""
         static let searchEndpoint = ProviderSettings.defaultSearchEndpoint
+        /// Pages behind the top sources are fetched and read.
+        ///
+        /// On, because a citation to a page nobody read is the weakest link in the whole
+        /// chain — the app's own source rows say "search summary, not the full page" for
+        /// exactly that reason. It is also the setting that changes *who Vervellum talks
+        /// to*, so it is named in `PRIVACY.md` and switchable in one control; `.off` is
+        /// what every build before it did.
+        static let pageReading = PageReadingMode.direct
+        static let readerEndpoint = ProviderSettings.defaultReaderEndpoint
         static let historyEnabled = true
         /// The search-plan and sources trail above each answer.
         static let showProcessTrail = true
@@ -70,6 +79,9 @@ final class CorePreferences {
         /// The full search-provider list, JSON-encoded. Authoritative when present.
         static let searchProviders = "searchProviders"
         static let selectedSearchProvider = "selectedSearchProvider"
+        /// How much of each source is read, and where a reader service lives.
+        static let pageReading = "pageReading"
+        static let readerEndpoint = "readerEndpoint"
         static let historyEnabled = "historyEnabled"
         static let showProcessTrail = "showProcessTrail"
         static let submitOnReturn = "submitOnReturn"
@@ -124,6 +136,8 @@ final class CorePreferences {
             store.setString(settings.modelName, for: Key.modelName)
             store.setString(settings.searchEndpoint, for: Key.searchEndpoint)
             store.setString(settings.searchKind.rawValue, for: Key.searchProvider)
+            store.setString(settings.pageReading.rawValue, for: Key.pageReading)
+            store.setString(settings.readerEndpoint, for: Key.readerEndpoint)
 
             cachedProviderSettings = settings
             onChange?()
@@ -138,7 +152,10 @@ final class CorePreferences {
             modelName: store.string(for: Key.modelName) ?? Default.modelName,
             searchEndpoint: store.string(for: Key.searchEndpoint) ?? Default.searchEndpoint,
             searchKind: store.string(for: Key.searchProvider)
-                .flatMap { SearchProviderKind(rawValue: $0) } ?? .mcp)
+                .flatMap { SearchProviderKind(rawValue: $0) } ?? .mcp,
+            pageReading: store.string(for: Key.pageReading)
+                .flatMap { PageReadingMode(rawValue: $0) } ?? Default.pageReading,
+            readerEndpoint: store.string(for: Key.readerEndpoint) ?? Default.readerEndpoint)
 
         if let encoded = store.string(for: Key.modelProviders),
            let profiles = ProviderSettings.decodeModelProfiles(encoded),

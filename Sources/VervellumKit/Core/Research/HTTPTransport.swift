@@ -214,6 +214,23 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         return (headers, object)
     }
 
+    /// Sends `request` and returns its response head and complete body, **without**
+    /// judging the status code.
+    ///
+    /// Every other entry point turns a non-2xx into a `ResearchError`, which is right
+    /// for a provider call. The page reader needs the 3xx itself: `HTTPTransport` still
+    /// refuses every automatic redirect, because `URLSession` would re-send headers to
+    /// the new host, and the reader instead starts a *fresh* credential-free request at
+    /// the `Location`. That keeps the rule's actual reason — a credential must never
+    /// reach a host the user did not configure — while letting `http → https` resolve.
+    ///
+    /// Only for requests that carry no credentials. Nothing else may use it.
+    func fetch(_ request: URLRequest, limit: Int) async throws -> (HTTPURLResponse, Data) {
+        let (http, body) = try await open(request, limit: limit)
+        let data = try await collect(body, limit: limit)
+        return (http, data)
+    }
+
     /// Sends `request` and yields each `data:` frame's decoded JSON object in order,
     /// stopping at the `[DONE]` sentinel. Used for the streaming answer.
     func streamJSONEvents(_ request: URLRequest) -> AsyncThrowingStream<[String: Any], Error> {

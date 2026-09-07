@@ -50,11 +50,14 @@ struct SourcesView: View {
     }
 }
 
-/// One source: number, title, domain, date, and the snippet the model actually saw.
+/// One source: number, title, domain, date, and what the model actually saw of it.
 ///
-/// The snippet is shown, and labelled as a search summary, because the single most
-/// misleading thing a research tool can do is present a citation as though the page
-/// had been read. What was read is this paragraph, and the user can see exactly that.
+/// The single most misleading thing a research tool can do is present a citation as
+/// though the page had been read. So each row says which it was — the page, or a search
+/// engine's summary of it — and the label is driven by `Source.wasRead`, which the
+/// runner clears when a page was fetched but its text did not fit the model's context.
+/// The row therefore describes the evidence the answer had, never the request that was
+/// made on its behalf.
 struct SourceRow: View {
     let source: Source
     var isCited: Bool
@@ -90,6 +93,14 @@ struct SourceRow: View {
                                 .font(.system(size: 10.5))
                                 .foregroundStyle(PanelTheme.Palette.tertiaryText)
                         }
+                        if source.wasRead {
+                            // Shown on the row rather than only on hover: it changes what
+                            // a citation to this source is worth, which is not a detail.
+                            Text("·").foregroundStyle(PanelTheme.Palette.tertiaryText)
+                            Label("page read", systemImage: "doc.text")
+                                .font(.system(size: 10))
+                                .foregroundStyle(PanelTheme.Palette.verdict(.supported))
+                        }
                     }
                     if isHovering, !source.snippet.isEmpty {
                         Text(source.snippet)
@@ -97,7 +108,9 @@ struct SourceRow: View {
                             .foregroundStyle(PanelTheme.Palette.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 2)
-                        Text("Search summary — not the full page")
+                        Text(source.wasRead
+                             ? "Search summary. The answer also had this page's own text."
+                             : "Search summary — not the full page")
                             .font(.system(size: 9.5))
                             .foregroundStyle(PanelTheme.Palette.tertiaryText)
                     }
@@ -120,6 +133,7 @@ struct SourceRow: View {
             withAnimation(PanelTheme.Motion.disclosure) { isHovering = hovering }
         }
         .help(source.url)
-        .accessibilityLabel("Source \(source.number), \(source.title), \(source.domain)")
+        .accessibilityLabel("Source \(source.number), \(source.title), \(source.domain)"
+                            + (source.wasRead ? ", page read" : ", search summary only"))
     }
 }

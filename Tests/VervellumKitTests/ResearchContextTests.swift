@@ -137,7 +137,7 @@ final class ResearchContextTests: XCTestCase {
             Source(number: $0, url: "https://e\($0).example.com/x", title: "T\($0)",
                    snippet: snippet, publishedAt: nil)
         }
-        let (entries, dropped) = ResearchContext.evidence(from: sources)
+        let (entries, dropped, _) = ResearchContext.evidence(from: sources)
         XCTAssertGreaterThan(dropped, 0)
         XCTAssertLessThanOrEqual(ResearchContext.measure(entries), ResearchContext.maxEvidenceCharacters)
         XCTAssertEqual(entries.count + dropped, sources.count)
@@ -156,9 +156,49 @@ final class ResearchContextTests: XCTestCase {
     func testEvidenceKeepsNumbersAndOmitsAnEmptyDate() {
         let sources = [Source(number: 3, url: "https://a.example.com", title: "T",
                               snippet: "S", publishedAt: "")]
-        let (entries, _) = ResearchContext.evidence(from: sources)
+        let (entries, _, _) = ResearchContext.evidence(from: sources)
         XCTAssertEqual(entries.first?["number"] as? Int, 3)
         XCTAssertNil(entries.first?["published"])
+    }
+
+    // MARK: Page text
+
+    /// A page Vervellum read reaches the model as `page_text`, beside the snippet rather
+    /// than instead of it: the snippet is what the search engine said the page was for,
+    /// and that framing is still worth having.
+    func testAReadPageIsCarriedBesideItsSnippet() {
+        var source = Source(number: 1, url: "https://a.example.com", title: "T", snippet: "S")
+        source.fullText = "The page itself."
+        let (entries, dropped, withheld) = ResearchContext.evidence(from: [source])
+        XCTAssertEqual(dropped, 0)
+        XCTAssertTrue(withheld.isEmpty)
+        XCTAssertEqual(entries.first?["page_text"] as? String, "The page itself.")
+        XCTAssertEqual(entries.first?["snippet"] as? String, "S")
+    }
+
+    func testAnUnreadSourceCarriesNoPageText() {
+        let source = Source(number: 1, url: "https://a.example.com", title: "T", snippet: "S")
+        let (entries, _, withheld) = ResearchContext.evidence(from: [source])
+        XCTAssertNil(entries.first?["page_text"])
+        XCTAssertTrue(withheld.isEmpty)
+    }
+
+    /// A source is never lost because its page was read: the page text is what gives
+    /// way, and the source stays with its snippet.
+    func testAPageTooLargeToFitIsWithheldWithoutLosingTheSource() {
+        var first = Source(number: 1, url: "https://a.example.com", title: "A", snippet: "S")
+        first.fullText = String(repeating: "p", count: ResearchContext.maxEvidenceCharacters)
+        var second = Source(number: 2, url: "https://b.example.com", title: "B", snippet: "S")
+        second.fullText = "Short enough."
+
+        let (entries, dropped, withheld) = ResearchContext.evidence(from: [first, second])
+        XCTAssertEqual(dropped, 0, "Both sources survive")
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(withheld, [1])
+        XCTAssertNil(entries.first?["page_text"], "The oversized page is the thing that gives way")
+        XCTAssertEqual(entries.last?["page_text"] as? String, "Short enough.")
+        XCTAssertLessThanOrEqual(ResearchContext.measure(entries),
+                                 ResearchContext.maxEvidenceCharacters)
     }
 
     func testTodayStringIsISOFormatted() {

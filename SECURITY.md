@@ -69,8 +69,34 @@ inert; literal URLs are flagged. Invalid numbers remain plain text and are repor
 Shared masking prevents raw placeholder characters from relocating real citations.
 These controls establish link provenance, not whether a source supports a claim.
 
-Retrieved text is never executed, never rendered as HTML, and never fetched a second
-time — Vervellum reads the search tool's summaries and does not load source pages.
+Retrieved text is never executed and never rendered as HTML. It is *read*: with page
+reading on — the default — Vervellum fetches up to three of the pages the search
+returned and extracts their text, which raises the evidential value of a citation and
+adds one thing to reason about, so both are stated here rather than only the first.
+
+Those requests are the only ones Vervellum makes to a host the user did not configure,
+and they are built to have nothing worth stealing:
+
+- **No credentials.** No `Authorization` header, no cookies (the shared session neither
+  stores nor sends them) and no `Referer`. There is nothing for a hostile host to
+  harvest.
+- **Redirects are re-issued, not followed.** The transport still refuses every automatic
+  redirect; the reader reads the `Location` and starts a *fresh* credential-free request,
+  at most twice, and re-validates every hop as an absolute `http(s)` URL. `file:` and
+  `data:` targets are rejected at each hop rather than only at the first.
+- **Only text, and only some of it.** A non-text content type is skipped on its header
+  rather than fetched and discarded, the body is capped, and the extracted text is
+  truncated with a visible marker.
+- **The page's own text is still untrusted data.** It reaches the model inside the same
+  evidence block as a snippet, under the same system prompt, and cannot become a
+  citation: Vervellum still owns the numbered list, and the model still refers to
+  evidence only by number.
+
+Setting **Reading the page** to *Use a reader service* moves the fetch to an MCP reader
+endpoint; setting it to *Snippets only* is the behaviour of every build before this one.
+Either way, a source that was read says so in the panel and in a copied transcript, and
+a page that was fetched but did not fit the model's context is listed as a summary —
+because that is what the answer actually had.
 
 ### Captured text
 
@@ -88,6 +114,12 @@ replaced, with a visible count of how many.
 - **The providers see your questions.** Vervellum has no way to make a remote model
   endpoint or a remote search server forget what was sent to it. Their handling is
   governed by their own policies.
+- **A page you read learns you read it.** With direct page reading the site behind a
+  search result receives a request from your machine and therefore your IP address, plus
+  whatever its own logs record. Nothing identifies Vervellum's user beyond that, but
+  "the search provider saw the query" and "the site saw the visit" are different
+  disclosures. A reader service moves the visit to the service and shows it the URLs
+  instead; *Snippets only* makes neither request.
 - **Released builds are not signed or notarized.** CI ad-hoc signs the app so it will
   launch on Apple Silicon; there is no Developer ID signature, no notarization, and the
   Hardened Runtime is not applied to the CI artifact. The in-app updater verifies a

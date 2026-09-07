@@ -36,6 +36,11 @@ struct ProvidersView: View {
     @State private var searchKeyEntries: [UUID: String] = [:]
     @State private var storedSearchKeys: Set<UUID> = []
 
+    @State private var pageReading: PageReadingMode = .direct
+    @State private var readerEndpoint = ""
+    @State private var readerKeyEntry = ""
+    @State private var hasReaderKey = false
+
     @State private var status: String?
     @State private var statusIsProblem = false
 
@@ -103,6 +108,40 @@ struct ProvidersView: View {
                     selectedSearchID = added.id
                 } label: {
                     Label("Add a search provider", systemImage: "plus")
+                }
+            }
+
+            SettingsSection(
+                title: "Reading the page",
+                footnote: "A search result is a summary, and a citation to a page nobody read "
+                    + "is the weakest link in the chain — so Vervellum reads the pages behind "
+                    + "the top few sources and marks in the source list which ones it got. "
+                    + "Fetching them directly is the only thing Vervellum does that contacts a "
+                    + "site you did not configure; those requests carry no key, no cookie and "
+                    + "no referrer, but the site does see your address. A reader service fetches "
+                    + "them instead, so the sites see the service and the service sees the URLs.") {
+                Picker("Sources", selection: $pageReading) {
+                    ForEach(PageReadingMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+
+                if pageReading == .reader {
+                    LabeledContent("Reader endpoint") {
+                        TextField(ProviderSettings.defaultReaderEndpoint, text: $readerEndpoint)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    keyRow(title: "Reader key",
+                           entry: $readerKeyEntry,
+                           hasStored: hasReaderKey,
+                           note: "Required for a hosted reader. z.ai's Web Reader takes the same "
+                               + "Coding Plan key as its web search, stored separately.") {
+                        try? keychain.delete(.readerAPIKey)
+                        hasReaderKey = keychain.hasValue(for: .readerAPIKey)
+                        statusIsProblem = false
+                        status = "Key removed."
+                    }
                 }
             }
 
@@ -256,6 +295,10 @@ struct ProvidersView: View {
         storedKeys = Set(profiles.filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
         storedSearchKeys = Set(searchProfiles
             .filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
+        pageReading = settings.pageReading
+        readerEndpoint = settings.readerEndpoint
+        readerKeyEntry = ""
+        hasReaderKey = keychain.hasValue(for: .readerAPIKey)
     }
 
     private func remove(_ id: UUID) {
@@ -285,6 +328,8 @@ struct ProvidersView: View {
         settings.selectedModelID = selectedID ?? profiles.first?.id
         settings.searchProfiles = searchProfiles
         settings.selectedSearchID = selectedSearchID ?? searchProfiles.first?.id
+        settings.pageReading = pageReading
+        settings.readerEndpoint = readerEndpoint
         preferences.providerSettings = settings
 
         do {
@@ -304,8 +349,12 @@ struct ProvidersView: View {
                 guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                 try keychain.set(typed, for: profile.secretAccount)
             }
+            if !readerKeyEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                try keychain.set(readerKeyEntry, for: .readerAPIKey)
+            }
             keyEntries = [:]
             searchKeyEntries = [:]
+            readerKeyEntry = ""
         } catch {
             status = error.localizedDescription
             statusIsProblem = true
@@ -321,8 +370,10 @@ struct ProvidersView: View {
             .filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
         // Re-read: `normalized()` may have filled in the default MCP endpoint, and the
         // form should show what was stored rather than what was typed.
+        hasReaderKey = keychain.hasValue(for: .readerAPIKey)
         let saved = preferences.providerSettings
         searchProfiles = saved.searchProfiles
+        readerEndpoint = saved.readerEndpoint
 
         // Report configuration problems now rather than at the first question, but do
         // not try to reach the providers: a connectivity check here would cost a

@@ -31,9 +31,12 @@ runs the searches and answers based on current sources.
 - **You can watch it work.** What it decided to look up, what it searched for, how
   many sources it kept, how many the answer actually cites. The detail is visible
   while it runs and collapses to one line once it's done.
-- **Sources are shown for what they are.** They're search summaries, not full
-  articles, and every source says so. A summary can't prove that the page behind it
-  says what the answer claims it says.
+- **It reads the pages, and says which ones.** Search results are summaries, and a
+  citation to a page nobody read is the weakest link in the chain — so Vervellum fetches
+  the pages behind the top few sources and gives the model their text alongside the
+  summary. Each source row says which it was: **page read**, or search summary. A page
+  that was fetched but didn't fit the model's context is listed as a summary, because
+  that is what the answer actually had.
 
 ## Features
 
@@ -67,6 +70,13 @@ runs the searches and answers based on current sources.
   a local server, a fast hosted model, a careful one — each with its own endpoint and
   its own key. Pick the one that answers next from the panel or with `/model`; every
   turn records the model that produced it.
+- **Three ways to read a page.** **Snippets only** is the old behaviour. **Fetch
+  directly** is the default: Vervellum requests the page itself, with no key, no cookie
+  and no referrer — the only thing it does that contacts a site you didn't configure, so
+  the site sees your address. **A reader service** ([z.ai's Web Reader MCP
+  server](https://docs.z.ai/devpack/mcp/reader-mcp-server), or any MCP server with a
+  compatible tool) fetches them instead, so the sites see the service and the service
+  sees the URLs. Settings ▸ Providers ▸ Reading the page.
 - **Native.** SwiftUI and AppKit, Liquid Glass on macOS 26, no dependencies.
 
 ## Getting started
@@ -110,6 +120,10 @@ at the instance (its home page is enough — `/search` is appended):
   "searchEndpoint": "https://searx.example.org"
 }
 ```
+
+Page reading is `pageReading`, one of `"off"`, `"direct"` or `"reader"` (default
+`"direct"`), with `readerEndpoint` for the reader service and its key in
+`VERVELLUM_READER_KEY` or the keyring under `reader-api-key`.
 
 > [!IMPORTANT]
 > A SearXNG instance must list `json` under `search.formats` in its `settings.yml`.

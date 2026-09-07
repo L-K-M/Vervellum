@@ -111,6 +111,11 @@ struct ProcessTrailView: View {
         if !turn.sources.isEmpty {
             parts.append("\(turn.sources.count) source\(turn.sources.count == 1 ? "" : "s")")
         }
+        // Only when a page was actually read. "0 pages read" on every turn with the
+        // setting off would be a line about a feature rather than about this answer.
+        if turn.pagesRead > 0 {
+            parts.append("\(turn.pagesRead) page\(turn.pagesRead == 1 ? "" : "s") read")
+        }
         if !turn.findings.isEmpty {
             parts.append("\(turn.findings.count) claim\(turn.findings.count == 1 ? "" : "s") checked")
         }

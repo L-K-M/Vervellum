@@ -54,7 +54,13 @@ enum TranscriptFormatter {
         if !cited.isEmpty {
             lines.append("")
             lines.append("Sources")
-            lines.append(contentsOf: cited.map { "[\($0.number)] \($0.title) — \($0.url)" })
+            // A pasted transcript is read away from the panel, where the source rows say
+            // which pages were actually read. It has to carry the same distinction, or
+            // every citation in it looks equally strong.
+            lines.append(contentsOf: cited.map {
+                "[\($0.number)] \($0.title) — \($0.url)"
+                    + ($0.wasRead ? " (page read)" : " (search summary)")
+            })
         }
 
         if !turn.limitations.isEmpty {

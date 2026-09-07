@@ -13,17 +13,17 @@ final class SearchMCPClientTests: XCTestCase {
     /// classification must not tell a user with an exhausted balance to replace a key
     /// that works.
     func testQuotaMessagesAreNotReadAsABadKey() {
-        XCTAssertFalse(SearchMCPClient.describesAuthenticationFailure("Insufficient token balance"))
-        XCTAssertFalse(SearchMCPClient.describesAuthenticationFailure("tokens per minute limit exceeded"))
-        XCTAssertFalse(SearchMCPClient.describesAuthenticationFailure("token quota exhausted"))
+        XCTAssertFalse(MCPSession.describesAuthenticationFailure("Insufficient token balance"))
+        XCTAssertFalse(MCPSession.describesAuthenticationFailure("tokens per minute limit exceeded"))
+        XCTAssertFalse(MCPSession.describesAuthenticationFailure("token quota exhausted"))
     }
 
     func testKeyMessagesAreReadAsABadKey() {
-        XCTAssertTrue(SearchMCPClient.describesAuthenticationFailure("Authentication failed"))
-        XCTAssertTrue(SearchMCPClient.describesAuthenticationFailure("Invalid API key"))
-        XCTAssertTrue(SearchMCPClient.describesAuthenticationFailure("invalid token"))
-        XCTAssertTrue(SearchMCPClient.describesAuthenticationFailure("Token expired"))
-        XCTAssertTrue(SearchMCPClient.describesAuthenticationFailure("Unauthorized"))
+        XCTAssertTrue(MCPSession.describesAuthenticationFailure("Authentication failed"))
+        XCTAssertTrue(MCPSession.describesAuthenticationFailure("Invalid API key"))
+        XCTAssertTrue(MCPSession.describesAuthenticationFailure("invalid token"))
+        XCTAssertTrue(MCPSession.describesAuthenticationFailure("Token expired"))
+        XCTAssertTrue(MCPSession.describesAuthenticationFailure("Unauthorized"))
     }
 
     // MARK: Tool selection
