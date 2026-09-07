@@ -41,8 +41,20 @@ struct ProvidersView: View {
     @State private var readerKeyEntry = ""
     @State private var hasReaderKey = false
 
+    /// What each provider's model list is doing. Keyed by profile id because a card is
+    /// fetched on its own — one provider being down must not blank another's list.
+    @State private var catalogues: [UUID: CatalogueState] = [:]
+
     @State private var status: String?
     @State private var statusIsProblem = false
+
+    /// A provider's model list, and why it is not showing one.
+    enum CatalogueState: Equatable {
+        case loading
+        case loaded([String])
+        /// The reason, already user-facing. The field stays editable underneath it.
+        case failed(String)
+    }
 
     var body: some View {
         SettingsPane {
@@ -185,8 +197,7 @@ struct ProvidersView: View {
                     .textFieldStyle(.roundedBorder)
             }
             LabeledContent("Model") {
-                TextField("model-name", text: profile.model)
-                    .textFieldStyle(.roundedBorder)
+                modelRow(profile)
             }
             keyRow(title: "API key",
                    entry: Binding(get: { keyEntries[id] ?? "" },
@@ -202,6 +213,87 @@ struct ProvidersView: View {
         .padding(10)
         .background(Color.primary.opacity(0.04),
                     in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
+    /// The model field, plus whatever the endpoint will tell us about itself.
+    ///
+    /// The text field never goes away. Fetching is an offer, not a replacement: a gateway
+    /// that lists nothing, one that lists a hundred routing aliases, or a name reachable
+    /// only through a prefix all have to stay typeable, and a picker that had swallowed
+    /// the field would make those providers unusable.
+    @ViewBuilder
+    private func modelRow(_ profile: Binding<ModelProfile>) -> some View {
+        let id = profile.wrappedValue.id
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                TextField("model-name", text: profile.model)
+                    .textFieldStyle(.roundedBorder)
+
+                if case .loading = catalogues[id] {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button {
+                        Task { await loadModels(for: profile.wrappedValue) }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .help("Ask this endpoint which models it serves")
+                    .disabled(ProviderSettings.modelListURL(from: profile.wrappedValue.endpoint) == nil)
+                }
+            }
+
+            switch catalogues[id] {
+            case .loaded(let models):
+                Picker("", selection: profile.model) {
+                    // The typed value is offered back as a row of its own when the
+                    // endpoint did not list it, so choosing from the menu cannot silently
+                    // discard a name that works.
+                    if !models.contains(profile.wrappedValue.model),
+                       !profile.wrappedValue.model.isEmpty {
+                        Text(profile.wrappedValue.model).tag(profile.wrappedValue.model)
+                    }
+                    ForEach(models, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+                .help("\(models.count) models listed by this endpoint")
+            case .failed(let reason):
+                Text(reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .loading, .none:
+                EmptyView()
+            }
+        }
+        // A list belongs to the endpoint it came from. Editing the address makes it
+        // stale, and a picker still offering the old host's models would be worse than
+        // offering none.
+        .onChange(of: profile.wrappedValue.endpoint) { _, _ in
+            catalogues[id] = nil
+        }
+    }
+
+    /// Asks one provider for its model list.
+    ///
+    /// Uses the key typed in this session when there is one and the stored key otherwise,
+    /// so a provider can be verified before Save — which is the moment the list is most
+    /// useful, and the moment a key that is wrong is cheapest to notice.
+    @MainActor
+    private func loadModels(for profile: ModelProfile) async {
+        guard let url = ProviderSettings.modelListURL(from: profile.endpoint) else { return }
+        catalogues[profile.id] = .loading
+        let typed = (keyEntries[profile.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = typed.isEmpty ? keychain.value(for: profile.secretAccount) : typed
+        let client = ModelCatalogClient(url: url, apiKey: key,
+                                        trace: ResearchTrace(sink: SilentLog()))
+        do {
+            catalogues[profile.id] = .loaded(try await client.fetch())
+        } catch {
+            // The provider's own text is never shown — only a `ResearchError` Vervellum
+            // wrote, and a bare type name for anything else.
+            catalogues[profile.id] = .failed(
+                (error as? ResearchError)?.message
+                    ?? "Could not list models. Type the model name instead.")
+        }
     }
 
     /// One search provider's fields. The protocol picker comes first, because it decides
@@ -292,6 +384,9 @@ struct ProvidersView: View {
         keyEntries = [:]
         searchKeyEntries = [:]
         accountsToDelete = []
+        // Not carried across an open: the endpoints may have changed elsewhere, and a
+        // list is one click away.
+        catalogues = [:]
         storedKeys = Set(profiles.filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
         storedSearchKeys = Set(searchProfiles
             .filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))

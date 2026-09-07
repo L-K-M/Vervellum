@@ -8,7 +8,7 @@ Vervellum server: the app talks only to the endpoints you configure and to GitHu
 
 ## What leaves this Mac
 
-Vervellum makes network requests in exactly three cases, each with a fixed purpose.
+Vervellum makes network requests in exactly four cases, each with a fixed purpose.
 
 - **Research.** Requested research sends your question, earlier thread context, and
   retrieved evidence to the model provider selected when you asked — and to no other
@@ -18,6 +18,12 @@ Vervellum makes network requests in exactly three cases, each with a fixed purpo
   to the search provider selected when you asked — an MCP server, or a SearXNG instance
   queried directly — and to no other configured provider. They are shown to you in the
   panel's process trail before the answer arrives.
+- **Listing a provider's models.** Only when you press the refresh button beside a
+  model field in Settings ▸ Providers. It sends `GET <endpoint>/models` to that one
+  provider, with that provider's key, and nothing else — no question, no thread, no
+  context. Nothing is fetched when Settings merely opens, and no other provider is
+  contacted. The reply is a list of model names, used to fill the picker; the field
+  stays typeable whether it succeeds or not.
 - **Update checks.** Vervellum asks GitHub's public releases API whether a newer version
   exists — on launch and about once a day while automatic checks are enabled (they can
   be turned off in Settings), or when you choose Check for Updates. The request contains

@@ -481,6 +481,29 @@ struct ProviderSettings: Equatable, Codable {
 
     private static let versionSuffix = try! NSRegularExpression(pattern: #"/v[0-9]+$"#)
 
+    /// The model-list URL for whatever the user pasted as their chat endpoint.
+    ///
+    /// The same three shapes `chatCompletionsURL` accepts, in reverse. A bare host or a
+    /// versioned base (`/v1`) gains `/models`; a full chat path (`/v1/chat/completions`)
+    /// has that suffix removed first, because appending to it would ask for
+    /// `/chat/completions/models`, which is nothing.
+    ///
+    /// Here rather than on `ModelCatalog` so the endpoint rules — HTTPS, no credentials
+    /// in the URL, a host — stay in one place and keep their validator private.
+    static func modelListURL(from raw: String) -> URL? {
+        guard var components = validatedURLComponents(raw) else { return nil }
+        var path = components.path
+        while path.hasSuffix("/") { path.removeLast() }
+        if path.hasSuffix(chatCompletionsSuffix) { path.removeLast(chatCompletionsSuffix.count) }
+        while path.hasSuffix("/") { path.removeLast() }
+        components.path = path + "/models"
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
+
+    private static let chatCompletionsSuffix = "/chat/completions"
+
     /// The SearXNG JSON search URL for an instance address.
     ///
     /// Users paste the instance's home page (`https://searx.example.org`), because that
