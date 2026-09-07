@@ -44,7 +44,8 @@ runs the searches and answers based on current sources.
   over another app's full-screen window without switching Spaces.
 - **Threaded.** Follow-up questions carry the thread's context, including which
   earlier claims were left unsettled. Threads are searchable, and it's up to you
-  whether they're kept at all. Active turns are checkpointed; interrupted work
+  whether they're kept at all, and how many are kept — older ones past the limit are
+  deleted, and lowering it takes effect immediately rather than at the next question. Active turns are checkpointed; interrupted work
   reopens as incomplete, with its partial answer retained.
 - **Keyboard-first.** `Return` asks, `Esc` clears then closes, `↑`/`↓` walk back
   through earlier questions, `/` opens commands. Everything in the header is also a

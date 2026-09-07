@@ -45,12 +45,12 @@ final class ThreadLibraryTests: XCTestCase {
 
     func testTheListIsBounded() {
         var library = ThreadLibrary()
-        let overfill = ThreadLibrary.maxThreads + 20
+        let overfill = ThreadLibrary.defaultKeptThreads + 20
         for index in 0..<overfill {
             library.upsert(thread("q\(index)"))
         }
-        XCTAssertEqual(library.threads.count, ThreadLibrary.maxThreads)
-        XCTAssertEqual(library.threads.first?.title, "q\(ThreadLibrary.maxThreads + 19)")
+        XCTAssertEqual(library.threads.count, ThreadLibrary.defaultKeptThreads)
+        XCTAssertEqual(library.threads.first?.title, "q\(ThreadLibrary.defaultKeptThreads + 19)")
     }
 
     func testSearchMatchesQuestionsAndAnswers() {
@@ -434,5 +434,72 @@ final class ThreadArchiveTests: XCTestCase {
         // The toggle cannot prove deletion succeeded; keep the warning and write block.
         store.isHistoryEnabled = true
         XCTAssertNotNil(store.eraseFailure)
+    }
+
+    // MARK: Retention
+
+    /// The setting moves the bound; it never removes it.
+    func testKeepsOnlyTheNewestUpToTheLimit() {
+        var library = ThreadLibrary()
+        for index in 0..<40 { library.upsert(thread("q\(index)"), keeping: 25) }
+        XCTAssertEqual(library.threads.count, 25)
+        XCTAssertEqual(library.threads.first?.title, "q39", "newest first")
+        XCTAssertEqual(library.threads.last?.title, "q15", "the oldest fifteen are gone")
+    }
+
+    /// A limit that only applied to new writes would leave a reader who asked to keep
+    /// twenty-five looking at two hundred until they had asked two hundred more questions.
+    func testLoweringTheLimitPrunesWhatIsAlreadyThere() {
+        var library = ThreadLibrary()
+        for index in 0..<60 { library.upsert(thread("q\(index)"), keeping: 100) }
+        XCTAssertEqual(library.threads.count, 60)
+        XCTAssertEqual(library.prune(to: 20), 40)
+        XCTAssertEqual(library.threads.count, 20)
+        XCTAssertEqual(library.threads.first?.title, "q59")
+    }
+
+    func testPruningToAHigherLimitDropsNothing() {
+        var library = ThreadLibrary()
+        for index in 0..<5 { library.upsert(thread("q\(index)"), keeping: 100) }
+        XCTAssertEqual(library.prune(to: 500), 0)
+        XCTAssertEqual(library.threads.count, 5)
+    }
+
+    /// The limit arrives from a settings file a crash, a sync or a hand edit can leave
+    /// holding anything. A zero there must not be able to erase the history — "keep
+    /// nothing" is what turning history off means, and it says so out loud.
+    func testAnAbsurdLimitIsClampedRatherThanObeyed() {
+        var library = ThreadLibrary()
+        for index in 0..<40 { library.upsert(thread("q\(index)"), keeping: 100) }
+        library.prune(to: 0)
+        XCTAssertEqual(library.threads.count, ThreadLibrary.keptThreadsRange.lowerBound)
+
+        var negative = ThreadLibrary()
+        for index in 0..<40 { negative.upsert(thread("q\(index)"), keeping: -5) }
+        XCTAssertEqual(negative.threads.count, ThreadLibrary.keptThreadsRange.lowerBound)
+    }
+
+    /// Setting it prunes at once: a reader who has just asked to keep twenty-five expects
+    /// to see twenty-five.
+    func testTheArchivePrunesWhenTheLimitIsLowered() throws {
+        let archive = ThreadArchive(fileURL: fileURL, debounce: 0)
+        for index in 0..<40 { archive.save(thread("q\(index)")) }
+        XCTAssertEqual(archive.library.threads.count, 40)
+
+        archive.keptThreads = 15
+        XCTAssertEqual(archive.library.threads.count, 15)
+        XCTAssertEqual(archive.library.threads.first?.title, "q39")
+    }
+
+    /// A file written when the limit was higher — or by a build that had no setting — is
+    /// trimmed on the way in, so the list already obeys what was asked for.
+    func testAnExistingFileIsTrimmedOnLoad() throws {
+        let writer = ThreadArchive(fileURL: fileURL, debounce: 0)
+        for index in 0..<40 { writer.save(thread("q\(index)")) }
+        writer.flush()
+
+        let reopened = ThreadArchive(fileURL: fileURL, keptThreads: 12, debounce: 0)
+        XCTAssertEqual(reopened.library.threads.count, 12)
+        XCTAssertEqual(reopened.library.threads.first?.title, "q39")
     }
 }

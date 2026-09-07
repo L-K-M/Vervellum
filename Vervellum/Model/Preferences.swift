@@ -81,6 +81,12 @@ final class Preferences: ObservableObject {
         set { core.historyEnabled = newValue }
     }
 
+    /// How many past threads are kept on disk.
+    var keptThreads: Int {
+        get { core.keptThreads }
+        set { core.keptThreads = newValue }
+    }
+
     var showProcessTrail: Bool {
         get { core.showProcessTrail }
         set { core.showProcessTrail = newValue }

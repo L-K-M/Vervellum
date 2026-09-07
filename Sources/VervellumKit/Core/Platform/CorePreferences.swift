@@ -49,6 +49,8 @@ final class CorePreferences {
         static let pageReading = PageReadingMode.direct
         static let readerEndpoint = ProviderSettings.defaultReaderEndpoint
         static let historyEnabled = true
+        /// How many past threads are kept. See `ThreadLibrary.defaultKeptThreads`.
+        static let keptThreads = ThreadLibrary.defaultKeptThreads
         /// The search-plan and sources trail above each answer.
         static let showProcessTrail = true
         /// Return submits; Shift-Return inserts a newline. The inverse suits people who
@@ -83,6 +85,7 @@ final class CorePreferences {
         static let pageReading = "pageReading"
         static let readerEndpoint = "readerEndpoint"
         static let historyEnabled = "historyEnabled"
+        static let keptThreads = "keptThreads"
         static let showProcessTrail = "showProcessTrail"
         static let submitOnReturn = "submitOnReturn"
         static let redactSecrets = "redactSecrets"
@@ -196,6 +199,28 @@ final class CorePreferences {
     var redactSecrets: Bool {
         get { store.bool(for: Key.redactSecrets) ?? Default.redactSecrets }
         set { store.setBool(newValue, for: Key.redactSecrets); onChange?() }
+    }
+
+    /// How many past threads are kept on disk.
+    ///
+    /// Stored as a double because that is the only number `SettingsStore` carries, and
+    /// clamped on read as well as on write like every other bound value here: a
+    /// settings file left holding a zero by a crash or a hand edit must not be able to
+    /// erase the history.
+    var keptThreads: Int {
+        get {
+            let range = ThreadLibrary.keptThreadsRange
+            let stored = Self.clamped(store.double(for: Key.keptThreads),
+                                      Double(Default.keptThreads),
+                                      Double(range.lowerBound)...Double(range.upperBound))
+            return Int(stored.rounded())
+        }
+        set {
+            let range = ThreadLibrary.keptThreadsRange
+            let bounded = min(max(newValue, range.lowerBound), range.upperBound)
+            store.setDouble(Double(bounded), for: Key.keptThreads)
+            onChange?()
+        }
     }
 
     var textScale: Double {

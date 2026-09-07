@@ -3,6 +3,12 @@ import SwiftUI
 /// Panel behaviour, history, and updates.
 struct GeneralView: View {
 
+    /// The limits offered. A short list of round numbers rather than a slider: this is a
+    /// number nobody wants to tune to the unit, and every value here is inside
+    /// `ThreadLibrary.keptThreadsRange`.
+    static let threadLimits = [25, 50, 100, 200, 500, 1000]
+
+
     @ObservedObject var preferences: Preferences
     @ObservedObject var store: ThreadStore
     @ObservedObject var updateChecker: UpdateChecker
@@ -105,6 +111,22 @@ struct GeneralView: View {
                         preferences.historyEnabled = enabled
                         store.isHistoryEnabled = enabled
                     }))
+                // Shown only while history is on: a limit on a history that is not being
+                // kept is a control with nothing to do.
+                if preferences.historyEnabled {
+                    Picker("Keep at most", selection: Binding(
+                        get: { preferences.keptThreads },
+                        set: { limit in
+                            preferences.keptThreads = limit
+                            store.keptThreads = limit
+                        })) {
+                        ForEach(GeneralView.threadLimits, id: \.self) { limit in
+                            Text("\(limit) threads").tag(limit)
+                        }
+                    }
+                    .help("Older threads past this are deleted. Lowering it takes effect now, "
+                          + "not at the next question.")
+                }
                 HStack {
                     Text("\(store.library.threads.count) thread\(store.library.threads.count == 1 ? "" : "s") stored")
                         .font(.system(size: 11))

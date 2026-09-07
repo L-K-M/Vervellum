@@ -72,14 +72,30 @@ final class ThreadArchive {
     /// in `init` and afterwards only on `queue`, where every write runs.
     private var primaryIsTrustworthy: Bool
 
+    /// How many threads to keep. See `ThreadLibrary.prune(to:)`.
+    ///
+    /// Setting it prunes immediately rather than at the next write: a reader who has just
+    /// asked to keep fifty expects to see fifty, not to wait for a hundred and fifty more
+    /// questions to push the rest out.
+    var keptThreads: Int {
+        didSet {
+            guard keptThreads != oldValue, isHistoryEnabled, !isReadOnly else { return }
+            guard library.prune(to: keptThreads) > 0 else { return }
+            onChange?()
+            scheduleSave()
+        }
+    }
+
     init(fileURL: URL,
          fileManager: FileManager = .default,
          historyEnabled: Bool = true,
+         keptThreads: Int = ThreadLibrary.defaultKeptThreads,
          debounce: TimeInterval = 1.0) {
         self.fileURL = fileURL
         self.fileManager = fileManager
         self.debounce = debounce
         self.isHistoryEnabled = historyEnabled
+        self.keptThreads = keptThreads
 
         // The file is read for its *version* even when history is off, and only adopted
         // when it is on. Skipping the read entirely would leave `isReadOnly` false, so a
@@ -101,13 +117,20 @@ final class ThreadArchive {
         if !historyEnabled, !isReadOnly {
             recordingFailure { try eraseEverything() }
         }
+        // A file written when the limit was higher — or by a build that had no setting —
+        // is trimmed on the way in, so the list the reader sees already obeys what they
+        // asked for. Never when the document is read-only: re-encoding a newer version
+        // is exactly what that flag forbids.
+        if historyEnabled, !isReadOnly, library.prune(to: keptThreads) > 0 {
+            scheduleSave()
+        }
     }
 
     // MARK: Mutation
 
     func save(_ thread: ResearchThread) {
         guard isHistoryEnabled, !forgottenThreadIDs.contains(thread.id) else { return }
-        library.upsert(thread)
+        library.upsert(thread, keeping: keptThreads)
         onChange?()
         scheduleSave()
     }

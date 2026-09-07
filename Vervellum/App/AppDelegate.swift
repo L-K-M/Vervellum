@@ -18,7 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let preferences = Preferences.shared
     private let secrets: SecretStore = KeychainStore()
-    private lazy var store = ThreadStore(historyEnabled: preferences.historyEnabled)
+    private lazy var store = ThreadStore(historyEnabled: preferences.historyEnabled,
+                                        keptThreads: preferences.keptThreads)
     private lazy var engine = ResearchEngine(preferences: preferences.core, secrets: secrets)
     private lazy var updateChecker = UpdateChecker(
         configuration: .init(owner: "L-K-M", repo: "Vervellum"))
@@ -68,7 +69,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // rather than at the next summon. Width and edge used to be sampled once per
         // show, so the only way to see what the width slider did was to close the panel
         // and open it again — with the previous width no longer on screen to compare to.
-        preferences.onChanged = { [weak self] in self?.panelController?.preferencesDidChange() }
+        preferences.onChanged = { [weak self] in
+            guard let self else { return }
+            self.panelController?.preferencesDidChange()
+            // The archive reads the limit when it is built, so without this a reader who
+            // lowered it would keep the threads they asked to drop until the next launch.
+            self.store.keptThreads = self.preferences.keptThreads
+        }
         observePanelPreview()
 
         installMainMenu()

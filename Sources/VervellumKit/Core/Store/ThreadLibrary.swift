@@ -11,9 +11,20 @@ struct ThreadLibrary: Codable, Equatable {
     /// Version 2 adds tolerant notices. Future readers preflight this stamp; releases
     /// predating that protection cannot safely open this schema, even with a bump.
     static let currentVersion = 2
-    /// How many threads are kept. Old research is the least valuable thing on the
-    /// disk and the file is read wholesale at launch, so the list is bounded.
-    static let maxThreads = 200
+    /// How many threads are kept when the reader has expressed no preference.
+    ///
+    /// Old research is the least valuable thing on the disk and the file is read
+    /// wholesale at launch, so the list is always bounded — the setting moves the bound,
+    /// it does not remove it.
+    static let defaultKeptThreads = 200
+
+    /// What the setting may be set to.
+    ///
+    /// The floor is not zero: "keep nothing" is what turning history off means, and a
+    /// zero here would be a second, quieter way to say it that also threw away the
+    /// thread being written. The ceiling is where reading the file wholesale at launch
+    /// starts to be felt.
+    static let keptThreadsRange = 10...2000
 
     var version: Int = ThreadLibrary.currentVersion
     /// Newest first.
@@ -22,13 +33,32 @@ struct ThreadLibrary: Codable, Equatable {
     /// Inserts or replaces `thread`, keeping the list newest-first and bounded.
     /// An empty thread is never stored: summoning the panel and dismissing it
     /// without asking anything should leave no trace.
-    mutating func upsert(_ thread: ResearchThread) {
+    mutating func upsert(_ thread: ResearchThread,
+                         keeping limit: Int = ThreadLibrary.defaultKeptThreads) {
         threads.removeAll { $0.id == thread.id }
         guard !thread.isEmpty else { return }
         threads.insert(thread, at: 0)
-        if threads.count > Self.maxThreads {
-            threads.removeLast(threads.count - Self.maxThreads)
-        }
+        prune(to: limit)
+    }
+
+    /// Drops the oldest threads past `limit`.
+    ///
+    /// Separate from `upsert` because lowering the setting has to take effect on threads
+    /// that are already on disk. A bound that only applied to new writes would leave a
+    /// reader who asked to keep fifty looking at two hundred until they had asked two
+    /// hundred more questions.
+    ///
+    /// The limit is clamped rather than trusted: it arrives from a settings file that a
+    /// crash, a sync or a hand edit can leave holding anything, and a zero there would
+    /// silently erase the history.
+    @discardableResult
+    mutating func prune(to limit: Int) -> Int {
+        let bounded = min(max(limit, Self.keptThreadsRange.lowerBound),
+                          Self.keptThreadsRange.upperBound)
+        guard threads.count > bounded else { return 0 }
+        let dropped = threads.count - bounded
+        threads.removeLast(dropped)
+        return dropped
     }
 
     mutating func remove(id: UUID) {

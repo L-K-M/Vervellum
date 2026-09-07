@@ -18,9 +18,11 @@ final class ThreadStore: ObservableObject {
     init(fileURL: URL = ThreadStore.defaultURL,
          fileManager: FileManager = .default,
          historyEnabled: Bool = true,
+         keptThreads: Int = ThreadLibrary.defaultKeptThreads,
          debounce: TimeInterval = 1.0) {
         archive = ThreadArchive(fileURL: fileURL, fileManager: fileManager,
-                                historyEnabled: historyEnabled, debounce: debounce)
+                                historyEnabled: historyEnabled, keptThreads: keptThreads,
+                                debounce: debounce)
         library = archive.library
         archive.onChange = { [weak self] in
             guard let self else { return }
@@ -54,6 +56,16 @@ final class ThreadStore: ObservableObject {
         set {
             objectWillChange.send()
             archive.isHistoryEnabled = newValue
+        }
+    }
+
+    /// How many past threads are kept. Setting it prunes at once — see
+    /// `ThreadArchive.keptThreads`.
+    var keptThreads: Int {
+        get { archive.keptThreads }
+        set {
+            objectWillChange.send()
+            archive.keptThreads = newValue
         }
     }
 

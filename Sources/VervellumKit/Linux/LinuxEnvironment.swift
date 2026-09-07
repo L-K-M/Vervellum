@@ -27,7 +27,8 @@ final class LinuxEnvironment {
         let store = JSONFileSettingsStore(url: settingsFile)
         let corePreferences = CorePreferences(store: store)
         let threadArchive = ThreadArchive(fileURL: threadsFile,
-                                          historyEnabled: corePreferences.historyEnabled)
+                                          historyEnabled: corePreferences.historyEnabled,
+                                          keptThreads: corePreferences.keptThreads)
 
         settingsStore = store
         preferences = corePreferences
@@ -41,6 +42,12 @@ final class LinuxEnvironment {
             guard let threadArchive, let corePreferences else { return }
             if threadArchive.isHistoryEnabled != corePreferences.historyEnabled {
                 threadArchive.isHistoryEnabled = corePreferences.historyEnabled
+            }
+            // Read once at construction for the same reason, and hand-edited in
+            // `settings.json` on this platform — so a lowered limit has to reach the
+            // archive without a relaunch.
+            if threadArchive.keptThreads != corePreferences.keptThreads {
+                threadArchive.keptThreads = corePreferences.keptThreads
             }
         }
     }
