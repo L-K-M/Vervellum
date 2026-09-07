@@ -165,7 +165,15 @@ final class ResearchEngineTests: XCTestCase {
         XCTAssertEqual(engine.queue.map(\.question), ["Second question"])
         XCTAssertEqual(engine.thread.turns.count, 1, "Nothing is appended until it runs")
 
+        // The runner resumes its continuation on this thread, but the task that awaits it
+        // resumes on the cooperative pool and only *then* hands the completion to the
+        // scheduler. Draining before that has happened finds an empty queue and the
+        // completion is never applied — so wait for the delivery to arrive first, the
+        // same handshake `testStopRejectsPendingProseAndLateCompletion` uses.
+        let delivered = expectation(description: "Completion delivered")
+        scheduler.expectDelivery { delivered.fulfill() }
         runner.finish(stage: .complete)
+        wait(for: [delivered], timeout: 3)
         scheduler.drain()
         wait(for: [second], timeout: 3)
         scheduler.drain()
@@ -238,7 +246,10 @@ final class ResearchEngineTests: XCTestCase {
         wait(for: [first], timeout: 3)
         engine.ask("Second")
 
+        let delivered = expectation(description: "Completion delivered")
+        scheduler.expectDelivery { delivered.fulfill() }
         runner.finish(stage: .failed)
+        wait(for: [delivered], timeout: 3)
         scheduler.drain()
 
         XCTAssertEqual(returned, ["Second"])
