@@ -53,8 +53,14 @@ struct ComposerView: NSViewRepresentable {
     /// Clamping on read as well as on write is the same rule every bounded value in
     /// `CorePreferences` already follows, for the same reason — a settings file a crash
     /// interrupted must not be able to produce an app the user cannot recover.
+    /// Only NaN is treated as "not a number". An infinity is *out of range*, not
+    /// garbage, so it saturates like any other out-of-range value — which is what makes
+    /// the clamp uniform: everything above the range lands on the ceiling, everything
+    /// below it on the floor, and only a value that is no number at all falls back to
+    /// unscaled. Guarding on `isFinite` instead sent infinity to 1.0 while 1000 went to
+    /// 3.0, so two scales that are both "far too large" produced different geometry.
     private static func sane(_ scale: Double) -> Double {
-        guard scale.isFinite else { return 1 }
+        guard !scale.isNaN else { return 1 }
         return min(max(scale, 0.5), 3)
     }
 

@@ -61,6 +61,34 @@ final class ComposerMetricsTests: XCTestCase {
             XCTAssertGreaterThan(height, 0, "at scale \(scale)")
             XCTAssertLessThanOrEqual(height, ComposerView.maximumHeight(3), "at scale \(scale)")
         }
+
+        // Bounded is not enough: two scales that are both far out of range must collapse
+        // to the *same* geometry, or the composer would quietly render at two different
+        // sizes for two equally impossible inputs.
+        XCTAssertEqual(ComposerView.height(for: "A question", width: width, scale: .infinity),
+                       ComposerView.height(for: "A question", width: width, scale: 1000),
+                       accuracy: 0.01, "everything above the range lands on one ceiling")
+        XCTAssertEqual(ComposerView.height(for: "A question", width: width, scale: 0),
+                       ComposerView.height(for: "A question", width: width, scale: -1),
+                       accuracy: 0.01, "everything below it lands on one floor")
+    }
+
+    /// The width can produce garbage geometry as easily as the scale. Zero is not
+    /// hypothetical: the composer is measured before any layout has happened, so the
+    /// first frame runs on an estimate. One unbreakable word takes the other path — no
+    /// soft-wrap opportunity at all.
+    func testAHostileWidthOrAnUnbreakableWordStillProducesUsableGeometry() {
+        let unbreakable = String(repeating: "x", count: 400)
+        for candidate in [0.0, -1.0, 1.0, 320.0] as [CGFloat] {
+            for text in ["A question", unbreakable] {
+                let height = ComposerView.height(for: text, width: candidate, scale: 1.0)
+                XCTAssertFalse(height.isNaN, "width \(candidate), \(text.count) characters")
+                XCTAssertGreaterThanOrEqual(height, ComposerView.minimumHeight(1.0),
+                                            "width \(candidate)")
+                XCTAssertLessThanOrEqual(height, ComposerView.maximumHeight(1.0),
+                                         "width \(candidate)")
+            }
+        }
     }
 
     /// Unscaled by default, so anything measuring the composer without an opinion gets
