@@ -21,15 +21,51 @@ protocol SecretStore: AnyObject {
 
 extension SecretStore {
     func hasValue(for account: SecretAccount) -> Bool { value(for: account) != nil }
+
+    /// The selected model provider's key, or nil.
+    ///
+    /// Named once here because every caller has to ask the same slightly awkward
+    /// question — "the key belonging to whichever provider is selected" — and a copy
+    /// that reached for a fixed account instead would send one provider's key to
+    /// another, or report a configured app as unconfigured.
+    func modelKey(for settings: ProviderSettings) -> String? {
+        settings.selectedModel.flatMap { value(for: $0.secretAccount) }
+    }
+
+    func hasModelKey(for settings: ProviderSettings) -> Bool { modelKey(for: settings) != nil }
 }
 
-/// The secrets Vervellum stores. An enum rather than free strings so a typo cannot
+/// The secrets Vervellum stores, named rather than free strings so a typo cannot
 /// silently create a second, empty slot that reads as "not configured".
-enum SecretAccount: String, CaseIterable {
-    /// The OpenAI-compatible Chat Completions provider key.
-    case modelAPIKey = "model-api-key"
-    /// The key for the web-search MCP endpoint.
-    case searchAPIKey = "search-api-key"
+///
+/// A struct rather than an enum, because a key is no longer one of a fixed pair: a
+/// user can configure several model providers, and each needs a slot of its own. New slots are minted by `SecretAccount.derived(from:for:)`,
+/// which is the only way one is ever spelled out — a free `SecretAccount(rawValue:)`
+/// would put the typo back.
+///
+/// **The two original raw values are load-bearing.** A Keychain item written by a
+/// pre-profiles build lives at `model-api-key` / `search-api-key`, and the profile
+/// migrated out of the old settings keeps exactly those accounts, so an existing user
+/// upgrades without re-pasting a key.
+struct SecretAccount: Hashable {
+    let rawValue: String
+
+    /// Deliberately not `public`-facing sugar: everything outside this file names an
+    /// account through one of the statics or `derived(from:for:)`.
+    init(rawValue: String) { self.rawValue = rawValue }
+
+    /// The first model provider's key, and the account every pre-profiles build used.
+    static let modelAPIKey = SecretAccount(rawValue: "model-api-key")
+    /// The web-search key.
+    static let searchAPIKey = SecretAccount(rawValue: "search-api-key")
+
+    /// A slot for a provider profile added after the first.
+    ///
+    /// The identifier is appended to the base account rather than replacing it, so a
+    /// human reading a keyring still sees which kind of key an item holds.
+    static func derived(from base: SecretAccount, for id: UUID) -> SecretAccount {
+        SecretAccount(rawValue: base.rawValue + "." + id.uuidString)
+    }
 }
 
 /// Holds secrets for the life of the process only. Used by tests, and by any run that

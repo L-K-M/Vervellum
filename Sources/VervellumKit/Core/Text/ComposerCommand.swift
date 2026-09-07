@@ -23,6 +23,9 @@ enum ComposerCommand: Equatable {
     case openSettings
     case copyLastAnswer
     case showHelp
+    /// Choose which configured model provider answers from here on. An empty name
+    /// means "show me what there is" rather than "pick the one called nothing".
+    case selectModel(String)
 
     /// One command as the completion list shows it.
     ///
@@ -38,6 +41,7 @@ enum ComposerCommand: Equatable {
     /// Commands offered in the composer's completion list.
     static let catalogue: [Entry] = [
         Entry(name: "direct", summary: "Answer from the model alone, with no web evidence"),
+        Entry(name: "model", summary: "List the configured models, or switch to one by name"),
         Entry(name: "new", summary: "Start a fresh thread"),
         Entry(name: "history", summary: "Search earlier threads"),
         Entry(name: "settings", summary: "Open Vervellum Settings"),
@@ -61,6 +65,9 @@ enum ComposerCommand: Equatable {
             // "/direct" with nothing after it is a mode request with no question yet,
             // not an empty question — leave it to the caller to keep the composer open.
             return rest.isEmpty ? nil : .direct(rest)
+        case "model", "models":
+            // Unlike "/direct", a bare "/model" is a complete request: list them.
+            return .selectModel(rest)
         case "new", "clear":
             return .newThread
         case "history", "threads":
@@ -88,6 +95,35 @@ enum ComposerCommand: Equatable {
         return matches.isEmpty ? nil : matches
     }
 
+    /// The configured model providers as markdown, for a bare `/model`.
+    ///
+    /// Lives here rather than on `ProviderSettings` so both front ends print the same
+    /// list, and so the wording sits with the rest of the command text instead of on the
+    /// value it describes.
+    static func modelListing(_ settings: ProviderSettings) -> String {
+        guard !settings.modelProfiles.isEmpty else {
+            return "## Models\n\nNo model provider is configured yet. "
+                + "Add one in Settings ▸ Providers."
+        }
+        let active = settings.selectedModel?.id
+        let rows = settings.modelProfiles.map { profile -> String in
+            let mark = profile.id == active ? "**·**" : "-"
+            let identifier = profile.model.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = identifier.isEmpty || identifier == profile.displayName
+                ? "" : " — `\(identifier)`"
+            let suffix = profile.id == active ? " *(active)*" : ""
+            return "\(mark) **\(profile.displayName)**\(detail)\(suffix)"
+        }.joined(separator: "\n")
+        return "## Models\n\n\(rows)\n\nSwitch with `/model <name>`."
+    }
+
+    /// What to say when `/model <name>` matched nothing.
+    static func unknownModel(_ name: String, in settings: ProviderSettings) -> String {
+        let known = settings.modelProfiles.map { "`\($0.displayName)`" }.joined(separator: ", ")
+        let suffix = known.isEmpty ? "" : " Configured: \(known)."
+        return "## No such model\n\nNothing configured is named “\(name)”.\(suffix)"
+    }
+
     /// The help text `/help` prints into the thread.
     static var helpText: String {
         let rows = catalogue.map { "- `/\($0.name)` — \($0.summary)" }.joined(separator: "\n")
@@ -95,6 +131,12 @@ enum ComposerCommand: Equatable {
             ## Commands
 
             \(rows)
+
+            ## Choosing a model
+
+            `/model` lists the configured providers and marks the active one; \
+            `/model <name>` switches to one by its name or its model identifier. \
+            Add and remove providers in Settings ▸ Providers.
 
             ## Keys
 

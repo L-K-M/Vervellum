@@ -41,9 +41,16 @@ final class ResearchRunner: ResearchRunning {
         }
 
         /// Reads the current settings and secrets. Called at the start of a turn.
+        ///
+        /// The model key comes from the *selected* provider's own account, not from a
+        /// fixed one: each configured provider has a slot of its own, and reading the
+        /// wrong one would send a working key to a second provider that has never seen
+        /// it. Capturing it here — with the rest of the environment, once — is also what
+        /// makes switching providers mid-run impossible.
         init(preferences: CorePreferences, secrets: SecretStore) {
-            self.init(settings: preferences.providerSettings,
-                      modelKey: secrets.value(for: .modelAPIKey),
+            let settings = preferences.providerSettings
+            self.init(settings: settings,
+                      modelKey: secrets.modelKey(for: settings),
                       searchKey: secrets.value(for: .searchAPIKey))
         }
     }
