@@ -46,6 +46,10 @@ runs the searches and answers based on current sources.
 - **Keyboard-first.** `Return` asks, `Esc` clears then closes, `↑`/`↓` walk back
   through earlier questions, `/` opens commands. Everything in the header is also a
   command.
+- **Ask while it's still working.** The composer never locks. A follow-up typed during
+  a run waits its turn and starts on its own, listed above the composer and removable
+  until it does. Stop cancels what is waiting too, and puts the text back in the
+  composer rather than discarding it.
 - **Research the selection.** An optional second shortcut opens the panel with
   whatever text you had selected, with credential-shaped values stripped out first.
 - **`/direct`** answers with no search at all, and is clearly badged as unsourced.
