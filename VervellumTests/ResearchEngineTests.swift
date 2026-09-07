@@ -107,14 +107,176 @@ final class ResearchEngineTests: XCTestCase {
             callback(snapshot)
         }
 
-        func finish() {
+        /// Ends the run in `stage`. Defaults to `.failed`, which is what the stop test
+        /// wants and what a queued follow-up must *not* be started by.
+        func finish(stage: ResearchStage = .failed) {
             lock.lock()
             var snapshot = turn!
             let continuation = completion!
             completion = nil
             lock.unlock()
-            snapshot.stage = .failed
+            snapshot.stage = stage
             continuation.resume(returning: snapshot)
         }
+    }
+
+    /// Fulfils a list of expectations in order, once per run started.
+    ///
+    /// A plain captured counter would be mutated from the cooperative pool while the
+    /// test thread reads it; this keeps the hand-off behind a lock and lets a test wait
+    /// for the first start before arranging the second.
+    private final class StartCounter {
+        private let lock = NSLock()
+        private var pending: [XCTestExpectation]
+
+        init(_ pending: [XCTestExpectation]) { self.pending = pending }
+
+        func record() {
+            lock.lock()
+            let next = pending.isEmpty ? nil : pending.removeFirst()
+            lock.unlock()
+            next?.fulfill()
+        }
+    }
+
+    private func makeEngine(runner: ResearchRunning,
+                            scheduler: ManualScheduler) -> ResearchEngine {
+        ResearchEngine(preferences: CorePreferences(store: MemorySettingsStore()),
+                       secrets: EphemeralSecretStore(), logSink: SilentLog(),
+                       makeRunner: { _, _ in runner },
+                       deliver: scheduler.enqueue, after: scheduler.after)
+    }
+
+    // MARK: Asking during a run
+
+    /// The composer stays live during a run, so a question asked then has to go
+    /// somewhere. It waits, and starts on its own when the thread frees up.
+    func testAQuestionAskedDuringARunIsQueuedAndRunWhenTheFirstCompletes() {
+        let first = expectation(description: "First run started")
+        let second = expectation(description: "Second run started")
+        let runner = ManualRunner(onStart: StartCounter([first, second]).record)
+        let scheduler = ManualScheduler()
+        let engine = makeEngine(runner: runner, scheduler: scheduler)
+
+        engine.ask("First question")
+        wait(for: [first], timeout: 3)
+
+        XCTAssertEqual(engine.ask("Second question"), .queued)
+        XCTAssertEqual(engine.queue.map(\.question), ["Second question"])
+        XCTAssertEqual(engine.thread.turns.count, 1, "Nothing is appended until it runs")
+
+        // The runner resumes its continuation on this thread, but the task that awaits it
+        // resumes on the cooperative pool and only *then* hands the completion to the
+        // scheduler. Draining before that has happened finds an empty queue and the
+        // completion is never applied — so wait for the delivery to arrive first, the
+        // same handshake `testStopRejectsPendingProseAndLateCompletion` uses.
+        let delivered = expectation(description: "Completion delivered")
+        scheduler.expectDelivery { delivered.fulfill() }
+        runner.finish(stage: .complete)
+        wait(for: [delivered], timeout: 3)
+        scheduler.drain()
+        wait(for: [second], timeout: 3)
+        scheduler.drain()
+
+        XCTAssertTrue(engine.queue.isEmpty)
+        XCTAssertEqual(engine.thread.turns.map(\.question), ["First question", "Second question"])
+        XCTAssertTrue(engine.isRunning)
+    }
+
+    /// A queue with no visible end is a way to spend a provider's quota by accident, so
+    /// it is bounded — and a refused question keeps its text rather than vanishing.
+    func testAFullQueueRefusesInsteadOfSwallowingTheQuestion() {
+        let first = expectation(description: "Run started")
+        let runner = ManualRunner(onStart: StartCounter([first]).record)
+        let scheduler = ManualScheduler()
+        let engine = makeEngine(runner: runner, scheduler: scheduler)
+
+        engine.ask("Running")
+        wait(for: [first], timeout: 3)
+
+        for index in 1...ResearchEngine.maxQueued {
+            XCTAssertEqual(engine.ask("Waiting \(index)"), .queued)
+        }
+        XCTAssertEqual(engine.ask("Overflow"), .queueFull)
+        XCTAssertEqual(engine.queue.count, ResearchEngine.maxQueued)
+        XCTAssertFalse(engine.queue.contains { $0.question == "Overflow" })
+
+        engine.removeQueued(engine.queue[0].id)
+        XCTAssertEqual(engine.queue.map(\.question), ["Waiting 2", "Waiting 3"])
+    }
+
+    /// Stop means stop everything that was asked for — and typed text is the one thing
+    /// the user cannot get back, so the queue is handed over rather than dropped.
+    func testStopCancelsTheQueueAndHandsItBack() {
+        let first = expectation(description: "Run started")
+        let runner = ManualRunner(onStart: StartCounter([first]).record)
+        let scheduler = ManualScheduler()
+        let engine = makeEngine(runner: runner, scheduler: scheduler)
+        var returned: [String] = []
+        engine.onQueueReturned = { returned = $0 }
+
+        engine.ask("Running")
+        wait(for: [first], timeout: 3)
+        engine.ask("Second")
+        engine.ask("Third")
+        XCTAssertEqual(engine.queue.count, 2)
+
+        engine.cancel()
+        XCTAssertEqual(returned, ["Second", "Third"])
+        XCTAssertTrue(engine.queue.isEmpty)
+
+        // Resume the abandoned run so the harness's continuation is not left suspended.
+        runner.finish()
+        scheduler.drain()
+        XCTAssertEqual(engine.thread.turns.count, 1)
+    }
+
+    /// A failed turn usually means a provider, a key or a quota — conditions the next
+    /// question would meet unchanged. Running the queue anyway would collect the same
+    /// error once per question and bill for each.
+    func testAFailedTurnHandsTheQueueBackInsteadOfAskingItAgain() {
+        let first = expectation(description: "Run started")
+        let runner = ManualRunner(onStart: StartCounter([first]).record)
+        let scheduler = ManualScheduler()
+        let engine = makeEngine(runner: runner, scheduler: scheduler)
+        var returned: [String] = []
+        engine.onQueueReturned = { returned = $0 }
+
+        engine.ask("Running")
+        wait(for: [first], timeout: 3)
+        engine.ask("Second")
+
+        let delivered = expectation(description: "Completion delivered")
+        scheduler.expectDelivery { delivered.fulfill() }
+        runner.finish(stage: .failed)
+        wait(for: [delivered], timeout: 3)
+        scheduler.drain()
+
+        XCTAssertEqual(returned, ["Second"])
+        XCTAssertTrue(engine.queue.isEmpty)
+        XCTAssertEqual(engine.thread.turns.count, 1, "The queued question was not started")
+        XCTAssertFalse(engine.isRunning)
+    }
+
+    /// A new thread puts the conversation away. Its follow-ups go with it rather than
+    /// reappearing in the composer over a thread they were not about.
+    func testANewThreadDropsTheQueueWithoutHandingItBack() {
+        let first = expectation(description: "Run started")
+        let runner = ManualRunner(onStart: StartCounter([first]).record)
+        let scheduler = ManualScheduler()
+        let engine = makeEngine(runner: runner, scheduler: scheduler)
+        var returned: [String] = []
+        engine.onQueueReturned = { returned = $0 }
+
+        engine.ask("Running")
+        wait(for: [first], timeout: 3)
+        engine.ask("Second")
+
+        engine.startNewThread()
+        XCTAssertTrue(engine.queue.isEmpty)
+        XCTAssertTrue(returned.isEmpty)
+
+        runner.finish()
+        scheduler.drain()
     }
 }
