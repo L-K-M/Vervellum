@@ -25,7 +25,11 @@ import Foundation
 /// are never inferred from descriptions or query-shaped arguments.
 /// Everything downstream is already backend-agnostic: the planner writes arguments
 /// against whatever schema was advertised, and `EvidenceExtractor` walks any result.
-final class SearchMCPClient {
+///
+/// One of two `SearchBackend`s. The interesting difference from `SearXNGClient` is that
+/// an MCP server advertises its own tool and schema and this client *fetches* it, where
+/// a bare JSON search API has nothing to advertise and its client supplies the schema.
+final class SearchMCPClient: SearchBackend {
 
     /// One MCP tool as advertised by `tools/list`.
     struct Tool {
@@ -48,6 +52,24 @@ final class SearchMCPClient {
     private var sequence = 0
 
     private(set) var tool: Tool?
+
+    let backendName = "MCP server"
+
+    /// The resolved tool as the planner is shown it.
+    ///
+    /// Built here rather than in the runner because only this client knows which fields
+    /// the server actually supplied — an absent description must be left out, not sent
+    /// as an empty string the model then tries to satisfy.
+    var toolDescriptor: [String: Any] {
+        // Built up rather than written as a nested literal: a heterogeneous literal in
+        // an `Any` position cannot be inferred.
+        var descriptor: [String: Any] = ["name": tool?.name ?? ""]
+        if let description = tool?.description, !description.isEmpty {
+            descriptor["description"] = description
+        }
+        descriptor["inputSchema"] = tool?.inputSchema ?? [String: Any]()
+        return descriptor
+    }
 
     /// Tool names known to be a web search: z.ai's two spellings first, then the names
     /// the common MCP search servers ship. Unknown operations are never inferred.
@@ -122,15 +144,9 @@ final class SearchMCPClient {
     /// the advertised schema first: a missing required key or an invented key means
     /// the model misread the schema, and sending it anyway would spend a request to
     /// get a provider-side error back.
-    func search(arguments: [String: Any]) async throws -> [String: Any] {
+    func search(arguments: [String: Any]) async throws -> Any {
         guard let tool else { throw ResearchError("The search connection was not established.") }
-        let keys = Set(arguments.keys)
-        guard tool.requiredKeys.allSatisfy({ keys.contains($0) }) else {
-            throw ResearchError("The model omitted a required search argument. Try another model.")
-        }
-        if !tool.propertyKeys.isEmpty, !keys.isSubset(of: tool.propertyKeys) {
-            throw ResearchError("The model produced unknown search arguments. Try another model.")
-        }
+        try validate(arguments, required: tool.requiredKeys, properties: tool.propertyKeys)
         let result = try await call("tools/call", params: ["name": tool.name, "arguments": arguments])
         if (result["isError"] as? Bool) == true {
             throw ResearchError("The web search failed. Check the search key and its quota.")

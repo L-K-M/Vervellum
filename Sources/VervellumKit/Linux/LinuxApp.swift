@@ -92,7 +92,7 @@ public enum VervellumLinuxApp {
         let settings = environment.preferences.providerSettings
         let problems = settings.problems(
             hasModelKey: environment.secrets.hasModelKey(for: settings),
-            hasSearchKey: environment.secrets.hasValue(for: .searchAPIKey),
+            hasSearchKey: environment.secrets.hasSearchKey(for: settings),
             requiresSearch: !direct)
         guard problems.isEmpty else {
             FileHandle.standardError.write(Data(

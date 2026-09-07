@@ -57,11 +57,12 @@ runs the searches and answers based on current sources.
 - **Research the selection.** An optional second shortcut opens the panel with
   whatever text you had selected, with credential-shaped values stripped out first.
 - **`/direct`** answers with no search at all, and is clearly badged as unsourced.
-- **Bring your own providers.** An OpenAI-compatible Chat Completions endpoint and
-  an HTTP MCP web-search server. Recognized tools include z.ai, Brave, Tavily, Exa
-  and SearXNG. Only recognized tool names are accepted. Model replies
-  must finish with `finish_reason: stop`; malformed or unfinished replies remain
-  incomplete. Keys live in your Keychain on macOS.
+- **Bring your own providers.** An OpenAI-compatible Chat Completions endpoint, and
+  for search either an HTTP MCP server — recognized tools include z.ai, Brave, Tavily,
+  Exa and SearXNG, and only recognized tool names are accepted — or a **SearXNG
+  instance queried directly**, with no MCP bridge in between. Model replies must
+  finish with `finish_reason: stop`; malformed or unfinished replies remain
+  incomplete. Keys live in your Keychain on macOS, one per configured provider.
 - **As many models as you want, chosen per question.** Configure several providers —
   a local server, a fast hosted model, a careful one — each with its own endpoint and
   its own key. Pick the one that answers next from the panel or with `/model`; every
@@ -100,11 +101,28 @@ The behaviour toggles are the same keys the macOS Settings window writes:
 `historyEnabled`, `showProcessTrail`, `submitOnReturn` (booleans) and `textScale`
 (0.85–1.4). The file is read at launch.
 
+To search a SearXNG instance instead, set `searchProvider` and point `searchEndpoint`
+at the instance (its home page is enough — `/search` is appended):
+
+```json
+{
+  "searchProvider": "searxng",
+  "searchEndpoint": "https://searx.example.org"
+}
+```
+
+> [!IMPORTANT]
+> A SearXNG instance must list `json` under `search.formats` in its `settings.yml`.
+> Most do not by default, and one that does not answers HTTP 403. SearXNG itself takes
+> no API key; store one only if your instance sits behind an authenticating proxy.
+
 `modelEndpoint` and `modelName` describe one provider, which is all the Linux build
 writes and the shape shown above. The macOS app can configure several and stores them
 under `modelProviders` (a JSON list) with `selectedModelProvider`; when that list is
 present it wins, and `modelEndpoint`/`modelName` are kept as a mirror of whichever
-provider is selected. `/model` lists them and switches between them on Linux too.
+provider is selected. `/model` lists them and switches between them on Linux too. Search
+providers work the same way: `searchProviders`/`selectedSearchProvider` for the list,
+`searchEndpoint`/`searchProvider` as the mirror.
 
 Then store the keys in your login keyring, or export them:
 

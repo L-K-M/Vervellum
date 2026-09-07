@@ -63,7 +63,13 @@ final class CorePreferences {
         /// The full provider list, JSON-encoded. Authoritative when present.
         static let modelProviders = "modelProviders"
         static let selectedModelProvider = "selectedModelProvider"
+        /// The selected search provider's endpoint, and — for a backend that is not an
+        /// MCP server — which protocol it speaks. Mirrored like the model keys are.
         static let searchEndpoint = "searchEndpoint"
+        static let searchProvider = "searchProvider"
+        /// The full search-provider list, JSON-encoded. Authoritative when present.
+        static let searchProviders = "searchProviders"
+        static let selectedSearchProvider = "selectedSearchProvider"
         static let historyEnabled = "historyEnabled"
         static let showProcessTrail = "showProcessTrail"
         static let submitOnReturn = "submitOnReturn"
@@ -98,42 +104,57 @@ final class CorePreferences {
             return assembled
         }
         set {
-            store.setString(ProviderSettings.encodeModelProfiles(newValue.modelProfiles),
+            // Normalised first, so the stored list and the mirrored keys cannot disagree
+            // about an endpoint the rules rewrote. See `ProviderSettings.normalized()`.
+            let settings = newValue.normalized()
+
+            store.setString(ProviderSettings.encodeModelProfiles(settings.modelProfiles),
                             for: Key.modelProviders)
-            store.setString(newValue.selectedModel?.id.uuidString, for: Key.selectedModelProvider)
+            store.setString(settings.selectedModel?.id.uuidString, for: Key.selectedModelProvider)
+            store.setString(ProviderSettings.encodeSearchProfiles(settings.searchProfiles),
+                            for: Key.searchProviders)
+            store.setString(settings.selectedSearch?.id.uuidString, for: Key.selectedSearchProvider)
+
             // The single-provider keys are mirrored, not merely left behind: they are what
             // the Linux settings file documents, and what an older build downgraded onto
             // the same file reads. Writing the *selected* profile into them means such a
             // build finds the provider the user was last using rather than the first one
             // in a list it cannot see.
-            store.setString(newValue.modelEndpoint, for: Key.modelEndpoint)
-            store.setString(newValue.modelName, for: Key.modelName)
-            // An emptied search endpoint reverts to the documented default rather than
-            // leaving the app with no search at all.
-            let endpoint = newValue.searchEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-            store.setString(endpoint.isEmpty ? Default.searchEndpoint : endpoint, for: Key.searchEndpoint)
-            // Re-read rather than caching `newValue`: the store applied the empty-endpoint
-            // rule above, so what was written is not always what was handed in.
-            cachedProviderSettings = nil
+            store.setString(settings.modelEndpoint, for: Key.modelEndpoint)
+            store.setString(settings.modelName, for: Key.modelName)
+            store.setString(settings.searchEndpoint, for: Key.searchEndpoint)
+            store.setString(settings.searchKind.rawValue, for: Key.searchProvider)
+
+            cachedProviderSettings = settings
             onChange?()
         }
     }
 
     private func readProviderSettings() -> ProviderSettings {
-        let searchEndpoint = store.string(for: Key.searchEndpoint) ?? Default.searchEndpoint
+        // Assembled half by half: a settings file can have a model list and no search
+        // list (an upgrade in between), and each half migrates on its own.
+        var settings = ProviderSettings(
+            modelEndpoint: store.string(for: Key.modelEndpoint) ?? Default.modelEndpoint,
+            modelName: store.string(for: Key.modelName) ?? Default.modelName,
+            searchEndpoint: store.string(for: Key.searchEndpoint) ?? Default.searchEndpoint,
+            searchKind: store.string(for: Key.searchProvider)
+                .flatMap { SearchProviderKind(rawValue: $0) } ?? .mcp)
+
         if let encoded = store.string(for: Key.modelProviders),
            let profiles = ProviderSettings.decodeModelProfiles(encoded),
            !profiles.isEmpty {
-            let selected = store.string(for: Key.selectedModelProvider)
+            settings.modelProfiles = profiles
+            settings.selectedModelID = store.string(for: Key.selectedModelProvider)
                 .flatMap { UUID(uuidString: $0) }
-            return ProviderSettings(modelProfiles: profiles,
-                                    selectedModelID: selected,
-                                    searchEndpoint: searchEndpoint)
         }
-        return ProviderSettings(
-            modelEndpoint: store.string(for: Key.modelEndpoint) ?? Default.modelEndpoint,
-            modelName: store.string(for: Key.modelName) ?? Default.modelName,
-            searchEndpoint: searchEndpoint)
+        if let encoded = store.string(for: Key.searchProviders),
+           let profiles = ProviderSettings.decodeSearchProfiles(encoded),
+           !profiles.isEmpty {
+            settings.searchProfiles = profiles
+            settings.selectedSearchID = store.string(for: Key.selectedSearchProvider)
+                .flatMap { UUID(uuidString: $0) }
+        }
+        return settings
     }
 
     // MARK: Behaviour

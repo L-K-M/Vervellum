@@ -159,6 +159,21 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         return request
     }
 
+    /// Builds a GET expecting JSON back.
+    ///
+    /// Separate from the POST builder rather than a parameter on it: a GET has no body
+    /// to encode and cannot be an SSE call, and every caller of the POST builder passes
+    /// a payload. The end-to-end budget applies, not the idle one — a search API is
+    /// silent until it has finished querying its own upstreams, which is not a stall.
+    static func getRequest(url: URL, headers: [String: String] = [:]) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = deadline
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        return request
+    }
+
     /// Sends `request` and returns its response headers plus a decoded JSON object.
     ///
     /// Handles both transports an MCP endpoint may pick: a plain JSON body, or an SSE
@@ -554,9 +569,7 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
                 + "the provider settings — the server did not recognise the requested resource.")
         }
         if http.statusCode == 401 || http.statusCode == 403 {
-            throw ResearchError(
-                "The provider rejected the API key (HTTP \(http.statusCode)). Check the key in "
-                + "the provider settings.")
+            throw ResearchError.rejectedCredential(http.statusCode)
         }
         if http.statusCode == 429 {
             throw ResearchError("The provider is rate-limiting Vervellum (HTTP 429). Wait a moment and retry.")

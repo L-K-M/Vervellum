@@ -33,6 +33,13 @@ extension SecretStore {
     }
 
     func hasModelKey(for settings: ProviderSettings) -> Bool { modelKey(for: settings) != nil }
+
+    /// The selected search provider's key, or nil. Same reasoning as `modelKey(for:)`.
+    func searchKey(for settings: ProviderSettings) -> String? {
+        settings.selectedSearch.flatMap { value(for: $0.secretAccount) }
+    }
+
+    func hasSearchKey(for settings: ProviderSettings) -> Bool { searchKey(for: settings) != nil }
 }
 
 /// The secrets Vervellum stores, named rather than free strings so a typo cannot

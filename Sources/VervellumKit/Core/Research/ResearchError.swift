@@ -47,6 +47,14 @@ struct ResearchError: LocalizedError, Equatable {
         "The provider rejected the request (HTTP 400). Check the model name in the provider "
         + "settings; the model may also not accept a request parameter Vervellum sends.")
 
+    /// HTTP 401 or 403. Named because a backend may recognise it and say something more
+    /// useful: a SearXNG instance answers 403 when JSON results are simply not enabled,
+    /// which has nothing to do with a key.
+    static func rejectedCredential(_ code: Int) -> ResearchError {
+        ResearchError("The provider rejected the API key (HTTP \(code)). Check the key in "
+                      + "the provider settings.")
+    }
+
     static func providerStatus(_ code: Int) -> ResearchError {
         ResearchError("The provider returned HTTP \(code). Check the endpoint, key, model and quota.")
     }
