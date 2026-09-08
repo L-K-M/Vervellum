@@ -61,6 +61,12 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertEqual(ProviderSettings.modelListURL(from: "https://api.example.com/v1/mymodels")?
             .absoluteString,
                        "https://api.example.com/v1/mymodels/models")
+        // Case-sensitively, because HTTP paths are. `/v1/Models` is a route of its own
+        // as far as this is concerned, so it gains a suffix like any other path rather
+        // than being treated as an already-correct list address.
+        XCTAssertEqual(ProviderSettings.modelListURL(from: "https://api.example.com/v1/Models")?
+            .absoluteString,
+                       "https://api.example.com/v1/Models/models")
     }
 
     /// Azure's deployment-scoped route is the one shape whose model list is not its own
@@ -130,6 +136,41 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertEqual(ProviderSettings.modelListURL(from: "http://localhost:11434/v1")?
             .absoluteString,
                        "http://localhost:11434/v1/models")
+        // Ollama and llama.cpp print this form as often as the named one, and the
+        // validator accepts both — so a paste of either must reach the same place.
+        XCTAssertEqual(ProviderSettings.modelListURL(from: "http://127.0.0.1:11434/v1")?
+            .absoluteString,
+                       "http://127.0.0.1:11434/v1/models")
+    }
+
+    /// Both builders take the same paste, so the address whose questions work has to be
+    /// the address whose list works. Written as a comparison rather than as two sets of
+    /// literals because the failure this guards against is *drift* — one of them
+    /// learning a shape the other does not.
+    func testTheListAddressIsTheChatAddressWithItsLastSegmentSwapped() throws {
+        for paste in ["https://host.example",
+                      "https://host.example/v1",
+                      "https://host.example/v1/chat/completions"] {
+            let chat = try XCTUnwrap(ProviderSettings.chatCompletionsURL(from: paste), paste)
+            let list = try XCTUnwrap(ProviderSettings.modelListURL(from: paste), paste)
+            XCTAssertEqual(list.host, chat.host, paste)
+            XCTAssertEqual(list.port, chat.port, paste)
+            XCTAssertEqual(list.path,
+                           chat.path.replacingOccurrences(of: "/chat/completions",
+                                                          with: "/models"),
+                           paste)
+        }
+    }
+
+    /// The one shape where they part, on purpose: Azure lists every deployment at
+    /// `/openai/models`, so the list is not the chat route's sibling and swapping the
+    /// last segment would ask for an address that has never existed.
+    func testAzureIsTheDeliberateExceptionToThatParity() throws {
+        let paste = "https://x.openai.azure.com/openai/deployments/gpt-4o/chat/completions"
+        let chat = try XCTUnwrap(ProviderSettings.chatCompletionsURL(from: paste))
+        let list = try XCTUnwrap(ProviderSettings.modelListURL(from: paste))
+        XCTAssertEqual(chat.path, "/openai/deployments/gpt-4o/chat/completions")
+        XCTAssertEqual(list.path, "/openai/models")
     }
 
     /// The key has to reach the request, and as the same scheme chat uses.

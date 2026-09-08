@@ -72,7 +72,11 @@ final class HTTPLineReaderTests: XCTestCase {
             }
             XCTFail("Expected the spent budget to stop the read")
         } catch {
-            XCTAssertTrue(error is ResearchError, "got \(error)")
+            // The budget's own error, not merely *a* `ResearchError` — the size cap and
+            // the handler both throw those, so the weaker assertion passed for a guard
+            // that had stopped being about the deadline at all.
+            XCTAssertEqual(error as? ResearchError, HTTPTransport.tookTooLong(-1),
+                           "expected the deadline's error, got \(error)")
         }
         XCTAssertTrue(lines.isEmpty, "the guard runs before the chunk does")
     }
@@ -81,10 +85,16 @@ final class HTTPLineReaderTests: XCTestCase {
     /// "did not finish within 0 minutes" for every budget shorter than one — and the
     /// model list's is thirty seconds.
     func testTheOverdueMessageIsSpelledInTheUnitTheBudgetIsIn() {
-        XCTAssertTrue(HTTPTransport.tookTooLong(30).message.contains("30 seconds"),
-                      HTTPTransport.tookTooLong(30).message)
-        XCTAssertTrue(HTTPTransport.tookTooLong(HTTPTransport.deadline).message
-            .contains("10 minutes"), HTTPTransport.tookTooLong(HTTPTransport.deadline).message)
+        let halfMinute = HTTPTransport.tookTooLong(30).message
+        XCTAssertTrue(halfMinute.contains("30 seconds"), halfMinute)
+        let tenMinutes = HTTPTransport.tookTooLong(HTTPTransport.deadline).message
+        XCTAssertTrue(tenMinutes.contains("10 minutes"), tenMinutes)
+        // Both sides of the unit switch, and both singulars. No budget in the app is one
+        // of either today, which is exactly why the wording would rot unnoticed.
+        let oneMinute = HTTPTransport.tookTooLong(60).message
+        XCTAssertTrue(oneMinute.contains("1 minute."), oneMinute)
+        let oneSecond = HTTPTransport.tookTooLong(1).message
+        XCTAssertTrue(oneSecond.contains("1 second."), oneSecond)
     }
 
     func testPropagatesHandlerErrors() async {

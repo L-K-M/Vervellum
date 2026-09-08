@@ -250,7 +250,15 @@ struct ProvidersView: View {
                 } else {
                     Button {
                         modelFetches[id]?.cancel()
-                        modelFetches[id] = Task { await loadModels(for: profile.wrappedValue) }
+                        // Read the row now, not when the task body runs. `profile` is a
+                        // binding into the edited array: the body is enqueued and can run
+                        // after other main-actor work, so `.wrappedValue` inside it would
+                        // be whatever the field held *then* — or, if the row was deleted
+                        // in between, a subscript into an index that is gone. It also
+                        // makes `stillCurrent`'s comparison true to its own comment,
+                        // which says the endpoint is the one the row asked with.
+                        let asked = profile.wrappedValue
+                        modelFetches[id] = Task { await loadModels(for: asked) }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -278,6 +286,10 @@ struct ProvidersView: View {
                     ForEach(models, id: \.self) { Text($0).tag($0) }
                 }
                 .labelsHidden()
+                // Hidden from the eye, not from VoiceOver — otherwise this is an
+                // anonymous pop-up button, and the "Model" label beside it belongs to a
+                // different view.
+                .accessibilityLabel("Model")
                 .help("\(models.count) models listed by this endpoint")
             case .failed(let reason):
                 Text(reason)

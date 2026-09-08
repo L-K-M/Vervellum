@@ -165,9 +165,17 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     /// every budget was the ten-minute `deadline` and reads as "did not finish within 0
     /// minutes" for anything shorter than one.
     static func tookTooLong(_ budget: TimeInterval) -> ResearchError {
-        let spelled = budget < 60
-            ? "\(Int(budget.rounded())) seconds"
-            : "\(Int(budget / 60)) minutes"
+        // Singular too. The old message hard-coded "minutes" because the only budget was
+        // ten of them; generalising the number without generalising the word swaps "0
+        // minutes" for "1 minutes".
+        let spelled: String
+        if budget < 60 {
+            let seconds = Int(budget.rounded())
+            spelled = seconds == 1 ? "1 second" : "\(seconds) seconds"
+        } else {
+            let minutes = Int(budget / 60)
+            spelled = minutes == 1 ? "1 minute" : "\(minutes) minutes"
+        }
         return ResearchError("The provider's response did not finish within \(spelled).")
     }
 
