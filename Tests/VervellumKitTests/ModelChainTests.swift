@@ -278,9 +278,64 @@ final class ModelChainTests: XCTestCase {
         let profiles = [profile("alpha"), profile("beta")]
         var asked: [String] = []
         var resets = 0
+        var started = false
         let subject = chain(profiles)
         let task = Task {
             try await subject.perform("Answer", beforeRetry: { resets += 1 }) { client in
+                asked.append(client.model)
+                started = true
+                // Wait for the Stop rather than racing it. This test used to cancel
+                // immediately after creating the task, which decided nothing: usually the
+                // cancellation won and only the *entry* guard ran, and on a loaded runner
+                // the whole two-provider chain finished first and the test failed for a
+                // reason that was never about the chain. It did exactly that on Linux
+                // after landing. Holding the attempt open until the Stop arrives makes
+                // the failure-path guard — the one this test is named for — the only
+                // thing that can produce the result below.
+                while !Task.isCancelled { await Task.yield() }
+                throw ResearchError.connectionFailed
+            }
+        }
+        // Bounded, so a chain that never reaches the body fails here rather than hanging
+        // the suite. The body needs one scheduling turn; ten thousand is only a ceiling.
+        var spins = 0
+        while !started, spins < 10_000 {
+            await Task.yield()
+            spins += 1
+        }
+        XCTAssertTrue(started, "the head's attempt never started, so nothing was tested")
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("expected the cancellation to propagate")
+        } catch let error as ResearchError {
+            XCTAssertEqual(error, ResearchError.cancelled,
+                           "a Stop is a Stop, not the failure it interrupted")
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+        // Exact now, where it used to be `!=` against the both-asked case. The ordering
+        // is guaranteed, so the head is asked once and the spare never.
+        XCTAssertEqual(asked, ["alpha"], "the spare must never be asked")
+        XCTAssertEqual(resets, 0, "nothing was retried, so nothing was reset")
+    }
+
+    /// The other guard, which the test above used to cover by accident and now cannot:
+    /// a Stop that lands before the head is even asked. Both exist because a cancellation
+    /// can arrive at either moment, and a chain that checked only at the failure would
+    /// still put one more question on the wire.
+    func testAStopBeforeTheFirstAttemptAsksNobody() async {
+        let profiles = [profile("alpha"), profile("beta")]
+        var asked: [String] = []
+        var resets = 0
+        let subject = chain(profiles)
+        let task = Task {
+            // Wait for the Stop *before* calling `perform`, so the stage begins already
+            // cancelled. Cancelling straight after `Task { }` would race the body and
+            // decide nothing — which is the flake this pair was written to remove, and
+            // re-creating it here to cover the other guard would be no better.
+            while !Task.isCancelled { await Task.yield() }
+            return try await subject.perform("Answer", beforeRetry: { resets += 1 }) { client in
                 asked.append(client.model)
                 throw ResearchError.connectionFailed
             }
@@ -295,10 +350,10 @@ final class ModelChainTests: XCTestCase {
         } catch {
             XCTFail("expected a ResearchError, got \(error)")
         }
-        // Either guard may be the one that fires — the cancellation can land before the
-        // head is asked or while it is failing — so what is pinned is what neither may
-        // allow: reaching the spare, or clearing the answer on the way out.
-        XCTAssertNotEqual(asked, ["alpha", "beta"], "the spare must never be asked")
+        // Exact: the guard runs before the head is built, so nobody is asked at all.
+        // The body throws something retryable, so anything in `asked` means the guard
+        // did not fire and the chain was one question further along than it should be.
+        XCTAssertEqual(asked, [], "a stage that begins cancelled asks nobody")
         XCTAssertEqual(resets, 0, "nothing was retried, so nothing was reset")
     }
 
