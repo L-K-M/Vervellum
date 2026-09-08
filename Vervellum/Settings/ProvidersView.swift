@@ -36,6 +36,8 @@ struct ProvidersView: View {
     @State private var searchKeyEntries: [UUID: String] = [:]
     @State private var storedSearchKeys: Set<UUID> = []
 
+    @State private var modelFallback = ProviderSettings.defaultModelFallback
+
     @State private var pageReading: PageReadingMode = .direct
     @State private var readerEndpoint = ""
     @State private var readerKeyEntry = ""
@@ -103,6 +105,17 @@ struct ProvidersView: View {
                     selectedID = added.id
                 } label: {
                     Label("Add a provider", systemImage: "plus")
+                }
+
+                // Shown only with somewhere to fall back to. A switch that cannot do
+                // anything is a question the user has no way to answer.
+                if profiles.count > 1 {
+                    Toggle("Try the next provider if one fails", isOn: $modelFallback)
+                        .help("The selected provider is tried first, then the rest in the "
+                              + "order listed here.")
+                    Text(fallbackExplanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -489,10 +502,26 @@ struct ProvidersView: View {
         storedKeys = Set(profiles.filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
         storedSearchKeys = Set(searchProfiles
             .filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
+        modelFallback = settings.modelFallback
         pageReading = settings.pageReading
         readerEndpoint = settings.readerEndpoint
         readerKeyEntry = ""
         hasReaderKey = keychain.hasValue(for: .readerAPIKey)
+    }
+
+    /// Names the order the chain will actually be tried in, from the live edits rather
+    /// than from what was last saved — a user who has just reordered or reselected
+    /// should be able to read the consequence before pressing Save.
+    private var fallbackExplanation: String {
+        guard modelFallback else {
+            return "A failing provider fails the question. Nothing else is tried."
+        }
+        // The chain's own rule, not a second copy of it: a caption that drifted would
+        // describe an order the runner does not walk.
+        let order = ProviderSettings.chainOrder(profiles, selectedID: selectedID)
+        guard !order.isEmpty else { return "" }
+        return "Order: " + order.map(\.displayName).joined(separator: " → ")
+            + ". The turn says which provider answered."
     }
 
     private func remove(_ id: UUID) {
@@ -524,6 +553,7 @@ struct ProvidersView: View {
         settings.selectedModelID = selectedID ?? profiles.first?.id
         settings.searchProfiles = searchProfiles
         settings.selectedSearchID = selectedSearchID ?? searchProfiles.first?.id
+        settings.modelFallback = modelFallback
         settings.pageReading = pageReading
         settings.readerEndpoint = readerEndpoint
         preferences.providerSettings = settings

@@ -29,20 +29,94 @@ final class ResearchRunner: ResearchRunning {
 
     /// Everything a run needs from the outside world, captured once so the settings
     /// cannot change halfway through a turn.
-    struct Environment {
+    ///
+    /// It prints redacted. The note on `modelKeys` used to say "never log an
+    /// `Environment`", which is a rule held by whoever remembers reading it — and this
+    /// value now carries *every* configured provider's key, so the one `print` someone
+    /// reaches for while a turn is failing would spill all of them at once rather than
+    /// one. All three routes out are overridden, not only the debug one: `print`, string
+    /// interpolation and `String(describing:)` take `description` — the interpolation in
+    /// a hurried log line is what this is for — `String(reflecting:)` takes
+    /// `debugDescription`, and `dump()`, a debugger and a crash reporter go round both
+    /// through `Mirror`. Closing two of the three would only have moved the hole.
+    ///
+    /// Every *printing* path, not memory: an attached debugger reading the stored
+    /// properties directly — lldb's `frame variable`, as against `po` — still sees the
+    /// keys, and nothing in a value type can prevent that. The guarantee is that no
+    /// rendering of this value writes a key somewhere it can be read later.
+    struct Environment: CustomStringConvertible, CustomDebugStringConvertible,
+                        CustomReflectable {
         var settings: ProviderSettings
         var modelKey: String?
+        /// Every configured model provider's key, by profile id.
+        ///
+        /// A chain needs more than the selected provider's key: the point of falling
+        /// back is to reach a *different* endpoint, and each has a secret slot of its
+        /// own. Captured with the rest of the environment, once, so a key edited
+        /// mid-turn cannot change which credential a later stage sends.
+        /// - Note: every configured provider's live key, not just the selected one.
+        ///   Turn diagnostics name profiles, never keys.
+        var modelKeys: [UUID: String]
         var searchKey: String?
         var readerKey: String?
+
+        /// Which secrets are present, never what they are. Profile ids are safe to name
+        /// — they are what the trace already uses to talk about providers — and they are
+        /// what makes this description useful enough that nobody wants the real one.
+        ///
+        /// Fields named one by one rather than interpolating `settings`, which is the
+        /// whole point and was the hole in the first version of this. `ProviderSettings`
+        /// has no description of its own, so reflection would have printed every stored
+        /// property — the endpoints included, and an endpoint is a URL somebody pasted.
+        /// Nothing stops one carrying `?api-key=…`: the validator refuses credentials in
+        /// a URL's *userinfo*, which is a different part of the address. Listing what may
+        /// be shown, rather than removing what may not, also means a field added to
+        /// `ProviderSettings` later cannot leak through here by default.
+        var description: String {
+            let ids = modelKeys.keys.map(\.uuidString).sorted().joined(separator: ", ")
+            func held(_ secret: String?) -> String { secret == nil ? "absent" : "present" }
+            return "Environment(model: \(settings.modelName), "
+                // The switch as well as the count. `modelChain` is the *effective* chain,
+                // so five configured providers with fallback off print as `providers: 1`
+                // — indistinguishable from having configured one, and "why was my spare
+                // never tried" is the likeliest question this rendering has to answer.
+                + "fallback: \(settings.modelFallback), "
+                + "providers: \(settings.modelChain.count), modelKeys: [\(ids)], "
+                + "modelKey: \(held(modelKey)), searchKey: \(held(searchKey)), "
+                + "readerKey: \(held(readerKey)))"
+        }
+
+        var debugDescription: String { description }
+
+        /// The third way this value gets printed, and the one neither description above
+        /// covers. `dump()` — and anything else built on `Mirror`, which is most of what
+        /// a debugger and a crash reporter use — ignores both and walks the stored
+        /// properties instead, which here means every key in the clear. Redacting the
+        /// descriptions and leaving reflection alone would have moved the hole rather
+        /// than closed it, so the mirror shows the same redacted line.
+        var customMirror: Mirror {
+            Mirror(self, children: ["description": description], displayStyle: .struct)
+        }
 
         init(settings: ProviderSettings,
              modelKey: String?,
              searchKey: String?,
-             readerKey: String? = nil) {
+             readerKey: String? = nil,
+             modelKeys: [UUID: String]? = nil) {
             self.settings = settings
             self.modelKey = modelKey
             self.searchKey = searchKey
             self.readerKey = readerKey
+            // Callers that know only about the selected provider — the tests, and the
+            // single-provider construction the Linux front end uses — still get a
+            // working one-element chain rather than a chain with no key in it.
+            if let modelKeys {
+                self.modelKeys = modelKeys
+            } else if let modelKey, let selected = settings.selectedModel {
+                self.modelKeys = [selected.id: modelKey]
+            } else {
+                self.modelKeys = [:]
+            }
         }
 
         /// Reads the current settings and secrets. Called at the start of a turn.
@@ -57,7 +131,8 @@ final class ResearchRunner: ResearchRunning {
             self.init(settings: settings,
                       modelKey: secrets.modelKey(for: settings),
                       searchKey: secrets.searchKey(for: settings),
-                      readerKey: secrets.value(for: .readerAPIKey))
+                      readerKey: secrets.value(for: .readerAPIKey),
+                      modelKeys: secrets.modelKeys(for: settings))
         }
     }
 
@@ -169,19 +244,31 @@ final class ResearchRunner: ResearchRunning {
         guard problems.isEmpty else {
             throw ResearchError("Vervellum is not configured yet. " + problems.joined(separator: " "))
         }
-        guard let endpoint = ProviderSettings.chatCompletionsURL(from: settings.modelEndpoint) else {
+        guard ProviderSettings.chatCompletionsURL(from: settings.modelEndpoint) != nil else {
             throw ResearchError("The model endpoint is not a usable URL. Check the provider settings.")
         }
 
-        let chat = ChatCompletionsClient(url: endpoint, model: settings.modelName,
-                                         apiKey: environment.modelKey, trace: trace,
-                                         transport: transport)
+        // Every model call this turn makes goes through the chain, which is the selected
+        // provider alone when fallback is off — the gate is in `ProviderSettings`, where
+        // `modelChain` collapses to `[selected]`, and it is named here because a reader
+        // otherwise has to open another file to be sure the off switch is wired to
+        // anything. A switch renames the turn's model and posts a notice, so the
+        // attribution shown to the reader is always the provider that actually produced
+        // the words.
+        let chain = ModelChain(profiles: settings.modelChain, keys: environment.modelKeys,
+                               trace: trace, transport: transport)
+        chain.onSwitch = { [weak self] profile in
+            self?.update { turn in
+                turn.model = profile.model
+                turn.addNotice(.modelFellBack)
+            }
+        }
         let today = ResearchContext.todayString()
 
         trace.log("Turn started mode=\(mode == .direct ? "direct" : "research") history=\(history.count)")
 
         if mode == .direct {
-            try await answerDirectly(chat: chat, question: question, history: history, today: today)
+            try await answerDirectly(chain: chain, question: question, history: history, today: today)
             return
         }
 
@@ -209,10 +296,17 @@ final class ResearchRunner: ResearchRunning {
             extra: ["search_tool": search.toolDescriptor])
         if planContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
 
-        let planObject = try await chat.completeJSON(
-            system: ResearchPrompts.plan(maxSearches: Self.maxSearches, today: today),
-            payload: planContext.payload, label: "Plan")
-        let plan = try PlanParser.parse(planObject, maxSearches: Self.maxSearches)
+        // Parsed *inside* the chain, not after it. A provider that answers with valid
+        // JSON in the wrong shape has failed at the same job as one that answers with
+        // no JSON at all, and only the second was worth another provider while the
+        // first killed the turn. `PlanParser`'s own messages give the game away — "Try
+        // again or choose another model" is the advice the chain exists to take.
+        let plan = try await chain.perform("Plan") { chat in
+            let object = try await chat.completeJSON(
+                system: ResearchPrompts.plan(maxSearches: Self.maxSearches, today: today),
+                payload: planContext.payload, label: "Plan")
+            return try PlanParser.parse(object, maxSearches: Self.maxSearches)
+        }
         update { turn in
             turn.reading = plan.reading
             turn.searches = plan.searches
@@ -238,7 +332,7 @@ final class ResearchRunner: ResearchRunning {
                     turn.reading = "The planner decided this question needs no web evidence."
                 }
             }
-            try await answerDirectly(chat: chat, question: question, history: history, today: today)
+            try await answerDirectly(chain: chain, question: question, history: history, today: today)
             return
         }
 
@@ -337,10 +431,19 @@ final class ResearchRunner: ResearchRunning {
             question: question, history: history, today: today, extra: answerExtra)
         if answerContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
 
-        let answer = try await chat.streamText(
-            system: ResearchPrompts.answer, payload: answerContext.payload, label: "Answer"
-        ) { [weak self] chunk in
-            self?.update { $0.answer += chunk }
+        // A provider that dies mid-sentence has already streamed text into the turn, and
+        // the next provider starts its answer from the beginning. Without the reset the
+        // two would be concatenated into a paragraph neither model wrote — so the
+        // fragment is discarded before the retry. The reader sees the answer restart,
+        // which is honest, rather than a seam they cannot see.
+        let answer = try await chain.perform("Answer", beforeRetry: { [weak self] in
+            self?.update { $0.answer = "" }
+        }) { chat in
+            try await chat.streamText(
+                system: ResearchPrompts.answer, payload: answerContext.payload, label: "Answer"
+            ) { [weak self] chunk in
+                self?.update { $0.answer += chunk }
+            }
         }
         update { $0.applyCitationValidation(sourceCount: sources.count) }
         try Task.checkCancellation()
@@ -361,8 +464,10 @@ final class ResearchRunner: ResearchRunning {
         // Cancellation still propagates: a Stop is a Stop.
         let assessment: AssessmentParser.Assessment
         do {
-            let assessObject = try await chat.completeJSON(
-                system: ResearchPrompts.assess, payload: assessContext.payload, label: "Assess")
+            let assessObject = try await chain.perform("Assess") { chat in
+                try await chat.completeJSON(
+                    system: ResearchPrompts.assess, payload: assessContext.payload, label: "Assess")
+            }
             assessment = try AssessmentParser.parse(assessObject, sourceCount: sources.count)
         } catch let error as ResearchError where error != ResearchError.cancelled && !Task.isCancelled {
             trace.warn("Assessment unavailable: \(error.message)")
@@ -425,17 +530,22 @@ final class ResearchRunner: ResearchRunning {
     }
 
     /// The `/direct` path: one streamed call, no search, no citations.
-    private func answerDirectly(chat: ChatCompletionsClient,
+    private func answerDirectly(chain: ModelChain,
                                 question: String,
                                 history: [ResearchTurn],
                                 today: String) async throws {
         update { $0.stage = .answering }
         let context = ResearchContext.assemble(question: question, history: history, today: today)
         if context.trimmed { update { $0.addNotice(.contextTrimmed) } }
-        _ = try await chat.streamText(
-            system: ResearchPrompts.direct, payload: context.payload, label: "Direct answer"
-        ) { [weak self] chunk in
-            self?.update { $0.answer += chunk }
+        // Same reset as the research path's answer stage, for the same reason.
+        _ = try await chain.perform("Direct answer", beforeRetry: { [weak self] in
+            self?.update { $0.answer = "" }
+        }) { chat in
+            try await chat.streamText(
+                system: ResearchPrompts.direct, payload: context.payload, label: "Direct answer"
+            ) { [weak self] chunk in
+                self?.update { $0.answer += chunk }
+            }
         }
         // The same check the research path makes after its answer. A Stop pressed
         // mid-stream ends the stream rather than failing it, and without this the

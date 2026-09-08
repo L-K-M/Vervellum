@@ -11,9 +11,20 @@ Vervellum server: the app talks only to the endpoints you configure and to GitHu
 Vervellum makes network requests in exactly five cases, each with a fixed purpose.
 
 - **Research.** Requested research sends your question, earlier thread context, and
-  retrieved evidence to the model provider selected when you asked — and to no other
-  configured provider. `/direct` uses that same provider without searching. Provider
-  handling is governed by its own policy; Vervellum cannot recall what was sent.
+  retrieved evidence to the model provider selected when you asked. `/direct` uses that
+  same provider without searching. Provider handling is governed by its own policy;
+  Vervellum cannot recall what was sent.
+
+  If that provider fails — no response, a rejected key, an error — the same material is
+  sent to the next model provider you have configured, and so on down the list, until
+  one answers. Two failures are the exception and reach nobody else: a question you
+  stopped, and one too large for Vervellum's own size limit. The second is measured
+  before anything leaves the machine and the limit is the same whichever provider is
+  next, so there is no second attempt to make. That is **Try the next provider if one fails** in Settings ▸ Providers;
+  it is on by default and only ever reaches providers you configured yourself. Turn it
+  off and a failing provider fails the question instead. When it happens the turn says
+  so, and the model recorded on the turn is the one that actually answered. A question
+  you cancel is never re-sent.
 - **Search queries.** Model-written queries derived from your question and context go
   to the search provider selected when you asked — an MCP server, or a SearXNG instance
   queried directly — and to no other configured provider. They are shown to you in the
