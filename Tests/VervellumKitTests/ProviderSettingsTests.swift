@@ -371,6 +371,21 @@ final class ProviderSettingsTests: XCTestCase {
                       "and the initialiser takes that default rather than its own")
     }
 
+    /// The upgrade path, which the two assertions above do not cover: a settings file
+    /// written before this key existed has to read as on, not as the `false` a synthesized
+    /// `Bool` decode would hand back. Everybody upgrading arrives through this line, and
+    /// they would lose the feature silently.
+    func testFallbackIsOnWhenTheStoredSettingsPredateTheKey() throws {
+        let before = #"{"modelProfiles":[],"searchProfiles":[]}"#
+        let decoded = try JSONDecoder().decode(ProviderSettings.self, from: Data(before.utf8))
+        XCTAssertTrue(decoded.modelFallback)
+        // And a value of the wrong type reads as the default rather than costing the
+        // reader the whole document — the leniency every other field here has.
+        let wrong = #"{"modelProfiles":[],"searchProfiles":[],"modelFallback":"yes"}"#
+        let salvaged = try JSONDecoder().decode(ProviderSettings.self, from: Data(wrong.utf8))
+        XCTAssertTrue(salvaged.modelFallback)
+    }
+
     func testFallbackOffLeavesOnlyTheSelection() {
         let alpha = chainProfile("alpha")
         let beta = chainProfile("beta")

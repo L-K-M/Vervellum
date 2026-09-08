@@ -107,6 +107,14 @@ final class ModelChain {
     func perform<T>(_ label: String,
                     beforeRetry: (() -> Void)? = nil,
                     _ body: (ChatCompletionsClient) async throws -> T) async throws -> T {
+        // Traced as well as asserted. `assert` is compiled out with `-O`, and the failure
+        // it guards — a mis-attributed answer — is the worst thing this type can do, so
+        // the build users actually run should not be the one that says nothing. Still not
+        // a lock: serialising would make the race safe and the caller still wrong.
+        if inFlight {
+            trace.warn("\(label): a stage is already running on this chain, so the "
+                + "provider order and the record of who answered may both be wrong")
+        }
         assert(!inFlight, "ModelChain runs one stage at a time; overlapping calls race the cursor")
         inFlight = true
         defer { inFlight = false }
@@ -143,6 +151,12 @@ final class ModelChain {
                 if firstError == nil { firstError = error }
                 trace.warn("\(label) failed on \(profile.displayName): \(error.message)")
                 index += 1
+                // Not before this guard. `beforeRetry` discards the dead provider's
+                // half-streamed text so the next provider's answer does not land on top
+                // of it — and when there is no next provider there is nothing to land.
+                // The fragment stays, beside the error, as the visible record of how far
+                // the turn got. Clearing it here would make an exhausted chain the one
+                // failure that also erases what the reader was looking at.
                 guard let next = nextUsableProfile(after: label) else { break }
                 beforeRetry?()
                 trace.log("\(label): trying \(next.displayName)")

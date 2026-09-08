@@ -621,7 +621,11 @@ struct ProviderSettings: Equatable, Codable {
         selectedSearchID = try container.decodeIfPresent(UUID.self, forKey: .selectedSearchID)
         // Absent in anything written before the chain existed, and the default there is
         // the same as the default for a fresh install: on.
-        modelFallback = try container.decodeIfPresent(Bool.self, forKey: .modelFallback)
+        // Lenient like `pageReading` below and every other field here: a strict decode
+        // throws on a value of the wrong type, and a throw from this initializer costs
+        // the reader every provider in the file — the whole-document failure the
+        // `.unknown` notice comment records as having emptied a library once already.
+        modelFallback = ((try? container.decodeIfPresent(Bool.self, forKey: .modelFallback)) ?? nil)
             ?? Self.defaultModelFallback
         let rawMode = (try? container.decodeIfPresent(String.self, forKey: .pageReading)) ?? nil
         pageReading = rawMode.flatMap { PageReadingMode(rawValue: $0) } ?? .direct
