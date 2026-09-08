@@ -47,4 +47,22 @@ final class ResearchErrorTests: XCTestCase {
         XCTAssertTrue(ResearchError.notConfigured.message.contains("Settings"))
         XCTAssertTrue(ResearchError.providerStatus(429).message.contains("429"))
     }
+
+    /// The two exclusions are the fallback chain's whole contract about what a spare is
+    /// *not* for, and both are promises to the reader: a Stop never spends another
+    /// provider's request, and a payload no endpoint could encode is not re-sent to four
+    /// of them. Everything else is retried, including the failures that look like
+    /// configuration — a rejected key and an unknown model name are exactly the states a
+    /// second provider exists to cover.
+    func testWhichFailuresAreWorthAnotherProvider() {
+        XCTAssertFalse(ResearchError.cancelled.isWorthAnotherProvider, "Stop is not weather")
+        XCTAssertFalse(ResearchError.invalidContext.isWorthAnotherProvider,
+                       "the same payload is the same size at every endpoint")
+        for error in [ResearchError.notConfigured, .connectionFailed, .timedOut,
+                      .invalidResponse, .streamInterrupted, .responseTooLarge, .badRequest,
+                      .rejectedCredential(401), .rejectedCredential(403),
+                      .providerStatus(429), .providerStatus(500)] {
+            XCTAssertTrue(error.isWorthAnotherProvider, "not retried: \(error.message)")
+        }
+    }
 }

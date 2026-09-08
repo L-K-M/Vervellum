@@ -221,10 +221,33 @@ struct ProviderSettings: Equatable, Codable {
     /// Which of them a run searches with. Same fallback rule as the model selection.
     var selectedSearchID: UUID?
 
+    /// Whether a model provider that fails hands the turn to the next one configured.
+    ///
+    /// On by default, but never silent: the turn records the provider that actually
+    /// answered and carries a `modelFellBack` notice, because "which model said this"
+    /// is part of what an answer means here. Off restores the single-provider
+    /// behaviour, where a failing provider fails the turn.
+    ///
+    /// It governs *failures*, not configuration. `problems(hasModelKey:...)` still runs
+    /// against the selection alone and still fails the turn before a chain exists, so an
+    /// empty endpoint or model name on the selected provider is a turn that never
+    /// starts — even with a complete spare beside it. That is the boundary, and it is
+    /// deliberate: the picker points at that provider, so a blank field there is
+    /// something to go and fix rather than weather to route around. A key is not part of
+    /// it; a local server takes none, and `problems` ignores `hasModelKey` for exactly
+    /// that reason.
+    var modelFallback: Bool
+
     /// How much of each source is read. See `PageReadingMode`.
     var pageReading: PageReadingMode
     /// The MCP endpoint used when `pageReading` is `.reader`.
     var readerEndpoint: String
+
+    /// One home for the fallback default. It was written out as a literal in five
+    /// places — two initialisers, the lenient decoder, `CorePreferences.Default`, and
+    /// the Settings pane's `@State` — and a default that disagrees with itself across
+    /// a load path is a setting that changes when nobody touched it.
+    static let defaultModelFallback = true
 
     static let defaultSearchEndpoint = "https://api.z.ai/api/mcp/web_search_prime/mcp"
     /// z.ai's Web Reader MCP server, documented at
@@ -238,12 +261,14 @@ struct ProviderSettings: Equatable, Codable {
          selectedModelID: UUID? = nil,
          searchProfiles: [SearchProfile] = [],
          selectedSearchID: UUID? = nil,
+         modelFallback: Bool = ProviderSettings.defaultModelFallback,
          pageReading: PageReadingMode = .direct,
          readerEndpoint: String = ProviderSettings.defaultReaderEndpoint) {
         self.modelProfiles = modelProfiles
         self.selectedModelID = selectedModelID
         self.searchProfiles = searchProfiles
         self.selectedSearchID = selectedSearchID
+        self.modelFallback = modelFallback
         self.pageReading = pageReading
         self.readerEndpoint = readerEndpoint
     }
@@ -258,6 +283,7 @@ struct ProviderSettings: Equatable, Codable {
          modelName: String = "",
          searchEndpoint: String = ProviderSettings.defaultSearchEndpoint,
          searchKind: SearchProviderKind = .mcp,
+         modelFallback: Bool = ProviderSettings.defaultModelFallback,
          pageReading: PageReadingMode = .direct,
          readerEndpoint: String = ProviderSettings.defaultReaderEndpoint) {
         let model = ModelProfile(name: "", endpoint: modelEndpoint, model: modelName,
@@ -268,6 +294,7 @@ struct ProviderSettings: Equatable, Codable {
                   selectedModelID: model.id,
                   searchProfiles: [search],
                   selectedSearchID: search.id,
+                  modelFallback: modelFallback,
                   pageReading: pageReading,
                   readerEndpoint: readerEndpoint)
     }
@@ -283,6 +310,43 @@ struct ProviderSettings: Equatable, Codable {
 
     var selectedSearch: SearchProfile? {
         searchProfiles.first { $0.id == selectedSearchID } ?? searchProfiles.first
+    }
+
+    /// The model providers a turn may use, in the order it will try them.
+    ///
+    /// The selected profile is always the head — a chain that did not start where the
+    /// picker points would make the picker a lie — and the rest follow in the order the
+    /// Providers list shows them, which is the only ordering the user can already see
+    /// and rearrange. There is deliberately no second, hidden ordering to configure.
+    ///
+    /// With fallback off this is just the selection, so every caller can be written
+    /// against a chain and the single-provider behaviour is the one-element case rather
+    /// than a separate path.
+    var modelChain: [ModelProfile] {
+        guard let selected = selectedModel else { return [] }
+        guard modelFallback else { return [selected] }
+        return Self.chainOrder(modelProfiles, selectedID: selectedModelID)
+    }
+
+    /// The order a chain tries providers in: the selection first, then the rest as the
+    /// Providers list shows them.
+    ///
+    /// The order fallback *would* take, which is not the same as the order a turn takes:
+    /// this does not consult `modelFallback`, because it is the ordering rule and the
+    /// setting is a separate question. A caller showing it has to ask that question
+    /// itself — `ProvidersView.fallbackExplanation` does, and says "nothing else is
+    /// tried" when the answer is no.
+    ///
+    /// Static and separate from `modelChain` because the Settings pane prints this order
+    /// back to the reader, and it was deriving it a second time from the same rule. Two
+    /// copies of an ordering is how a caption ends up describing a chain the runner does
+    /// not walk. A selection that no longer exists degrades to the first profile, the
+    /// same way `selectedModel` does, so the caption cannot claim an order the chain
+    /// would not take.
+    static func chainOrder(_ profiles: [ModelProfile], selectedID: UUID?) -> [ModelProfile] {
+        guard let selected = profiles.first(where: { $0.id == selectedID }) ?? profiles.first
+        else { return [] }
+        return [selected] + profiles.filter { $0.id != selected.id }
     }
 
     /// Selects the profile whose name or model identifier matches `name`, exactly first
@@ -481,6 +545,61 @@ struct ProviderSettings: Equatable, Codable {
 
     private static let versionSuffix = try! NSRegularExpression(pattern: #"/v[0-9]+$"#)
 
+    /// The model-list URL for whatever the user pasted as their chat endpoint.
+    ///
+    /// The same three shapes `chatCompletionsURL` accepts, in reverse. A bare host or a
+    /// versioned base (`/v1`) gains `/models`; a full chat path (`/v1/chat/completions`)
+    /// has that suffix removed first, because appending to it would ask for
+    /// `/chat/completions/models`, which is nothing.
+    ///
+    /// The append is idempotent, because the model-list URL is itself a plausible paste:
+    /// it is the address the provider's documentation prints, and a reader who has just
+    /// been told Vervellum can list models may well copy that line into the endpoint
+    /// field. Appending blindly would ask for `/v1/models/models` and 404.
+    ///
+    /// Azure's deployment-scoped route is the one shape whose model list is not its own
+    /// sibling. `chatCompletionsURL` accepts `/openai/deployments/<name>/chat/completions`
+    /// as a custom path and leaves it alone, but Azure lists every deployment at
+    /// `/openai/models` — so appending beside the deployment asks for a route that has
+    /// never existed, and the reader gets a 404 on an address whose questions work.
+    ///
+    /// The shape is handled; Azure is not claimed. Its classic surface authenticates with
+    /// an `api-key` header and Vervellum sends `Authorization: Bearer` everywhere, so that
+    /// surface needs a credential scheme this app does not have — its own piece of work.
+    /// What the fold is worth today is any gateway presenting Azure's path layout over
+    /// bearer auth, and not asking a route that cannot exist.
+    ///
+    /// The query string is carried over, because `chatCompletionsURL` carries it and the
+    /// two addresses have to describe the same provider. Azure's OpenAI-compatible
+    /// surface is the case that makes this concrete: it requires `?api-version=` on every
+    /// call, so dropping it here produced the worst failure this feature can have —
+    /// questions work, listing 404s, and the message says nothing about a stripped
+    /// parameter. The fragment is still dropped, since it is never sent to a server.
+    ///
+    /// Here rather than on `ModelCatalog` so the endpoint rules — HTTPS, no credentials
+    /// in the URL, a host — stay in one place and keep their validator private.
+    static func modelListURL(from raw: String) -> URL? {
+        guard var components = validatedURLComponents(raw) else { return nil }
+        var path = components.path
+        while path.hasSuffix("/") { path.removeLast() }
+        if path.hasSuffix(chatCompletionsSuffix) { path.removeLast(chatCompletionsSuffix.count) }
+        while path.hasSuffix("/") { path.removeLast() }
+        // Only a deployment name — one segment, nothing after it — is folded away. A
+        // deeper path under `deployments/` is somebody else's routing scheme, and
+        // guessing at it would be worse than appending beside it.
+        if let deployments = path.range(of: deploymentsInfix),
+           path[deployments.upperBound...].firstIndex(of: "/") == nil {
+            path = String(path[..<deployments.lowerBound]) + "/openai"
+        }
+        components.path = path.hasSuffix(modelsSuffix) ? path : path + modelsSuffix
+        components.fragment = nil
+        return components.url
+    }
+
+    private static let chatCompletionsSuffix = "/chat/completions"
+    private static let modelsSuffix = "/models"
+    private static let deploymentsInfix = "/openai/deployments/"
+
     /// The SearXNG JSON search URL for an instance address.
     ///
     /// Users paste the instance's home page (`https://searx.example.org`), because that
@@ -545,7 +664,7 @@ struct ProviderSettings: Equatable, Codable {
 
     enum CodingKeys: String, CodingKey {
         case modelProfiles, selectedModelID, searchProfiles, selectedSearchID
-        case pageReading, readerEndpoint
+        case modelFallback, pageReading, readerEndpoint
     }
 
     /// Lenient for the same reason `ModelProfile.init(from:)` is.
@@ -555,6 +674,14 @@ struct ProviderSettings: Equatable, Codable {
         selectedModelID = try container.decodeIfPresent(UUID.self, forKey: .selectedModelID)
         searchProfiles = try container.decodeIfPresent([SearchProfile].self, forKey: .searchProfiles) ?? []
         selectedSearchID = try container.decodeIfPresent(UUID.self, forKey: .selectedSearchID)
+        // Absent in anything written before the chain existed, and the default there is
+        // the same as the default for a fresh install: on.
+        // Lenient like `pageReading` below and every other field here: a strict decode
+        // throws on a value of the wrong type, and a throw from this initializer costs
+        // the reader every provider in the file — the whole-document failure the
+        // `.unknown` notice comment records as having emptied a library once already.
+        modelFallback = ((try? container.decodeIfPresent(Bool.self, forKey: .modelFallback)) ?? nil)
+            ?? Self.defaultModelFallback
         let rawMode = (try? container.decodeIfPresent(String.self, forKey: .pageReading)) ?? nil
         pageReading = rawMode.flatMap { PageReadingMode(rawValue: $0) } ?? .direct
         readerEndpoint = try container.decodeIfPresent(String.self, forKey: .readerEndpoint)

@@ -338,4 +338,152 @@ final class ProviderSettingsTests: XCTestCase {
             profile: SearchProfile.new(kind: .mcp, endpoint: ProviderSettings.defaultSearchEndpoint),
             apiKey: nil, trace: ResearchTrace(sink: SilentLog())))
     }
+
+    // MARK: Fallback chain
+
+    private func chainProfile(_ name: String) -> ModelProfile {
+        ModelProfile.new(name: name, endpoint: "https://\(name).example.com/v1", model: name)
+    }
+
+    /// The chain starts at the selection, because the picker claims that provider
+    /// answers — and the rest follow in the order the Providers list shows.
+    func testTheChainStartsAtTheSelectionAndKeepsListOrder() {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let gamma = chainProfile("gamma")
+        var settings = ProviderSettings(modelProfiles: [alpha, beta, gamma],
+                                        selectedModelID: beta.id)
+        XCTAssertEqual(settings.modelChain.map(\.model), ["beta", "alpha", "gamma"])
+
+        settings.selectedModelID = alpha.id
+        XCTAssertEqual(settings.modelChain.map(\.model), ["alpha", "beta", "gamma"])
+    }
+
+    /// Off is the single-provider behaviour, expressed as a one-element chain so every
+    /// caller can be written against a chain rather than branching.
+    /// `PRIVACY.md` and the README both state that fallback is on unless the reader
+    /// turns it off, and a privacy document that describes where a question goes has to
+    /// be right about that. Pinned mechanically rather than by the convention that
+    /// somebody rereads two files after changing a constant.
+    func testFallbackIsOnByDefaultAsThePrivacyDocumentSays() {
+        XCTAssertTrue(ProviderSettings.defaultModelFallback)
+        XCTAssertTrue(ProviderSettings(modelProfiles: []).modelFallback,
+                      "and the initialiser takes that default rather than its own")
+    }
+
+    /// The upgrade path, which the two assertions above do not cover: a settings file
+    /// written before this key existed has to read as on, not as the `false` a synthesized
+    /// `Bool` decode would hand back. Everybody upgrading arrives through this line, and
+    /// they would lose the feature silently.
+    func testFallbackIsOnWhenTheStoredSettingsPredateTheKey() throws {
+        let before = #"{"modelProfiles":[],"searchProfiles":[]}"#
+        let decoded = try JSONDecoder().decode(ProviderSettings.self, from: Data(before.utf8))
+        XCTAssertTrue(decoded.modelFallback)
+        // And a value of the wrong type reads as the default rather than costing the
+        // reader the whole document — the leniency every other field here has.
+        let wrong = #"{"modelProfiles":[],"searchProfiles":[],"modelFallback":"yes"}"#
+        let salvaged = try JSONDecoder().decode(ProviderSettings.self, from: Data(wrong.utf8))
+        XCTAssertTrue(salvaged.modelFallback)
+    }
+
+    func testFallbackOffLeavesOnlyTheSelection() {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let settings = ProviderSettings(modelProfiles: [alpha, beta],
+                                        selectedModelID: beta.id,
+                                        modelFallback: false)
+        XCTAssertEqual(settings.modelChain.map(\.model), ["beta"])
+    }
+
+    /// A stale selection degrades to "the one at the top" everywhere else, and the chain
+    /// must not be the exception that researches with nothing.
+    func testAStaleSelectionStillProducesAChain() {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let settings = ProviderSettings(modelProfiles: [alpha, beta], selectedModelID: UUID())
+        XCTAssertEqual(settings.modelChain.map(\.model), ["alpha", "beta"])
+    }
+
+    /// The same degradation from the other direction: nothing selected at all. It runs
+    /// through `selectedModel`'s `?? modelProfiles.first`, exactly as a stale id does —
+    /// pinned so the two cannot drift apart into separate paths later.
+    func testANilSelectionStillProducesAChain() {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let settings = ProviderSettings(modelProfiles: [alpha, beta], selectedModelID: nil)
+        XCTAssertEqual(settings.modelChain.map(\.model), ["alpha", "beta"])
+    }
+
+    /// The Settings caption prints the order back to the reader through this same
+    /// helper. Pinned as one rule so a caption cannot describe a chain the runner does
+    /// not walk — including when the saved selection no longer exists, where both have
+    /// to degrade to the first profile rather than disagree about which is the head.
+    func testTheSharedOrderingIsTheChainsOwn() {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let gamma = chainProfile("gamma")
+        let profiles = [alpha, beta, gamma]
+
+        let settings = ProviderSettings(modelProfiles: profiles, selectedModelID: beta.id)
+        XCTAssertEqual(
+            ProviderSettings.chainOrder(profiles, selectedID: beta.id).map(\.model),
+            settings.modelChain.map(\.model))
+        XCTAssertEqual(settings.modelChain.map(\.model), ["beta", "alpha", "gamma"])
+
+        // The raw id rather than `stale.selectedModelID`, so this keeps testing the stale
+        // case if the initializer ever starts normalizing an unknown selection down to
+        // the first profile. Read back, it would quietly become the ordinary alpha-first
+        // check and still pass, while the scenario named above lost its coverage.
+        let staleID = UUID()
+        let stale = ProviderSettings(modelProfiles: profiles, selectedModelID: staleID)
+        XCTAssertEqual(
+            ProviderSettings.chainOrder(profiles, selectedID: staleID).map(\.model),
+            stale.modelChain.map(\.model))
+
+        XCTAssertTrue(ProviderSettings.chainOrder([], selectedID: nil).isEmpty)
+    }
+
+    func testNoProvidersIsAnEmptyChain() {
+        XCTAssertTrue(ProviderSettings(modelProfiles: []).modelChain.isEmpty)
+    }
+
+    /// The chain reaches endpoints the selected provider's key was never issued for, so
+    /// each profile's own slot has to be read.
+    func testEveryProvidersKeyIsCollectedByProfile() throws {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let unkeyed = chainProfile("local")
+        let settings = ProviderSettings(modelProfiles: [alpha, beta, unkeyed],
+                                        selectedModelID: alpha.id)
+        let secrets = EphemeralSecretStore()
+        try secrets.set("alpha-key", for: alpha.secretAccount)
+        try secrets.set("beta-key", for: beta.secretAccount)
+
+        let keys = secrets.modelKeys(for: settings)
+        // The count as well as the entries: three assertions about three known ids say
+        // nothing about a fourth, and a map with a slot for a profile that is not in the
+        // settings would be a key sent to an endpoint the chain never walks.
+        XCTAssertEqual(keys.count, 2, "two keyed profiles, and nothing else in the map")
+        XCTAssertEqual(keys[alpha.id], "alpha-key")
+        XCTAssertEqual(keys[beta.id], "beta-key")
+        XCTAssertNil(keys[unkeyed.id], "a local server takes no key, and sends no header")
+    }
+
+    /// With fallback off there is nowhere to fall back to, so the spare's key is neither
+    /// read nor held. `Environment` carries this map for the length of a turn and is the
+    /// value this app documents as the most expensive thing it owns to print — a secret
+    /// kept in it for a provider the turn cannot dial is a keychain read spent to widen
+    /// what one hurried `print` could spill.
+    func testOnlyTheSelectionsKeyIsCollectedWhenFallbackIsOff() throws {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let settings = ProviderSettings(modelProfiles: [alpha, beta], selectedModelID: beta.id,
+                                        modelFallback: false)
+        let secrets = EphemeralSecretStore()
+        try secrets.set("alpha-key", for: alpha.secretAccount)
+        try secrets.set("beta-key", for: beta.secretAccount)
+
+        XCTAssertEqual(secrets.modelKeys(for: settings), [beta.id: "beta-key"],
+                       "only the provider the chain can reach")
+    }
 }

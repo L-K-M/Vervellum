@@ -198,6 +198,10 @@ enum TurnNotice: String, Codable, Equatable {
     /// A page was read but its text did not fit the model's context, so the answer saw
     /// that source's summary only.
     case pageTextTrimmed
+    /// A model provider failed and the next one in the chain answered instead. Not
+    /// necessarily the *selected* provider: a turn can move on twice, and the second
+    /// failure is a spare's. The turn's `model` is the one that actually answered.
+    case modelFellBack
     /// A notice written by a newer build that this one does not know. Kept rather than
     /// failing the whole document: a `notices` array that refused to decode used to make
     /// an older build start from an empty library and overwrite the newer file.
@@ -237,6 +241,10 @@ enum TurnNotice: String, Codable, Equatable {
         case .pageTextTrimmed:
             return "A page was read but did not fit the model's context, so the answer saw that "
                 + "source's summary only. It is listed as a summary."
+        case .modelFellBack:
+            return "A model provider failed, so the next one configured answered instead, "
+                + "and the rest of this turn used it too. The model named on this turn is "
+                + "the one that answered."
         case .unknown:
             return "This turn carries a note recorded by a newer version of Vervellum."
         }
