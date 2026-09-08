@@ -202,14 +202,25 @@ final class ResearchRunner: ResearchRunning {
     /// exactly why the *evidence* is not summarised the same way: only the answer cites,
     /// and it must have the sources themselves.
     private static func digest(of sources: [Source]) -> String {
-        sources.prefix(40).enumerated().map { index, source in
+        // `suffix`, not `prefix`. This list is cumulative, so once several engines over
+        // several rounds push it past the cap, taking from the front would show a later
+        // planner the round-one material it has already planned against and hide what the
+        // round before it just found — the opposite of reading the gaps.
+        sources.suffix(40).enumerated().map { index, source in
             let snippet = source.snippet.prefix(200)
             return "\(index + 1). \(source.title) — \(snippet)"
         }.joined(separator: "\n")
     }
 
-    /// The most searches one turn may run. Each is a billed request, and past three or
-    /// four the marginal source rarely changes the answer.
+    /// The most searches one *plan* may ask for. Past three or four the marginal source
+    /// rarely changes the answer.
+    ///
+    /// Not the same as the number of billed requests, which it used to be. A `deep` turn
+    /// puts each planned search to every engine still answering, over as many as
+    /// `maxDeepRounds` rounds, so the ceiling on requests is this times the engines times
+    /// the rounds. That is the cost of a wider net and it is the reader's to choose by
+    /// configuring a second engine — but it should be said plainly here rather than left
+    /// for someone to discover on a metered account.
     static let maxSearches = 4
 
     private let environment: Environment
@@ -379,8 +390,19 @@ final class ResearchRunner: ResearchRunning {
                         trace: trace, transport: transport)
                     try await spare.connect()
                     engines.append(spare)
-                } catch let error as ResearchError where error != ResearchError.cancelled {
-                    trace.warn("Search engine \(profile.displayName) is not usable: \(error.message)")
+                } catch is CancellationError {
+                    throw ResearchError.cancelled
+                } catch let error as ResearchError where error == .cancelled {
+                    throw error
+                } catch {
+                    // Everything else, not only `ResearchError`. The comment above promises
+                    // a spare cannot break a turn the selected engine can serve alone, and
+                    // a catch narrowed to one error type does not keep that promise: the
+                    // transport is entitled to throw `URLError` and the chain's own
+                    // fallback code already says in as many words that a non-`ResearchError`
+                    // can reach it. Only a Stop propagates.
+                    let reason = (error as? ResearchError)?.message ?? String(describing: error)
+                    trace.warn("Search engine \(profile.displayName) is not usable: \(reason)")
                 }
                 try Task.checkCancellation()
             }
@@ -463,17 +485,28 @@ final class ResearchRunner: ResearchRunning {
                         // Structure only — keys, counts and sizes, never a title or a
                         // link — so a result the extractor cannot read is diagnosable
                         // from a log that must not contain results.
-                        trace.log("Search \(attempted + 1) result shape: "
+                        // The same label the stage used, so two engines answering one
+                        // planned search do not emit two identical lines about different
+                        // shapes — which is the case this log exists for.
+                        trace.log(label + " result shape: "
                                   + "\(EvidenceExtractor.shape(of: result))")
                         rawResults.append(result)
                         productive.insert(ObjectIdentifier(engine))
-                    } catch let error as ResearchError where error != ResearchError.cancelled {
-                        // One failed search must not lose the others. Record it and go on;
-                        // if every search fails, the first reason is what the user is told
-                        // below. A cancellation is not a failed search and propagates.
+                    } catch is CancellationError {
+                        throw ResearchError.cancelled
+                    } catch let error as ResearchError where error == .cancelled {
+                        throw error
+                    } catch {
+                        // One failed search must not lose the others, and in `deep` that
+                        // now means the other engines and every earlier round too — a turn
+                        // may have spent a dozen billed requests before reaching here.
+                        // Narrowed to `ResearchError` this caught none of the failures the
+                        // transport can raise on its own. A cancellation is not a failed
+                        // search and still propagates.
+                        let reason = (error as? ResearchError)?.message ?? String(describing: error)
                         trace.warn("Search \(attempted + 1) failed on "
-                                   + "\(engine.backendName): \(error.message)")
-                        searchFailures.append(error.message)
+                                   + "\(engine.backendName): \(reason)")
+                        searchFailures.append(reason)
                     }
                 }
                 // Counted whether the attempts succeeded or failed, and once per planned
@@ -516,7 +549,14 @@ final class ResearchRunner: ResearchRunning {
                     question: question, history: history, today: today,
                     extra: ["search_tool": search.toolDescriptor,
                             "found": Self.digest(of: soFar)])
-                let follow = try await chain.perform("Plan \(round)") { chat in
+                // `try?`, because a later round failing to plan is not a reason to lose
+                // the turn. Everything gathered so far is still good evidence and still
+                // answers the question; the rounds are an improvement on one pass, not a
+                // precondition for any answer at all. The loop already treats an *empty*
+                // plan as a clean stop, and an unparseable one had no such courtesy — so
+                // a malformed reply on round three discarded two rounds of billed
+                // searches, which is the most expensive way this feature could fail.
+                let follow = try? await chain.perform("Plan \(round)") { chat in
                     let object = try await chat.completeJSON(
                         system: ResearchPrompts.deepFollowUp(maxSearches: Self.maxSearches,
                                                              today: today,
@@ -525,7 +565,15 @@ final class ResearchRunner: ResearchRunning {
                         payload: followContext.payload, label: "Plan \(round)")
                     return try PlanParser.parse(object, maxSearches: Self.maxSearches)
                 }
+                // Before the guard, because `try?` swallows the cancellation too: a Stop
+                // during planning must end the turn rather than quietly settle for the
+                // evidence already in hand.
                 try Task.checkCancellation()
+                guard let follow else {
+                    trace.warn("Round \(round) could not be planned; "
+                               + "answering from the evidence already gathered")
+                    break
+                }
 
                 // An empty plan is the documented way to stop, not a failure: a round with
                 // nothing left worth asking should say so rather than fill its quota.

@@ -58,7 +58,6 @@ extension SecretStore {
         return keys
     }
 
-    /// The selected search provider's key, or nil. Same reasoning as `modelKey(for:)`.
     /// Every configured search provider's key, by profile id.
     ///
     /// `deep` research asks more than one engine, because the point of a wider net is a
@@ -70,7 +69,10 @@ extension SecretStore {
     ///
     /// Every profile, not just the selected one, and not filtered by whether a key was
     /// found: an engine that needs no key is configured by having none, so an absent key
-    /// is a fact about the engine rather than a reason to leave it out.
+    /// is a fact about the engine rather than a reason to leave it out. It is also what
+    /// a key nobody entered, or a keychain read that failed, looks like — the dictionary
+    /// cannot tell those apart — so a caller that knows an engine requires one still has
+    /// to check.
     func searchKeys(for settings: ProviderSettings) -> [UUID: String] {
         var keys: [UUID: String] = [:]
         for profile in settings.searchProfiles {
@@ -79,6 +81,7 @@ extension SecretStore {
         return keys
     }
 
+    /// The selected search provider's key, or nil. Same reasoning as `modelKey(for:)`.
     func searchKey(for settings: ProviderSettings) -> String? {
         settings.selectedSearch.flatMap { value(for: $0.secretAccount) }
     }
