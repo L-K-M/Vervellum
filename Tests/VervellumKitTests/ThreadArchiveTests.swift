@@ -523,4 +523,48 @@ final class ThreadArchiveTests: XCTestCase {
         XCTAssertEqual(reopened.library.threads.count, 12)
         XCTAssertEqual(reopened.library.threads.first?.title, "q39")
     }
+
+    /// ...but only in memory. The limit is read from `settings.json`, which a sync tool
+    /// or a hand edit can lower with nobody asking, so writing the trim at load would
+    /// destroy history before the reader had taken a single action. Raising the limit
+    /// and relaunching must bring it all back.
+    func testTheLoadTimeTrimDoesNotTouchTheFile() throws {
+        let writer = ThreadArchive(fileURL: fileURL, debounce: 0)
+        for index in 0..<40 { writer.save(thread("q\(index)")) }
+        writer.flush()
+
+        let narrowed = ThreadArchive(fileURL: fileURL, keptThreads: 12, debounce: 0)
+        XCTAssertEqual(narrowed.library.threads.count, 12)
+
+        // Same file, limit restored: nothing was actually dropped from disk.
+        let restored = ThreadArchive(fileURL: fileURL, keptThreads: 500, debounce: 0)
+        XCTAssertEqual(restored.library.threads.count, 40,
+                       "the load-time trim must be recoverable by raising the limit")
+    }
+
+    /// Changing the limit with history off must change nothing, and must still be
+    /// remembered for whenever history comes back on.
+    ///
+    /// What this pins is that end-to-end behaviour, not the `isHistoryEnabled` guard in
+    /// isolation — and the difference is worth stating rather than implying. In both
+    /// states that guard covers, history off and a read-only document, the library is
+    /// already empty: `load` returns before decoding any threads once it sees a newer
+    /// version stamp, and history off adopts none and erases the file. So `prune(to:)`
+    /// reports nothing dropped and the *second* guard would exit too. Removing the
+    /// first guard today would not fail this test. It is still worth having both,
+    /// because "the library happens to be empty in these states" is a property of code
+    /// elsewhere, and this test is what would catch a refactor that made history-off
+    /// retain its threads in memory.
+    func testLoweringTheLimitWhileHistoryIsOffChangesNothing() throws {
+        let writer = ThreadArchive(fileURL: fileURL, debounce: 0)
+        for index in 0..<30 { writer.save(thread("q\(index)")) }
+        writer.flush()
+
+        let archive = ThreadArchive(fileURL: fileURL, historyEnabled: false,
+                                    keptThreads: 100, debounce: 0)
+        XCTAssertTrue(archive.library.threads.isEmpty, "history off adopts nothing")
+        archive.keptThreads = 10
+        XCTAssertEqual(archive.keptThreads, 10, "the value is remembered, just not applied")
+        XCTAssertTrue(archive.library.threads.isEmpty)
+    }
 }

@@ -64,6 +64,11 @@ final class ThreadStore: ObservableObject {
     var keptThreads: Int {
         get { archive.keptThreads }
         set {
+            // `AppDelegate` assigns this on *every* preference change, because the archive
+            // reads the limit when it is built. Most of those changes are a width drag or
+            // a text-size step, and announcing one as a thread change would redraw the
+            // thread list and its counter for a setting that never moved.
+            guard archive.keptThreads != newValue else { return }
             objectWillChange.send()
             archive.keptThreads = newValue
         }

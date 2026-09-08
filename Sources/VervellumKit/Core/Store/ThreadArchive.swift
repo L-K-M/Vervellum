@@ -121,8 +121,16 @@ final class ThreadArchive {
         // is trimmed on the way in, so the list the reader sees already obeys what they
         // asked for. Never when the document is read-only: re-encoding a newer version
         // is exactly what that flag forbids.
-        if historyEnabled, !isReadOnly, library.prune(to: keptThreads) > 0 {
-            scheduleSave()
+        //
+        // In memory only: the trimmed file lands with the next real write instead. This
+        // is the one destructive path with no user gesture behind it — the limit comes
+        // from `settings.json`, which a sync tool or a hand edit can lower without anyone
+        // asking — and writing at once would make a stray edit unrecoverable before the
+        // reader had done anything. Leaving the file alone means raising the limit and
+        // relaunching gets everything back. Every real write prunes anyway, so the file
+        // still converges; it just does so behind an action somebody took.
+        if historyEnabled, !isReadOnly {
+            _ = library.prune(to: keptThreads)
         }
     }
 
