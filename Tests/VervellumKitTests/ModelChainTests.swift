@@ -116,6 +116,26 @@ final class ModelChainTests: XCTestCase {
         XCTAssertEqual(asked, ["alpha"])
     }
 
+    /// The reset exists to clear a fragment before the next provider starts writing over
+    /// it. A Stop starts no next provider, so it must not run — and nothing pinned that:
+    /// an implementation that fired it from a `defer`, or on any exit from the attempt,
+    /// would pass every other test here while wiping the turn for no reason.
+    func testACancellationDoesNotRunTheReset() async {
+        let profiles = [profile("alpha"), profile("beta")]
+        var resets = 0
+        do {
+            _ = try await chain(profiles).perform("Answer", beforeRetry: { resets += 1 }) { _ in
+                throw ResearchError.cancelled
+            }
+            XCTFail("expected the cancellation to propagate")
+        } catch let error as ResearchError {
+            XCTAssertEqual(error, ResearchError.cancelled)
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+        XCTAssertEqual(resets, 0, "nothing was retried, so nothing was reset")
+    }
+
     /// The payload is measured before a byte leaves the machine, so every provider in
     /// the chain would fail on it identically.
     func testAnUnencodableContextIsNeverRetriedOnAnotherProvider() async {

@@ -405,9 +405,14 @@ final class ProviderSettingsTests: XCTestCase {
             settings.modelChain.map(\.model))
         XCTAssertEqual(settings.modelChain.map(\.model), ["beta", "alpha", "gamma"])
 
-        let stale = ProviderSettings(modelProfiles: profiles, selectedModelID: UUID())
+        // The raw id rather than `stale.selectedModelID`, so this keeps testing the stale
+        // case if the initializer ever starts normalizing an unknown selection down to
+        // the first profile. Read back, it would quietly become the ordinary alpha-first
+        // check and still pass, while the scenario named above lost its coverage.
+        let staleID = UUID()
+        let stale = ProviderSettings(modelProfiles: profiles, selectedModelID: staleID)
         XCTAssertEqual(
-            ProviderSettings.chainOrder(profiles, selectedID: stale.selectedModelID).map(\.model),
+            ProviderSettings.chainOrder(profiles, selectedID: staleID).map(\.model),
             stale.modelChain.map(\.model))
 
         XCTAssertTrue(ProviderSettings.chainOrder([], selectedID: nil).isEmpty)

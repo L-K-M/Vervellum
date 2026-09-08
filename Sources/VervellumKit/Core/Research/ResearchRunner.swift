@@ -29,7 +29,15 @@ final class ResearchRunner: ResearchRunning {
 
     /// Everything a run needs from the outside world, captured once so the settings
     /// cannot change halfway through a turn.
-    struct Environment {
+    ///
+    /// It prints redacted. The note on `modelKeys` used to say "never log an
+    /// `Environment`", which is a rule held by whoever remembers reading it — and this
+    /// value now carries *every* configured provider's key, so the one `print` someone
+    /// reaches for while a turn is failing would spill all of them at once rather than
+    /// one. Both conversions are overridden, not only the debug one: `print`, string
+    /// interpolation and `String(describing:)` take `description`, and it is the
+    /// interpolation in a hurried log line that this is for.
+    struct Environment: CustomStringConvertible, CustomDebugStringConvertible {
         var settings: ProviderSettings
         var modelKey: String?
         /// Every configured model provider's key, by profile id.
@@ -39,10 +47,23 @@ final class ResearchRunner: ResearchRunning {
         /// own. Captured with the rest of the environment, once, so a key edited
         /// mid-turn cannot change which credential a later stage sends.
         /// - Note: every configured provider's live key, not just the selected one.
-        ///   Never log an `Environment`; turn diagnostics name profiles, never keys.
+        ///   Turn diagnostics name profiles, never keys.
         var modelKeys: [UUID: String]
         var searchKey: String?
         var readerKey: String?
+
+        /// Which secrets are present, never what they are. Profile ids are safe to name
+        /// — they are what the trace already uses to talk about providers — and they are
+        /// what makes this description useful enough that nobody wants the real one.
+        var description: String {
+            let ids = modelKeys.keys.map(\.uuidString).sorted().joined(separator: ", ")
+            func held(_ secret: String?) -> String { secret == nil ? "absent" : "present" }
+            return "Environment(settings: \(settings), modelKeys: [\(ids)], "
+                + "modelKey: \(held(modelKey)), searchKey: \(held(searchKey)), "
+                + "readerKey: \(held(readerKey)))"
+        }
+
+        var debugDescription: String { description }
 
         init(settings: ProviderSettings,
              modelKey: String?,
@@ -195,9 +216,12 @@ final class ResearchRunner: ResearchRunning {
         }
 
         // Every model call this turn makes goes through the chain, which is the selected
-        // provider alone when fallback is off. A switch renames the turn's model and
-        // posts a notice, so the attribution shown to the reader is always the provider
-        // that actually produced the words.
+        // provider alone when fallback is off — the gate is in `ProviderSettings`, where
+        // `modelChain` collapses to `[selected]`, and it is named here because a reader
+        // otherwise has to open another file to be sure the off switch is wired to
+        // anything. A switch renames the turn's model and posts a notice, so the
+        // attribution shown to the reader is always the provider that actually produced
+        // the words.
         let chain = ModelChain(profiles: settings.modelChain, keys: environment.modelKeys,
                                trace: trace, transport: transport)
         chain.onSwitch = { [weak self] profile in
