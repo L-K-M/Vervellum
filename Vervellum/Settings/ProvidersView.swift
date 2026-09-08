@@ -247,27 +247,34 @@ struct ProvidersView: View {
                         // A bare indeterminate spinner reads as "busy" and nothing else,
                         // and there is one of these per provider card.
                         .accessibilityLabel("Listing models")
-                } else {
-                    Button {
-                        modelFetches[id]?.cancel()
-                        // Read the row now, not when the task body runs. `profile` is a
-                        // binding into the edited array: the body is enqueued and can run
-                        // after other main-actor work, so `.wrappedValue` inside it would
-                        // be whatever the field held *then* — or, if the row was deleted
-                        // in between, a subscript into an index that is gone. It also
-                        // makes `stillCurrent`'s comparison true to its own comment,
-                        // which says the endpoint is the one the row asked with.
-                        let asked = profile.wrappedValue
-                        modelFetches[id] = Task { await loadModels(for: asked) }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    // `.help` is a hint, not a label: without this the button reads as
-                    // "arrow clockwise", which says nothing about what it does.
-                    .accessibilityLabel("List this provider's models")
-                    .help("Ask this endpoint which models it serves")
-                    .disabled(ProviderSettings.modelListURL(from: profile.wrappedValue.endpoint) == nil)
                 }
+                // Beside the spinner rather than replaced by it. The button already
+                // cancels whatever is in flight before starting again, so leaving it up
+                // costs nothing and buys the way out of a request that is going nowhere:
+                // `sendCheapJSON` bounds the idle clock and the wall clock at thirty
+                // seconds *each*, and they run one after the other, so a host that
+                // accepts the connection and then says nothing can hold this row for the
+                // better part of a minute. Hiding it also took the only labelled action
+                // on the row away from VoiceOver for exactly that window.
+                Button {
+                    modelFetches[id]?.cancel()
+                    // Read the row now, not when the task body runs. `profile` is a
+                    // binding into the edited array: the body is enqueued and can run
+                    // after other main-actor work, so `.wrappedValue` inside it would
+                    // be whatever the field held *then* — or, if the row was deleted
+                    // in between, a subscript into an index that is gone. It also
+                    // makes `stillCurrent`'s comparison true to its own comment,
+                    // which says the endpoint is the one the row asked with.
+                    let asked = profile.wrappedValue
+                    modelFetches[id] = Task { await loadModels(for: asked) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                // `.help` is a hint, not a label: without this the button reads as
+                // "arrow clockwise", which says nothing about what it does.
+                .accessibilityLabel("List this provider's models")
+                .help("Ask this endpoint which models it serves")
+                .disabled(ProviderSettings.modelListURL(from: profile.wrappedValue.endpoint) == nil)
             }
 
             switch catalogues[id] {
@@ -334,8 +341,10 @@ struct ProvidersView: View {
         guard let url = ProviderSettings.modelListURL(from: profile.endpoint) else { return }
         // Cancellation is cooperative: a task cancelled before its first instruction still
         // runs its body. Without this, a fetch retired in that window would go on to write
-        // `.loading`, fail, and decline to write anything else — parking the row on a
-        // spinner with the refresh button hidden and nothing left to clear it.
+        // `.loading`, fail, and decline to write anything else — leaving the row spinning
+        // over a request nobody is waiting for. The refresh button now stays up beside the
+        // spinner, so that state is recoverable rather than terminal; it is still wrong,
+        // and this is what keeps it from happening rather than what rescues it.
         guard !Task.isCancelled else { return }
         catalogues[profile.id] = .loading
         let typed = (keyEntries[profile.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)

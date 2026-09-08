@@ -138,6 +138,17 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertNil(ProviderSettings.modelListURL(from: "https://user:pass@api.example.com/v1"))
         XCTAssertNil(ProviderSettings.modelListURL(from: ""))
         XCTAssertNil(ProviderSettings.modelListURL(from: "not a url"))
+        // The two shapes that actually arrive in this field, neither of which the rows
+        // above reach: `URL(string:)` throws out "" and "not a url" on its own, so those
+        // never exercise the validator at all. A schemeless host is what provider docs
+        // print — and it is refused, because guessing `https` for someone who may have
+        // meant a local server is a decision this field must not make for them.
+        XCTAssertNil(ProviderSettings.modelListURL(from: "api.example.com/v1"))
+        // A good address wearing the whitespace a copy picked up. Accepted: the paste is
+        // right and the newline is the clipboard's, not the reader's.
+        XCTAssertEqual(ProviderSettings.modelListURL(from: " https://api.example.com/v1\n")?
+            .absoluteString,
+                       "https://api.example.com/v1/models")
     }
 
     /// A local model server has no certificate, exactly like a local SearXNG instance.
@@ -150,6 +161,12 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertEqual(ProviderSettings.modelListURL(from: "http://127.0.0.1:11434/v1")?
             .absoluteString,
                        "http://127.0.0.1:11434/v1/models")
+        // The third spelling those same docs print. `isLoopback` strips the brackets
+        // before comparing, so this is allowed over plain HTTP like the other two — and
+        // an IPv6-only local server is a real setup, not a curiosity.
+        XCTAssertEqual(ProviderSettings.modelListURL(from: "http://[::1]:11434/v1")?
+            .absoluteString,
+                       "http://[::1]:11434/v1/models")
     }
 
     /// Both builders take the same paste, so the address whose questions work has to be
@@ -159,7 +176,14 @@ final class ModelCatalogTests: XCTestCase {
     func testTheListAddressIsTheChatAddressWithItsLastSegmentSwapped() throws {
         for paste in ["https://host.example",
                       "https://host.example/v1",
-                      "https://host.example/v1/chat/completions"] {
+                      "https://host.example/v1/chat/completions",
+                      // A real provider's shape, and the only one here that carries a
+                      // query — without it the comparison below is vacuous, since a
+                      // builder that dropped the query on one side alone would agree
+                      // with itself on every other row in this list. Azure's list is
+                      // unusable without `api-version`, so this is the paste where
+                      // losing it costs something.
+                      "https://r.openai.azure.com/openai/v1/chat/completions?api-version=2024-02"] {
             let chat = try XCTUnwrap(ProviderSettings.chatCompletionsURL(from: paste), paste)
             let list = try XCTUnwrap(ProviderSettings.modelListURL(from: paste), paste)
             XCTAssertEqual(list.host, chat.host, paste)
@@ -168,6 +192,7 @@ final class ModelCatalogTests: XCTestCase {
                            chat.path.replacingOccurrences(of: "/chat/completions",
                                                           with: "/models"),
                            paste)
+            XCTAssertEqual(list.query, chat.query, paste)
         }
     }
 
@@ -234,6 +259,13 @@ final class ModelCatalogTests: XCTestCase {
             HTTPTransport.getRequest(url: url, timeout: ModelCatalogClient.listTimeout).timeoutInterval,
             ModelCatalogClient.listTimeout)
         XCTAssertLessThan(ModelCatalogClient.listTimeout, HTTPTransport.deadline)
+        // What these two do not prove, said out loud rather than left to be discovered:
+        // that `fetch()` passes `listTimeout` at all. It does — `sendCheapJSON(within:)`
+        // in `ModelCatalog.swift` — but the only way to *test* it is to watch the request
+        // the client actually builds, and `HTTPTransport` has no seam to watch through.
+        // A `fetch` that dropped the argument would keep both assertions above green and
+        // hold this row for the generation-sized deadline. That seam is its own change,
+        // wanted by three branches now.
     }
 
     // MARK: The reply
