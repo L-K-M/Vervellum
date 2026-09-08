@@ -17,7 +17,10 @@ Vervellum makes network requests in exactly three cases, each with a fixed purpo
 
   If that provider fails — no response, a rejected key, an error — the same material is
   sent to the next model provider you have configured, and so on down the list, until
-  one answers. That is **Try the next provider if one fails** in Settings ▸ Providers;
+  one answers. Two failures are the exception and reach nobody else: a question you
+  stopped, and one too large for Vervellum's own size limit. The second is measured
+  before anything leaves the machine and the limit is the same whichever provider is
+  next, so there is no second attempt to make. That is **Try the next provider if one fails** in Settings ▸ Providers;
   it is on by default and only ever reaches providers you configured yourself. Turn it
   off and a failing provider fails the question instead. When it happens the turn says
   so, and the model recorded on the turn is the one that actually answered. A question

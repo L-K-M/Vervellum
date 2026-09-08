@@ -227,6 +227,15 @@ struct ProviderSettings: Equatable, Codable {
     /// answered and carries a `modelFellBack` notice, because "which model said this"
     /// is part of what an answer means here. Off restores the single-provider
     /// behaviour, where a failing provider fails the turn.
+    ///
+    /// It governs *failures*, not configuration. `problems(hasModelKey:...)` still runs
+    /// against the selection alone and still fails the turn before a chain exists, so an
+    /// empty endpoint or model name on the selected provider is a turn that never
+    /// starts — even with a complete spare beside it. That is the boundary, and it is
+    /// deliberate: the picker points at that provider, so a blank field there is
+    /// something to go and fix rather than weather to route around. A key is not part of
+    /// it; a local server takes none, and `problems` ignores `hasModelKey` for exactly
+    /// that reason.
     var modelFallback: Bool
 
     /// How much of each source is read. See `PageReadingMode`.

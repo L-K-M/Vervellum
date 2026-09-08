@@ -143,7 +143,7 @@ final class ModelChain {
                 if firstError == nil { firstError = error }
                 trace.warn("\(label) failed on \(profile.displayName): \(error.message)")
                 index += 1
-                guard let next = nextUsableProfile() else { break }
+                guard let next = nextUsableProfile(after: label) else { break }
                 beforeRetry?()
                 trace.log("\(label): trying \(next.displayName)")
             } catch let error as ResearchError {
@@ -207,11 +207,17 @@ final class ModelChain {
     // MARK: Links
 
     /// Advances past any profile that cannot be reached and returns the next that can.
-    private func nextUsableProfile() -> ModelProfile? {
+    ///
+    /// Takes the stage label only to log with it. The same event — a profile passed over
+    /// — is reported from two places, and this was the one that said "Skipping alpha"
+    /// with nothing to say which stage was doing the skipping. A trace read by somebody
+    /// asking "why did it answer from the wrong model" is filtered by stage; a line
+    /// without one is a line they will not see.
+    private func nextUsableProfile(after label: String) -> ModelProfile? {
         while index < profiles.count {
             let profile = profiles[index]
             if client(for: profile) != nil { return profile }
-            trace.log("Skipping \(profile.displayName), it is not configured")
+            trace.log("\(label): skipping \(profile.displayName), it is not configured")
             index += 1
         }
         return nil
