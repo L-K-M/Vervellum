@@ -157,8 +157,23 @@ final class PreferencesTests: XCTestCase {
         XCTAssertNotEqual(preferences.keptThreads, 25,
                           "the starting value must differ, or the assertion below passes "
                           + "whether or not anything was forwarded")
+        for index in 0..<40 { store.save(thread("q\(index)")) }
+        XCTAssertEqual(store.library.threads.count, 40)
+
         preferences.keptThreads = 25
         XCTAssertEqual(store.keptThreads, 25)
+        // The number arriving is half the contract. An empty store would have asserted
+        // the forwarding and nothing about what it is for — the pane promises the drop
+        // takes effect now, so the list the pane is looking at has to have shrunk.
+        XCTAssertEqual(store.library.threads.count, 25,
+                       "the forwarded limit must prune, and the store's own view of the "
+                       + "library must show it")
+    }
+
+    private func thread(_ question: String) -> ResearchThread {
+        var thread = ResearchThread()
+        thread.turns = [ResearchTurn(question: question)]
+        return thread
     }
 
     /// The default-versus-floor distinction rests entirely on an absent key reading as

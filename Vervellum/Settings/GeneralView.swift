@@ -136,8 +136,8 @@ struct GeneralView: View {
                             Text("\(limit) threads").tag(limit)
                         }
                     }
-                    .help("Older threads past this are deleted. Lowering it takes effect now, "
-                          + "not at the next question.")
+                    .help("Threads past this are deleted immediately and permanently when "
+                          + "the limit is lowered — not at the next question.")
                 }
                 HStack {
                     Text("\(store.library.threads.count) thread\(store.library.threads.count == 1 ? "" : "s") stored")

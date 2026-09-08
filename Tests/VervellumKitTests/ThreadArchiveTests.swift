@@ -62,6 +62,20 @@ final class ThreadLibraryTests: XCTestCase {
         XCTAssertEqual(library.search("nothing here").count, 0)
         XCTAssertEqual(library.search("   ").count, 2)
     }
+
+    /// The floor lives in `prune(to:)`, not only in the preference that usually feeds
+    /// it. A caller that reaches the library directly — a settings file read by another
+    /// build, a future front end — must not be able to ask for zero and get an erased
+    /// history, and must not be able to ask for a million and get a different answer
+    /// than the ceiling gives.
+    func testPruningClampsSoZeroCannotEraseAndTheCeilingHolds() {
+        var library = ThreadLibrary()
+        library.threads = (0..<15).map { thread("q\($0)") }
+        XCTAssertEqual(library.prune(to: 0), 5, "the floor of ten applies, not the zero")
+        XCTAssertEqual(library.threads.count, 10)
+        XCTAssertEqual(library.prune(to: 50_000), 0, "above the ceiling there is nothing to drop")
+        XCTAssertEqual(library.threads.count, 10)
+    }
 }
 
 final class ThreadArchiveTests: XCTestCase {
