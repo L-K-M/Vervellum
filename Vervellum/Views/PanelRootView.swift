@@ -37,6 +37,18 @@ struct PanelRootView: View {
     /// would mean typing `/new` and pressing Return filled the field instead of starting
     /// a thread — the command would become harder to run, not easier.
     @State private var completionIndex: Int?
+
+    /// The row the pointer is over, kept apart from the keyboard's choice.
+    ///
+    /// One index for both meant leaving the list with the mouse cleared a highlight the
+    /// arrow keys had put there — a trackpad brushed on the way past, and Return quietly
+    /// went back to declining the half-typed command. The pointer still wins while it is
+    /// inside the list, so the two can never disagree about what Return would take; it
+    /// just no longer destroys the other one's answer on the way out.
+    @State private var hoverIndex: Int?
+
+    /// What is highlighted, and what Return would accept.
+    private var effectiveCompletionIndex: Int? { hoverIndex ?? completionIndex }
     /// Whether the thread is scrolled to its end. Streams auto-scroll only while
     /// pinned, so reading back during an answer is never undone by the next token.
     @State private var isPinnedToBottom = true
@@ -189,7 +201,9 @@ struct PanelRootView: View {
                 // Any edit invalidates the highlight: the list is filtered by what has
                 // been typed, so an index kept across a keystroke could point past the
                 // end of the shorter list, or at a command the user has just filtered out.
+                // Both of them: the pointer's row is an index into the same list.
                 completionIndex = nil
+                hoverIndex = nil
             }
             .onChange(of: engine.thread.turns.count) { _, _ in
                 scrollToBottom(proxy)
@@ -253,8 +267,8 @@ struct PanelRootView: View {
             }
             if let completions = visibleCompletions {
                 CommandCompletionsView(completions: completions,
-                                       selected: completionIndex,
-                                       onHover: { completionIndex = $0 }) { name in
+                                       selected: effectiveCompletionIndex,
+                                       onHover: { hoverIndex = $0 }) { name in
                     accept(completion: name)
                 }
             }
@@ -299,7 +313,8 @@ struct PanelRootView: View {
                 }
                 CircularComposerButton(symbol: "arrow.up",
                                        tint: PanelTheme.Palette.accent,
-                                       help: engine.isRunning ? "Ask next" : "Ask",
+                                       help: unfinishedCommandHelp
+                                           ?? (engine.isRunning ? "Ask next" : "Ask"),
                                        isEnabled: isAskable,
                                        action: { submit(draft) })
             }
@@ -332,6 +347,16 @@ struct PanelRootView: View {
     /// because a button can show the state and a key press cannot.
     private var isAskable: Bool {
         !isDraftBlank && !ComposerCommand.isUnfinishedCommand(draft)
+    }
+
+    /// Why the send button is dim, when it is dim for something the reader can fix.
+    ///
+    /// The same sentence `submit` speaks, deliberately: grey says a button is off, never
+    /// what would turn it on, and a reader who cannot hear the announcement is exactly
+    /// the one left looking at it.
+    private var unfinishedCommandHelp: String? {
+        guard !isDraftBlank, ComposerCommand.isUnfinishedCommand(draft) else { return nil }
+        return "Finish the command name"
     }
 
     private var isDraftBlank: Bool {
@@ -456,10 +481,13 @@ struct PanelRootView: View {
 
     private struct CommandCompletionsView: View {
         let completions: [ComposerCommand.Entry]
-        /// The keyboard-highlighted row, or nil while the user is still typing.
+        /// The highlighted row — the pointer's while it is inside, otherwise the
+        /// keyboard's — or nil while the user is still typing.
         var selected: Int?
         /// Pointing at a row highlights it, so the mouse and the arrow keys cannot
-        /// disagree about which command Return would take.
+        /// disagree about which command Return would take. Reports the *pointer's* row
+        /// only; the caller keeps the keyboard's separately, so leaving the list hands
+        /// the highlight back rather than throwing it away.
         var onHover: (Int?) -> Void = { _ in }
         var onSelect: (String) -> Void
 
@@ -509,7 +537,8 @@ struct PanelRootView: View {
             .accessibilityLabel("Command completions")
             // The container is the reliable "the mouse left" signal: its hover stays true
             // over any row and over the padding between them, so moving between rows
-            // never clears while leaving the list always does.
+            // never clears while leaving the list always does. What that clears is the
+            // pointer's claim alone — a keyboard highlight underneath it survives.
             .onHover { inside in if !inside { onHover(nil) } }
             .background(PanelTheme.Palette.cardFill,
                         in: RoundedRectangle(cornerRadius: PanelTheme.Radius.card, style: .continuous))
@@ -718,7 +747,7 @@ struct PanelRootView: View {
     /// Return from the composer: take the highlighted command, or ask.
     private func submitFromComposer() {
         if let completions = visibleCompletions,
-           let index = completionIndex, completions.indices.contains(index) {
+           let index = effectiveCompletionIndex, completions.indices.contains(index) {
             accept(completion: completions[index].name)
             return
         }
@@ -736,9 +765,16 @@ struct PanelRootView: View {
         guard let completions = visibleCompletions, !completions.isEmpty else {
             return recall(up)
         }
-        completionIndex = ComposerCommand.moveSelection(completionIndex, up: up,
-                                                        count: completions.count)
-        announceSelection(in: completions)
+        // Stepping from whatever is highlighted, including a row the pointer put there —
+        // ↓ from a hovered row should reach the next one, not the top. The hover is then
+        // dropped, because a pointer that is no longer moving must not keep out-voting
+        // the keys: it sends no further events, so without this the arrows would walk an
+        // index nothing draws. Moving the mouse again claims the highlight back.
+        let moved = ComposerCommand.moveSelection(effectiveCompletionIndex, up: up,
+                                                  count: completions.count)
+        hoverIndex = nil
+        completionIndex = moved
+        announceSelection(moved, in: completions)
         return true
     }
 
@@ -753,8 +789,8 @@ struct PanelRootView: View {
     /// Called from the arrow keys alone, not from every write to `completionIndex`. The
     /// mouse writes it too, and announcing there would talk over VoiceOver every time the
     /// pointer crossed a row — noise aimed squarely at the people this is for.
-    private func announceSelection(in completions: [ComposerCommand.Entry]) {
-        guard let index = completionIndex, completions.indices.contains(index) else { return }
+    private func announceSelection(_ index: Int?, in completions: [ComposerCommand.Entry]) {
+        guard let index, completions.indices.contains(index) else { return }
         announce("/\(completions[index].name), \(index + 1) of \(completions.count)")
     }
 

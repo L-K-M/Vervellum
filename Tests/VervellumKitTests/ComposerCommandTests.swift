@@ -184,6 +184,14 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertEqual(ComposerCommand.moveSelection(Int.max, up: false, count: 2), 1)
         XCTAssertEqual(ComposerCommand.moveSelection(9, up: true, count: 2), 0,
                        "clamped to the last row, then stepped up from there")
+        // The other extreme of the same guarantee. The up path is safe because it clamps
+        // through `min` *before* subtracting; a refactor that mirrored the down path's
+        // shape as `index + 1 > last` would behave identically for 9 and trap here.
+        XCTAssertEqual(ComposerCommand.moveSelection(Int.max, up: true, count: 2), 0)
+        // `Int.min + 1` does not overflow, so the down path survives — but say so rather
+        // than leave the bottom end of "any integer" resting on that being noticed.
+        XCTAssertEqual(ComposerCommand.moveSelection(Int.min, up: false, count: 2), 0)
+        XCTAssertNil(ComposerCommand.moveSelection(Int.min, up: true, count: 2))
     }
 
     // MARK: What Return does with a list on screen

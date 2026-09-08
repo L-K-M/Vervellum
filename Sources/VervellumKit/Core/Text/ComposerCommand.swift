@@ -162,6 +162,11 @@ enum ComposerCommand: Equatable {
     /// Pure and here rather than in the view for the same reason as `moveSelection` —
     /// the rule is the interesting part, and it should be testable on both platforms.
     static func isUnfinishedCommand(_ input: String) -> Bool {
+        // Correct only while `completions(for:)` answers non-nil exclusively for a bare
+        // command word still being typed — which is what makes an unknown slash word like
+        // `/asdf hello` fall straight through to `parse` and be asked as a question. If
+        // that matching ever widens (arguments, substrings, fuzzy), a real question can
+        // land below this line and be withheld instead of sent. Widen it, revisit this.
         guard completions(for: input) != nil else { return false }
         // `parse` already returns nil for a command that is complete but wants an
         // argument (`/direct`), and the composer handles that by keeping the text.
