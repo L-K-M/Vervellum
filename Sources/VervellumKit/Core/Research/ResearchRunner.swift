@@ -58,6 +58,13 @@ final class ResearchRunner: ResearchRunning {
         ///   Turn diagnostics name profiles, never keys.
         var modelKeys: [UUID: String]
         var searchKey: String?
+        /// Every configured search provider's key, by profile id.
+        ///
+        /// `deep` research asks more than one engine, and each has its own slot.
+        /// Captured with the rest of the environment for the same reason `modelKeys` is:
+        /// a key edited while the turn runs must not change which credential a later
+        /// round sends.
+        var searchKeys: [UUID: String]
         var readerKey: String?
 
         /// Which secrets are present, never what they are. Profile ids are safe to name
@@ -74,6 +81,7 @@ final class ResearchRunner: ResearchRunning {
         /// `ProviderSettings` later cannot leak through here by default.
         var description: String {
             let ids = modelKeys.keys.map(\.uuidString).sorted().joined(separator: ", ")
+            let searchIDs = searchKeys.keys.map(\.uuidString).sorted().joined(separator: ", ")
             func held(_ secret: String?) -> String { secret == nil ? "absent" : "present" }
             return "Environment(model: \(settings.modelName), "
                 // The switch as well as the count. `modelChain` is the *effective* chain,
@@ -82,6 +90,7 @@ final class ResearchRunner: ResearchRunning {
                 // never tried" is the likeliest question this rendering has to answer.
                 + "fallback: \(settings.modelFallback), "
                 + "providers: \(settings.modelChain.count), modelKeys: [\(ids)], "
+                + "searchKeys: [\(searchIDs)], "
                 + "modelKey: \(held(modelKey)), searchKey: \(held(searchKey)), "
                 + "readerKey: \(held(readerKey)))"
         }
@@ -102,11 +111,22 @@ final class ResearchRunner: ResearchRunning {
              modelKey: String?,
              searchKey: String?,
              readerKey: String? = nil,
-             modelKeys: [UUID: String]? = nil) {
+             modelKeys: [UUID: String]? = nil,
+             searchKeys: [UUID: String]? = nil) {
             self.settings = settings
             self.modelKey = modelKey
             self.searchKey = searchKey
             self.readerKey = readerKey
+            // Same shape as `modelKeys` below, and for the same callers: a test or the
+            // single-provider construction that knows only the selected engine still
+            // gets a map with that engine's key in it rather than an empty one.
+            if let searchKeys {
+                self.searchKeys = searchKeys
+            } else if let searchKey, let selected = settings.selectedSearch {
+                self.searchKeys = [selected.id: searchKey]
+            } else {
+                self.searchKeys = [:]
+            }
             // Callers that know only about the selected provider — the tests, and the
             // single-provider construction the Linux front end uses — still get a
             // working one-element chain rather than a chain with no key in it.
@@ -132,7 +152,8 @@ final class ResearchRunner: ResearchRunning {
                       modelKey: secrets.modelKey(for: settings),
                       searchKey: secrets.searchKey(for: settings),
                       readerKey: secrets.value(for: .readerAPIKey),
-                      modelKeys: secrets.modelKeys(for: settings))
+                      modelKeys: secrets.modelKeys(for: settings),
+                      searchKeys: secrets.searchKeys(for: settings))
         }
     }
 
