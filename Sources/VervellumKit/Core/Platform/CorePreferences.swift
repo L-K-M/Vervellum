@@ -13,6 +13,11 @@ import Foundation
 /// Numeric values are clamped **on read as well as on write**, so a settings file
 /// corrupted by a crash, an interrupted sync, or a hand edit cannot produce a state the
 /// user can neither see nor fix.
+///
+/// Not thread-safe, and not meant to be: this is read and written from the UI thread on
+/// both platforms. Two properties below keep mutable state across calls — the provider
+/// memo and the warned-about theme text — and neither is synchronized, because a settings
+/// object touched from two threads would have worse problems than those two.
 final class CorePreferences {
 
     /// Invoked after any change, so a platform can republish it — `objectWillChange` on

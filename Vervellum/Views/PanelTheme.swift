@@ -144,7 +144,9 @@ enum PanelTheme {
         /// A legibility scrim behind the content column. Liquid Glass over an
         /// arbitrary desktop — a photo, a bright IDE, a video — cannot be relied on to
         /// keep 13pt text readable, and the system does not add one for you. A theme with
-        /// its own opaque surface sets this transparent, because it no longer needs one.
+        /// its own surface does *not* clear this: `PanelBackground` paints one or the
+        /// other, never both, so the scrim costs nothing while a surface is set and is
+        /// what stands in the moment the reader hands `surface` back to Automatic.
         static var scrim: Color { Color(theme.scrim) }
 
         /// The panel's own surface, or nil to use the system material behind it.
@@ -203,10 +205,13 @@ struct PanelBackground: View {
 
     /// What sits behind the surface.
     ///
-    /// A theme with an opaque surface still gets one: the panel's corners are rounded, so
-    /// something has to be behind them, and the blur is cheaper than it looks once it is
-    /// covered. `Reduce Transparency` still wins over the theme, because that setting is
-    /// an accessibility request rather than a preference.
+    /// A theme with an opaque surface still gets one, even though that surface fills the
+    /// same rounded rectangle and hides it completely. `surface` is an optional the
+    /// reader toggles and an alpha they drag, so making the view tree depend on either
+    /// would build and tear down an `NSVisualEffectView` in the middle of that drag —
+    /// a stutter, traded for a blur nothing is looking at. `Reduce Transparency` still
+    /// wins over the theme, because that setting is an accessibility request rather than
+    /// a preference.
     ///
     /// Three cases, three renderings. That is the whole contract: the picker offers three
     /// names, so two of them drawing the same pixels would read as a broken setting rather

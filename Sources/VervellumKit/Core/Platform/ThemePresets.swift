@@ -111,6 +111,11 @@ extension PanelPalette {
         hairline: ThemeColor(0.35, 0.43, 0.46, 0.30),
         scrim: ThemeColor(0, 0, 0, 0.40),
         supported: ThemeColor(0.52, 0.60, 0.0),
+        // Solarized's own red and orange, and the closest pair of verdict colours in this
+        // file: different, but not by much, and the contract at the top only asks that no
+        // two be *equal*. Kept as the palette states them — a Solarized that spreads its
+        // red and orange apart is not Solarized — and written down so the next edit here
+        // knows this is the tight pair rather than discovering it on screen.
         contradicted: ThemeColor(0.86, 0.20, 0.18),
         mixed: ThemeColor(0.80, 0.29, 0.09),
         insufficient: ThemeColor(0.15, 0.55, 0.82),

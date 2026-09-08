@@ -93,11 +93,17 @@ struct ThemeColor: Codable, Equatable, Hashable {
             return
         }
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        func component(_ key: CodingKeys, _ fallback: Double) -> Double {
-            ((try? container.decodeIfPresent(Double.self, forKey: key)) ?? nil) ?? fallback
+        // Absent is lenient; the wrong type is not. A missing `alpha` means opaque, so it
+        // takes the default — but `"red": "crimson"` is not a red of zero, and swallowing
+        // it left the other two channels standing and drew a colour the file never asked
+        // for, most of the way to black. Throwing hands the whole field to
+        // `PanelPalette`'s `try?`, which drops it to the role's own default: the answer
+        // the string form above already gives for `"accent": "crimson"`.
+        func component(_ key: CodingKeys, _ fallback: Double) throws -> Double {
+            try container.decodeIfPresent(Double.self, forKey: key) ?? fallback
         }
-        self.init(component(.red, 0), component(.green, 0), component(.blue, 0),
-                  component(.alpha, 1))
+        try self.init(component(.red, 0), component(.green, 0), component(.blue, 0),
+                      component(.alpha, 1))
     }
 
     /// Perceived brightness, 0…1, by the usual luma weights.

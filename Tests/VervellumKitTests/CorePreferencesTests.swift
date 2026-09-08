@@ -255,6 +255,9 @@ final class CorePreferencesTests: XCTestCase {
 
     /// Losing a theme is a bad afternoon; refusing to launch is worse.
     func testAStoredThemeThatWillNotParseReadsAsEmber() {
-        XCTAssertEqual(preferences(["panelPalette": "{ not json"]).panelPalette, .ember)
+        // The key by name rather than by literal: a rename would otherwise leave this
+        // test seeding a key nothing reads, and it would still pass.
+        XCTAssertEqual(preferences([CorePreferences.Key.panelPalette: "{ not json"]).panelPalette,
+                       .ember)
     }
 }

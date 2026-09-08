@@ -235,6 +235,34 @@ final class PanelPaletteTests: XCTestCase {
             try JSONDecoder().decode([ThemeColor].self, from: Data(#"["nonsense"]"#.utf8)))
     }
 
+    /// A component of the wrong type is not two thirds of a colour. `"red": "crimson"`
+    /// used to read as a red of zero and leave the other two channels standing, so the
+    /// field drew as something the file never asked for — most of the way to black, and
+    /// on `accent` that is a link nobody can see. It throws now, which is what
+    /// `PanelPalette`'s lenient decoder turns into that field's own default: the same
+    /// answer the string form gets for `"accent": "crimson"`.
+    func testAComponentOfTheWrongTypeDropsTheWholeColour() throws {
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ThemeColor.self,
+            from: Data(#"{"red":"crimson","green":0.8,"blue":0.2}"#.utf8)))
+        let palette = try XCTUnwrap(
+            PanelPalette.decode(#"{"accent":{"red":"crimson","green":0.8,"blue":0.2}}"#))
+        XCTAssertEqual(palette.accent, PanelPalette.ember.accent,
+                       "the role's default, not a colour built from the half that parsed")
+        let text = try XCTUnwrap(
+            PanelPalette.decode(#"{"primaryText":{"red":"crimson","green":0.8,"blue":0.2}}"#))
+        XCTAssertNil(text.primaryText, "an optional colour goes back to Automatic")
+    }
+
+    /// A key that is simply missing still takes the component default, because that is a
+    /// different thing from a key that is wrong: `{"red":1,"green":0,"blue":0}` is opaque
+    /// red, not a document to throw out.
+    func testAnAbsentAlphaIsStillOpaque() throws {
+        let colour = try JSONDecoder().decode(
+            ThemeColor.self, from: Data(#"{"red":1,"green":0,"blue":0}"#.utf8))
+        XCTAssertEqual(colour, ThemeColor(1, 0, 0))
+    }
+
     /// And the object form `encode` actually writes still round-trips unchanged.
     func testTheEncodedFormStillDecodesToItself() throws {
         let colour = ThemeColor(0.2, 0.4, 0.6, 0.8)

@@ -257,7 +257,11 @@ struct AppearanceView: View {
             if let current = stored.wrappedValue {
                 ColorPicker("", selection: Binding(
                     get: { Color(current) },
-                    set: { stored.wrappedValue = $0.themeColor ?? current }),
+                    // The live value on the failure path, not the `current` this body was
+                    // built with. A drag can land two sets before SwiftUI re-renders, so
+                    // a conversion that fails on the second would have written the colour
+                    // from before the first — undoing a change rather than declining one.
+                    set: { stored.wrappedValue = $0.themeColor ?? stored.wrappedValue }),
                             supportsOpacity: true)
                     .labelsHidden()
                     // The label is hidden from the eye, not from VoiceOver: without this
