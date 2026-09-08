@@ -21,7 +21,8 @@ jobs:
   review:
     name: Review PR with GLM 5.3
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A 15-minute inactivity window plus adaptive retries can exceed 30 minutes.
+    timeout-minutes: 90
     # pull_request_target exposes repository secrets and a write-capable token.
     # Never run this privileged job for branches from untrusted forks.
     if: >-
@@ -33,16 +34,16 @@ jobs:
       - name: Z.ai Code Review
         if: ${{ env.ZAI_API_KEY != '' }}
         # Pin privileged third-party actions to an immutable commit.
-        uses: L-K-M/zai-code-review@7d0ce7b0c226c70eed194615130fa5b632ba4798
+        # 8e718ac = v0.0.13. Verify before bumping:
+        #   git ls-remote https://github.com/L-K-M/zai-code-review 'refs/tags/v0.0.13^{}'
+        uses: L-K-M/zai-code-review@8e718ac45f13c5ae0e57b19a00afd54d42e5b8f7
         with:
           ZAI_API_KEY: ${{ env.ZAI_API_KEY }}
-          # Flash rather than plain glm-5.3. The action sends no `reasoning_effort`,
-          # and that parameter defaults to `max` -- so every review ran GLM-5.3 at
-          # maximum reasoning effort, non-streaming and with no token cap. Requests
-          # were accepted and then never answered inside the action's hardcoded
-          # 300s per-attempt timeout (see PR #70, run 34097800960: two clean 300s
-          # timeouts on an 18,958-char single-chunk prompt, then HTTP 429).
           ZAI_MODEL: glm-5.3-flash
+          ZAI_REASONING_EFFORT: high
+          ZAI_MAX_OUTPUT_TOKENS: 32768
+          ZAI_REQUEST_TIMEOUT_SECONDS: 900
+          MAX_CHUNK_CHARS: 25000
           ZAI_REVIEWER_NAME: GLM 5.3 Flash Code Review
           GITHUB_TOKEN: ${{ github.token }}
 
