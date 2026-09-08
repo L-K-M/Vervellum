@@ -47,11 +47,15 @@ struct ProvidersView: View {
 
     /// The live model-list fetch for each row, so a newer one can retire an older.
     ///
-    /// `stillCurrent` asks whether the row still points where it did, which two fetches
-    /// made with the *same* address and key both answer yes to — so the one that finishes
-    /// last wins even if it started first, and a slow failure can overwrite a fast
-    /// success with "Could not list models". Reachable because clearing the catalogue on
-    /// a key edit brings the refresh button back while the first fetch is still running.
+    /// `stillCurrent` alone was not enough: two fetches made with the *same* address and
+    /// key both answered yes to it, so the one that finished last won even if it started
+    /// first, and a slow failure could overwrite a fast success with "Could not list
+    /// models". It was reachable, because clearing the catalogue on a key edit brings the
+    /// refresh button back while the first fetch is still running.
+    ///
+    /// It is not reachable now, and that is what this holds: a new fetch cancels the one
+    /// it replaces, and both guards test `Task.isCancelled` on the main actor with no
+    /// suspension before the write, so a superseded task cannot land.
     @State private var modelFetches: [UUID: Task<Void, Never>] = [:]
 
     @State private var status: String?

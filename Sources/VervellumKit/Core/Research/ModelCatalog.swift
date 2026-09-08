@@ -42,7 +42,15 @@ enum ModelCatalog {
             guard seen.insert(name).inserted else { continue }
             names.append(name)
         }
-        return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        // A total order, not just a case-insensitive one. Dedup above is exact, so
+        // `GPT-4o` and `gpt-4o` can both survive — and they compare as the same under a
+        // case-insensitive comparison, which leaves their order to whatever the sort
+        // happened to do. The tie-break makes the list depend on the names alone, which
+        // is the whole claim of the paragraph above.
+        return names.sorted {
+            let order = $0.localizedCaseInsensitiveCompare($1)
+            return order == .orderedAscending || (order == .orderedSame && $0 < $1)
+        }
     }
 
     private static func identifier(in entry: Any) -> String? {
@@ -84,6 +92,10 @@ final class ModelCatalogClient {
     ///   lists nothing is a failure rather than an empty list: silently showing an empty
     ///   picker looks like a bug, and the user needs to know to keep typing.
     func fetch() async throws -> [String] {
+        // The same header `ChatCompletionsClient` builds, deliberately: a key that lists
+        // models and a key that answers questions have to be presented the same way, or
+        // a provider that accepts one refuses the other and the refusal reads as a bad
+        // key. If chat ever learns a second scheme, this has to learn it too.
         var headers: [String: String] = [:]
         if let apiKey { headers["Authorization"] = "Bearer " + apiKey }
         let request = HTTPTransport.getRequest(url: url, headers: headers)

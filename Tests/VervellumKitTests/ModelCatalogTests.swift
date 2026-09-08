@@ -132,7 +132,25 @@ final class ModelCatalogTests: XCTestCase {
                        "http://localhost:11434/v1/models")
     }
 
+    /// The key has to reach the request, and as the same scheme chat uses.
+    func testTheKeyIsSentAsABearerTokenLikeChat() throws {
+        let url = try XCTUnwrap(ProviderSettings.modelListURL(from: "https://api.example.com/v1"))
+        let request = HTTPTransport.getRequest(url: url, headers: ["Authorization": "Bearer k"])
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer k")
+        XCTAssertEqual(request.httpMethod, "GET")
+        // And nothing is attached when there is no key: a local server that takes none
+        // must not be sent an empty credential.
+        XCTAssertNil(HTTPTransport.getRequest(url: url).value(forHTTPHeaderField: "Authorization"))
+    }
+
     // MARK: The reply
+
+    /// Case-variant duplicates both survive an exact dedup, so the ordering between them
+    /// has to come from the names rather than from the sort's internals.
+    func testCaseVariantNamesSortDeterministically() {
+        let body: [String: Any] = ["data": [["id": "gpt-4o"], ["id": "GPT-4o"], ["id": "alpha"]]]
+        XCTAssertEqual(ModelCatalog.parse(body), ["alpha", "GPT-4o", "gpt-4o"])
+    }
 
     func testReadsTheOpenAIShape() {
         let body: [String: Any] = ["object": "list", "data": [
