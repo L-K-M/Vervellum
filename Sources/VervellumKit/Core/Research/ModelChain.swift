@@ -63,7 +63,20 @@ final class ModelChain {
     /// can move on after the answer has already streamed. So the runner asks this
     /// immediately after the stage whose words the reader keeps, rather than recording
     /// whichever provider was last announced.
+    ///
+    /// Cleared at the start of every `perform`, so a caller that reads it too late gets
+    /// nil rather than the previous stage's provider. The two failures are not equal: a
+    /// nil is a blank badge and a tripped assertion, and a stale value is one provider's
+    /// name on another's words with nothing to notice.
+    ///
+    /// Concurrency: written inside `perform`, read between `perform` calls on the same
+    /// task. Serial stages are what make that safe — do not run one chain's stages
+    /// concurrently.
     private(set) var lastAnswered: ModelProfile?
+
+    /// The selection, which is the head by construction. Compared against `lastAnswered`
+    /// to decide whether the answer came from somewhere the reader did not choose.
+    var head: ModelProfile? { profiles.first }
 
     init(profiles: [ModelProfile],
          keys: [UUID: String],
@@ -104,6 +117,7 @@ final class ModelChain {
                     _ body: (ChatCompletionsClient) async throws -> T) async throws -> T {
         var firstError: ResearchError?
         var attempted = 0
+        lastAnswered = nil
 
         while index < profiles.count {
             let profile = profiles[index]

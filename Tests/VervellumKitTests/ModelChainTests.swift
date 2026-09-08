@@ -256,7 +256,8 @@ final class ModelChainTests: XCTestCase {
     /// This follows the last *successful* stage, not the last announcement — and it does
     /// keep moving, which is the whole reason the runner reads it immediately after the
     /// answering stage rather than at the end of the turn. Pinned here so nobody
-    /// mistakes it for a value that freezes itself.
+    /// mistakes it for a value that freezes itself; `perform` clears it on the way in, so
+    /// reading late gets nothing rather than the wrong thing.
     func testTheRecordFollowsEachStageThatSucceeds() async throws {
         let subject = chain([profile("alpha"), profile("beta")])
         _ = try await subject.perform("Answer") { $0.model }
@@ -286,6 +287,27 @@ final class ModelChainTests: XCTestCase {
     func testNothingIsRecordedWhenEveryProviderFails() async {
         let subject = chain([profile("alpha"), profile("beta")])
         _ = try? await subject.perform("Answer") { _ in
+            throw ResearchError.connectionFailed
+        }
+        XCTAssertNil(subject.lastAnswered)
+    }
+
+    /// The head is the selection by construction, and comparing against it is how the
+    /// runner decides whether the answer needs a fallback note at all.
+    func testTheHeadIsTheSelection() {
+        XCTAssertEqual(chain([profile("alpha"), profile("beta")]).head?.model, "alpha")
+        XCTAssertNil(chain([]).head)
+    }
+
+    /// A stage that answered nothing must not leave the previous stage's provider behind
+    /// for a late reader to mistake for its own. Nil is a blank badge and a tripped
+    /// assertion; a stale value is one provider's name on another's words, silently.
+    func testAFailedStageDoesNotInheritTheEarlierRecord() async throws {
+        let subject = chain([profile("alpha")])
+        _ = try await subject.perform("Answer") { $0.model }
+        XCTAssertEqual(subject.lastAnswered?.model, "alpha")
+
+        _ = try? await subject.perform("Assess") { _ in
             throw ResearchError.connectionFailed
         }
         XCTAssertNil(subject.lastAnswered)

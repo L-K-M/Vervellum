@@ -200,14 +200,14 @@ final class ResearchRunner: ResearchRunning {
         // that actually produced the words.
         let chain = ModelChain(profiles: settings.modelChain, keys: environment.modelKeys,
                                trace: trace, transport: transport)
-        // The notice only. Which provider *answered* is settled after the stage that
-        // produced the words, not at the moment the chain moved on: a turn whose answer
-        // streamed from one provider can still fall through to another for the
-        // assessment, and recording the switch would put the second name on the first
-        // one's paragraphs — the exact substitution this app claims not to make.
-        chain.onSwitch = { [weak self] _ in
-            self?.update { $0.addNotice(.modelFellBack) }
-        }
+        // No `onSwitch` handler. Both halves of what the reader is told — the name on
+        // the turn and the note explaining it — are settled after the stage that produced
+        // the words, because both are statements about the answer. A turn whose answer
+        // streamed from the selection can still fall through for the assessment, and a
+        // notice fired there would say "the next provider answered instead" over an
+        // answer the badge correctly credits to the selection. `ModelChain.onSwitch`
+        // remains the chain's own announcement hook; this caller does not need it,
+        // because a switch that did not reach the answer is not news about the answer.
         let today = ResearchContext.todayString()
 
         trace.log("Turn started mode=\(mode == .direct ? "direct" : "research") history=\(history.count)")
@@ -507,7 +507,19 @@ final class ResearchRunner: ResearchRunning {
     /// rest of the time — which is close to the opposite of what a field documented as
     /// "the model that produced the answer" is for.
     private func recordAnsweringModel(from chain: ModelChain) {
-        guard let profile = chain.lastAnswered else { return }
-        update { $0.model = profile.model }
+        guard let profile = chain.lastAnswered else {
+            // Unreachable: every caller sits directly after a `perform` that returned,
+            // and every return writes this. If it ever trips, the wiring is wrong in
+            // exactly the way this function exists to fix, and a blank badge is the only
+            // symptom — so fail where it can be found instead.
+            assertionFailure("The answer streamed but no provider was recorded for it.")
+            return
+        }
+        update { turn in
+            turn.model = profile.model
+            // The note goes with the name, and says what the name shows: the answer came
+            // from somewhere other than the selection.
+            if profile.id != chain.head?.id { turn.addNotice(.modelFellBack) }
+        }
     }
 }
