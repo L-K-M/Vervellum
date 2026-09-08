@@ -164,11 +164,20 @@ final class ComposerCommandTests: XCTestCase {
     }
 
     /// The arrow keys hand themselves to the command list whenever one is on screen, so
-    /// the list disappearing the moment an argument is being typed is what stops ↑/↓ from
-    /// hijacking `/model gpt-4o` and Return from replacing it with `/model `.
-    func testTheListDisappearsOnceAnArgumentIsBeingTyped() {
+    /// what stops ↑/↓ from hijacking `/model gpt-4o` — and Return from replacing it with
+    /// `/model ` — is the list disappearing the moment an argument exists.
+    ///
+    /// The boundary is the first character *of* the argument, not the space before it:
+    /// the input is trimmed before matching, so `/model ` is still just the command word.
+    /// That case is harmless — accepting the completion there rewrites `/model ` as
+    /// `/model `, which changes nothing — and it keeps the list up while the reader is
+    /// deciding whether they meant to type an argument at all.
+    func testTheListDisappearsOnceAnArgumentExists() {
         XCTAssertNotNil(ComposerCommand.completions(for: "/model"))
-        XCTAssertNil(ComposerCommand.completions(for: "/model "))
+        XCTAssertNotNil(ComposerCommand.completions(for: "/model "),
+                        "a trailing space is trimmed away, so this is still the bare command")
+        XCTAssertNil(ComposerCommand.completions(for: "/model g"),
+                     "one character of argument is enough to hand the arrows back")
         XCTAssertNil(ComposerCommand.completions(for: "/model gpt-4o"))
         XCTAssertNil(ComposerCommand.completions(for: "/direct what is the time"))
     }
