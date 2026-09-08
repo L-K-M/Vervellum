@@ -234,6 +234,12 @@ struct ProviderSettings: Equatable, Codable {
     /// The MCP endpoint used when `pageReading` is `.reader`.
     var readerEndpoint: String
 
+    /// One home for the fallback default. It was written out as a literal in five
+    /// places — two initialisers, the lenient decoder, `CorePreferences.Default`, and
+    /// the Settings pane's `@State` — and a default that disagrees with itself across
+    /// a load path is a setting that changes when nobody touched it.
+    static let defaultModelFallback = true
+
     static let defaultSearchEndpoint = "https://api.z.ai/api/mcp/web_search_prime/mcp"
     /// z.ai's Web Reader MCP server, documented at
     /// <https://docs.z.ai/devpack/mcp/reader-mcp-server>. Configurable so any MCP server
@@ -246,7 +252,7 @@ struct ProviderSettings: Equatable, Codable {
          selectedModelID: UUID? = nil,
          searchProfiles: [SearchProfile] = [],
          selectedSearchID: UUID? = nil,
-         modelFallback: Bool = true,
+         modelFallback: Bool = ProviderSettings.defaultModelFallback,
          pageReading: PageReadingMode = .direct,
          readerEndpoint: String = ProviderSettings.defaultReaderEndpoint) {
         self.modelProfiles = modelProfiles
@@ -268,7 +274,7 @@ struct ProviderSettings: Equatable, Codable {
          modelName: String = "",
          searchEndpoint: String = ProviderSettings.defaultSearchEndpoint,
          searchKind: SearchProviderKind = .mcp,
-         modelFallback: Bool = true,
+         modelFallback: Bool = ProviderSettings.defaultModelFallback,
          pageReading: PageReadingMode = .direct,
          readerEndpoint: String = ProviderSettings.defaultReaderEndpoint) {
         let model = ModelProfile(name: "", endpoint: modelEndpoint, model: modelName,
@@ -585,7 +591,8 @@ struct ProviderSettings: Equatable, Codable {
         selectedSearchID = try container.decodeIfPresent(UUID.self, forKey: .selectedSearchID)
         // Absent in anything written before the chain existed, and the default there is
         // the same as the default for a fresh install: on.
-        modelFallback = try container.decodeIfPresent(Bool.self, forKey: .modelFallback) ?? true
+        modelFallback = try container.decodeIfPresent(Bool.self, forKey: .modelFallback)
+            ?? Self.defaultModelFallback
         let rawMode = (try? container.decodeIfPresent(String.self, forKey: .pageReading)) ?? nil
         pageReading = rawMode.flatMap { PageReadingMode(rawValue: $0) } ?? .direct
         readerEndpoint = try container.decodeIfPresent(String.self, forKey: .readerEndpoint)

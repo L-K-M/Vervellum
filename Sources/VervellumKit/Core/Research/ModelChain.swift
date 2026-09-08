@@ -17,10 +17,12 @@ import Foundation
 ///   provider that already failed this turn. Re-testing a dead endpoint before every
 ///   call costs a timeout per stage, and a turn whose plan came from one model and
 ///   whose answer came from another is confusing enough without it alternating.
-/// * **A switch is always visible.** `onSwitch` fires before the retry so the runner can
-///   record the model that is really answering and post a notice. A silent substitution
-///   would put one provider's name on another's words — and this app records the model
-///   on every turn precisely because that attribution matters.
+/// * **A switch is always visible.** `onSwitch` fires before any provider but the head
+///   is used — not on the failure path, since a provider can be reached by skipping an
+///   unusable head rather than by catching a failure — so the runner can record the
+///   model that is really answering and post a notice. A silent substitution would put
+///   one provider's name on another's words, and this app records the model on every
+///   turn precisely because that attribution matters.
 ///
 /// Clients are built lazily rather than up front. Constructing one is cheap, but
 /// *validating* an endpoint is where a half-configured second profile would otherwise
@@ -46,6 +48,13 @@ final class ModelChain {
     /// for the head — that one is the selection the user made, and announcing it as a
     /// change would be noise on every turn.
     var onSwitch: ((ModelProfile) -> Void)?
+
+    /// The profile already announced through `onSwitch`.
+    ///
+    /// A turn calls `perform` once per stage and `index` persists across those calls, so
+    /// without this the provider that answered the plan would be announced again for the
+    /// search and again for the answer.
+    private var announcedID: UUID?
 
     init(profiles: [ModelProfile],
          keys: [UUID: String],
@@ -85,6 +94,7 @@ final class ModelChain {
                 index += 1
                 continue
             }
+            announce(profile)
             attempted += 1
             do {
                 return try await body(client)
@@ -95,7 +105,6 @@ final class ModelChain {
                 guard let next = nextUsableProfile() else { break }
                 beforeRetry?()
                 trace.log("\(label): trying \(next.displayName)")
-                onSwitch?(next)
             }
         }
 
@@ -106,6 +115,25 @@ final class ModelChain {
         }
         guard attempted > 1 else { throw firstError }
         throw ResearchError("All \(attempted) model providers failed. " + firstError.message)
+    }
+
+    /// Announces `profile` unless it is the selection, or has been announced already.
+    ///
+    /// At the point of use rather than on the failure path, because a provider can start
+    /// answering without any failure having been caught: if the *head* cannot build a
+    /// client — an endpoint that will not parse, an empty model name — the loop skips it
+    /// and the next profile answers having never passed through the catch. Announcing
+    /// there left that answer recorded under the selection's name with no notice, which
+    /// is exactly the silent substitution this type's third rule forbids.
+    ///
+    /// Latent rather than live today: `ResearchRunner` checks the selected provider's
+    /// endpoint and model name before building a chain at all, so an unusable head is
+    /// rejected earlier. That is a precondition in another file, and this type's promise
+    /// should not depend on it.
+    private func announce(_ profile: ModelProfile) {
+        guard profile.id != profiles.first?.id, announcedID != profile.id else { return }
+        announcedID = profile.id
+        onSwitch?(profile)
     }
 
     // MARK: Links

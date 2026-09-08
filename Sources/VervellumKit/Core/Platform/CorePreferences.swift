@@ -54,7 +54,7 @@ final class CorePreferences {
         /// question the user has to re-type. It is not a silent substitution: the turn
         /// records the provider that answered and carries a notice saying it happened.
         /// With one provider configured — which is most installs — it changes nothing.
-        static let modelFallback = true
+        static let modelFallback = ProviderSettings.defaultModelFallback
         static let historyEnabled = true
         /// The search-plan and sources trail above each answer.
         static let showProcessTrail = true

@@ -379,6 +379,16 @@ final class ProviderSettingsTests: XCTestCase {
         XCTAssertEqual(settings.modelChain.map(\.model), ["alpha", "beta"])
     }
 
+    /// The same degradation from the other direction: nothing selected at all. It runs
+    /// through `selectedModel`'s `?? modelProfiles.first`, exactly as a stale id does —
+    /// pinned so the two cannot drift apart into separate paths later.
+    func testANilSelectionStillProducesAChain() {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let settings = ProviderSettings(modelProfiles: [alpha, beta], selectedModelID: nil)
+        XCTAssertEqual(settings.modelChain.map(\.model), ["alpha", "beta"])
+    }
+
     func testNoProvidersIsAnEmptyChain() {
         XCTAssertTrue(ProviderSettings(modelProfiles: []).modelChain.isEmpty)
     }

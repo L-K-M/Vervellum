@@ -184,17 +184,63 @@ final class ModelChainTests: XCTestCase {
         XCTAssertEqual(asked, ["alpha", "gamma"])
     }
 
-    /// An endpoint that is not HTTPS never becomes a request.
+    /// An endpoint that is not HTTPS never becomes a request. Asserted on what was
+    /// asked, not only on what came back: a result of "gamma" would also be produced by
+    /// a chain that contacted the insecure endpoint first and moved on.
     func testSkipsAProviderWhoseEndpointIsUnusable() async throws {
         let profiles = [profile("alpha"),
                         ModelProfile.new(name: "insecure", endpoint: "http://elsewhere.example.com",
                                          model: "insecure"),
                         profile("gamma")]
+        var asked: [String] = []
         let result = try await chain(profiles).perform("Plan") { client in
+            asked.append(client.model)
             if client.model == "alpha" { throw ResearchError.connectionFailed }
             return client.model
         }
         XCTAssertEqual(result, "gamma")
+        XCTAssertEqual(asked, ["alpha", "gamma"],
+                       "the insecure endpoint must never be contacted")
+    }
+
+    /// A skipped *head* reaches the next provider without any failure being caught, so
+    /// announcing on the failure path alone left the spare answering under the
+    /// selection's name — the silent substitution the type's third rule forbids.
+    func testAnnouncesTheSpareWhenTheHeadIsSkippedEntirely() async throws {
+        let profiles = [ModelProfile.new(name: "blank", endpoint: "", model: ""),
+                        profile("beta")]
+        let subject = chain(profiles)
+        var switched: [String] = []
+        subject.onSwitch = { switched.append($0.model) }
+        let result = try await subject.perform("Plan") { $0.model }
+        XCTAssertEqual(result, "beta")
+        XCTAssertEqual(switched, ["beta"],
+                       "the provider that actually answered must be announced")
+    }
+
+    /// A turn runs three stages through the same chain. The switch happened once, so it
+    /// is announced once — three notices for one substitution would be noise.
+    func testASwitchIsAnnouncedOncePerTurnNotOncePerStage() async throws {
+        let profiles = [profile("alpha"), profile("beta")]
+        let subject = chain(profiles)
+        var switched: [String] = []
+        subject.onSwitch = { switched.append($0.model) }
+        _ = try await subject.perform("Plan") { client in
+            if client.model == "alpha" { throw ResearchError.connectionFailed }
+            return client.model
+        }
+        _ = try await subject.perform("Search") { $0.model }
+        _ = try await subject.perform("Answer") { $0.model }
+        XCTAssertEqual(switched, ["beta"])
+    }
+
+    /// The head answering is not a switch, and must never be announced as one.
+    func testTheHeadIsNeverAnnounced() async throws {
+        let subject = chain([profile("alpha"), profile("beta")])
+        var switched: [String] = []
+        subject.onSwitch = { switched.append($0.model) }
+        _ = try await subject.perform("Plan") { $0.model }
+        XCTAssertTrue(switched.isEmpty, "the selection answering is not a substitution")
     }
 
     // MARK: Exhaustion
@@ -205,15 +251,22 @@ final class ModelChainTests: XCTestCase {
         let profiles = [profile("alpha"), profile("beta"), profile("gamma")]
         do {
             _ = try await chain(profiles).perform("Plan") { client in
-                throw client.model == "alpha"
-                    ? ResearchError.rejectedCredential(401)
-                    : ResearchError.connectionFailed
+                // Distinguishable per provider: with beta and gamma failing identically,
+                // the assertion below would pass whether the chain keeps the first
+                // reason or concatenates every reason it collected.
+                switch client.model {
+                case "alpha": throw ResearchError.rejectedCredential(401)
+                case "beta": throw ResearchError.rejectedCredential(403)
+                default: throw ResearchError.connectionFailed
+                }
             }
             XCTFail("expected the chain to fail")
         } catch let error as ResearchError {
             XCTAssertTrue(error.message.contains("All 3 model providers failed"), error.message)
             XCTAssertTrue(error.message.contains("HTTP 401"),
                           "the selected provider's reason is the actionable one: \(error.message)")
+            XCTAssertFalse(error.message.contains("HTTP 403"),
+                           "a later provider's reason must not displace the first: \(error.message)")
         } catch {
             XCTFail("expected a ResearchError, got \(error)")
         }

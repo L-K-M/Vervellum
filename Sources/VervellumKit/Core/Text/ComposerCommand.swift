@@ -116,7 +116,7 @@ enum ComposerCommand: Equatable {
         }.joined(separator: "\n")
         // Worth a line only when it can happen: with one provider, or with fallback off,
         // saying nothing is the accurate description of what a failure will do.
-        let chain = settings.modelProfiles.count > 1 && settings.modelFallback
+        let chain = settings.modelChain.count > 1
             ? "\n\nIf one fails the next is tried, in the order above starting from the "
                 + "active one."
             : ""

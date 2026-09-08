@@ -36,7 +36,7 @@ struct ProvidersView: View {
     @State private var searchKeyEntries: [UUID: String] = [:]
     @State private var storedSearchKeys: Set<UUID> = []
 
-    @State private var modelFallback = true
+    @State private var modelFallback = ProviderSettings.defaultModelFallback
 
     @State private var pageReading: PageReadingMode = .direct
     @State private var readerEndpoint = ""
@@ -86,8 +86,8 @@ struct ProvidersView: View {
                 // anything is a question the user has no way to answer.
                 if profiles.count > 1 {
                     Toggle("Try the next provider if one fails", isOn: $modelFallback)
-                        .help("The providers are tried from the selected one downwards, in "
-                              + "the order listed here.")
+                        .help("The selected provider is tried first, then the rest in the "
+                              + "order listed here.")
                     Text(fallbackExplanation)
                         .font(.caption)
                         .foregroundStyle(.secondary)
