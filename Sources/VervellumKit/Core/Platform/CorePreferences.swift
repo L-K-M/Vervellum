@@ -214,10 +214,13 @@ final class CorePreferences {
                 // Falling back is right; falling back in silence is not. "My theme keeps
                 // resetting itself" is unanswerable without knowing a stored value was
                 // there and would not parse.
-                let head = text.prefix(100)
-                FileHandle.standardError.write(Data(
-                    "vervellum warning: the stored theme could not be read and the default "
-                    + "was used. It began: \(head)\n".utf8))
+                // Built as one string first, like `ThreadArchive`'s warning and for the
+                // reason its comment gives: `.utf8` binds tighter than `+`, so applying
+                // it to the last literal of a concatenation is a type error rather than
+                // a byte view of the whole thing.
+                let warning = "vervellum warning: the stored theme could not be read and "
+                    + "the default was used. It began: \(text.prefix(100))\n"
+                FileHandle.standardError.write(Data(warning.utf8))
                 return .ember
             }
             return decoded
