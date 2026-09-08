@@ -34,10 +34,13 @@ final class ResearchRunner: ResearchRunning {
     /// `Environment`", which is a rule held by whoever remembers reading it — and this
     /// value now carries *every* configured provider's key, so the one `print` someone
     /// reaches for while a turn is failing would spill all of them at once rather than
-    /// one. Both conversions are overridden, not only the debug one: `print`, string
-    /// interpolation and `String(describing:)` take `description`, and it is the
-    /// interpolation in a hurried log line that this is for.
-    struct Environment: CustomStringConvertible, CustomDebugStringConvertible {
+    /// one. All three routes out are overridden, not only the debug one: `print`, string
+    /// interpolation and `String(describing:)` take `description` — the interpolation in
+    /// a hurried log line is what this is for — `String(reflecting:)` takes
+    /// `debugDescription`, and `dump()`, a debugger and a crash reporter go round both
+    /// through `Mirror`. Closing two of the three would only have moved the hole.
+    struct Environment: CustomStringConvertible, CustomDebugStringConvertible,
+                        CustomReflectable {
         var settings: ProviderSettings
         var modelKey: String?
         /// Every configured model provider's key, by profile id.
@@ -74,6 +77,16 @@ final class ResearchRunner: ResearchRunning {
         }
 
         var debugDescription: String { description }
+
+        /// The third way this value gets printed, and the one neither description above
+        /// covers. `dump()` — and anything else built on `Mirror`, which is most of what
+        /// a debugger and a crash reporter use — ignores both and walks the stored
+        /// properties instead, which here means every key in the clear. Redacting the
+        /// descriptions and leaving reflection alone would have moved the hole rather
+        /// than closed it, so the mirror shows the same redacted line.
+        var customMirror: Mirror {
+            Mirror(self, children: ["description": description], displayStyle: .struct)
+        }
 
         init(settings: ProviderSettings,
              modelKey: String?,

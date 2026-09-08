@@ -435,6 +435,10 @@ final class ProviderSettingsTests: XCTestCase {
         try secrets.set("beta-key", for: beta.secretAccount)
 
         let keys = secrets.modelKeys(for: settings)
+        // The count as well as the entries: three assertions about three known ids say
+        // nothing about a fourth, and a map with a slot for a profile that is not in the
+        // settings would be a key sent to an endpoint the chain never walks.
+        XCTAssertEqual(keys.count, 2, "two keyed profiles, and nothing else in the map")
         XCTAssertEqual(keys[alpha.id], "alpha-key")
         XCTAssertEqual(keys[beta.id], "beta-key")
         XCTAssertNil(keys[unkeyed.id], "a local server takes no key, and sends no header")

@@ -372,4 +372,24 @@ final class ModelChainTests: XCTestCase {
             XCTFail("expected a ResearchError, got \(error)")
         }
     }
+
+    /// A different sentence from the empty chain's, because it is a different repair.
+    /// Both cases reach the same place — nothing was ever attempted — but a reader
+    /// looking at two providers in Settings who is told none is configured has been sent
+    /// to look for something that is on the screen in front of them.
+    func testAChainOfUnusableProvidersSaysTheyCouldNotBeUsed() async {
+        let profiles = [ModelProfile.new(name: "blank", endpoint: "", model: ""),
+                        ModelProfile.new(name: "unnamed",
+                                         endpoint: "https://alpha.example.com/v1", model: "")]
+        do {
+            _ = try await chain(profiles).perform("Plan") { _ in "unreachable" }
+            XCTFail("expected the chain to fail")
+        } catch let error as ResearchError {
+            XCTAssertTrue(error.message.contains("No model provider could be used"), error.message)
+            XCTAssertFalse(error.message.contains("is configured"),
+                           "two configured providers must not be reported as none: \(error.message)")
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+    }
 }

@@ -54,6 +54,20 @@ final class ResearchEnvironmentTests: XCTestCase {
         }
     }
 
+    /// Reflection, which is the way neither description above is consulted. `dump()`
+    /// walks the stored properties, and a debugger, a crash reporter and most structured
+    /// loggers reach a value the same way — so redacting `description` alone would have
+    /// moved this hole rather than closed it.
+    func testReflectingOverAnEnvironmentReflectsNoKeys() {
+        let (subject, _, _) = environment()
+        var dumped = ""
+        dump(subject, to: &dumped)
+        // Same catch-all as above, and the same reason for not echoing what failed.
+        XCTAssertFalse(dumped.contains("sk-"), "reflection leaked key material")
+        XCTAssertTrue(dumped.contains("modelKey: present"),
+                      "and it still says what the redacted description says")
+    }
+
     /// Redacted is not the same as useless. Which providers had a key, and whether the
     /// search and reader ones were there at all, is what the question "why did this turn
     /// fail" actually needs.
