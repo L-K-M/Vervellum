@@ -67,6 +67,12 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertTrue(ComposerCommand.isBareCommandWord("  /model  "),
                       "outer space is trimmed, so a trailing space is still a bare word")
         XCTAssertFalse(ComposerCommand.isBareCommandWord("/model g"), "an argument ends it")
+        // A newline is trimmed at the edges like a space, because the interior test counts
+        // it as whitespace and the two sets have to agree. They did not: `/h` followed by
+        // Shift-Return closed the list, slipped the withhold, and asked the model "/h".
+        XCTAssertTrue(ComposerCommand.isBareCommandWord("/h\n"), "a trailing newline is an edge")
+        XCTAssertTrue(ComposerCommand.isBareCommandWord("\n/h"), "so is a leading one")
+        XCTAssertFalse(ComposerCommand.isBareCommandWord("/model\ng"), "an interior one ends it")
         XCTAssertFalse(ComposerCommand.isBareCommandWord("what is swift"))
         XCTAssertFalse(ComposerCommand.isBareCommandWord("and/or, in logic"))
         XCTAssertFalse(ComposerCommand.isBareCommandWord(""))
@@ -222,6 +228,9 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertTrue(ComposerCommand.isHalfTypedCommand("/h"))
         XCTAssertTrue(ComposerCommand.isHalfTypedCommand("/c"))
         XCTAssertTrue(ComposerCommand.isHalfTypedCommand("/"))
+        // The composer is multiline: Shift-Return puts a newline in the field. Return
+        // must still decline the half-typed word underneath it rather than asking it.
+        XCTAssertTrue(ComposerCommand.isHalfTypedCommand("/h\n"))
     }
 
     /// An exact command still submits, or the list would break every command it lists.

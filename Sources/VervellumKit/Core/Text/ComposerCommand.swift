@@ -91,7 +91,7 @@ enum ComposerCommand: Equatable {
     /// nothing has to decide what an empty completion card would look like.
     static func completions(for input: String) -> [Entry]? {
         guard isBareCommandWord(input) else { return nil }
-        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let prefix = String(trimmed.dropFirst()).lowercased()
         // Both sides lowered. Every catalogue name is lowercase today, so this is a
         // no-op — but `parse` matches case-insensitively, and a name that arrived
@@ -108,7 +108,13 @@ enum ComposerCommand: Equatable {
     /// withholds Return for exactly these inputs. Widening this widens both, which is
     /// the right coupling — it is what "still typing the command word" means.
     static func isBareCommandWord(_ input: String) -> Bool {
-        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        // `.whitespacesAndNewlines`, matching `parse`, because the interior test below is
+        // `Character.isWhitespace` — which counts newlines, where `CharacterSet
+        // .whitespaces` does not. Trimming the narrower set left `/h\n` failing the
+        // interior test while `/h ` passed it, so a half-typed command followed by
+        // Shift-Return closed the list, escaped the withhold, and went to the model as
+        // the question "/h". Two character sets in one function, disagreeing.
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.hasPrefix("/")
             && !trimmed.dropFirst().contains(where: { $0.isWhitespace })
     }

@@ -144,7 +144,9 @@ struct PanelRootView: View {
             // Through the composer's own submit, not straight to `submit`: this is a key
             // that sends a question, and the rule beside `onSubmit` is that whatever key
             // sends a question is the key that takes the highlighted command. With
-            // nothing highlighted it falls through to exactly what it used to do.
+            // nothing highlighted it falls through to `submit` — which is not what it
+            // used to do either, since `submit` now declines a half-typed command rather
+            // than asking it. Both changes are this branch's, and both are the point.
             case .submit: submitFromComposer()
             case .newThread: newThread()
             case .toggleHistory: showsHistory.toggle()
