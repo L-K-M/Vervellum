@@ -92,6 +92,11 @@ final class ModelCatalogClient {
             try await self.transport.sendJSON(request)
         }
         let models = ModelCatalog.parse(body)
+        // Only a 2xx reply reaches here: `sendJSON` calls `checkStatus` before it
+        // returns, and every non-2xx becomes a Vervellum-authored `ResearchError` —
+        // 401 and 403 as `rejectedCredential`, 404 naming the path. So "listed no
+        // models" cannot be a rejected key wearing the wrong message. Written down
+        // because the guarantee lives in another file and reads like an omission here.
         guard !models.isEmpty else {
             throw ResearchError("The endpoint answered but listed no models. "
                                 + "Type the model name instead.")

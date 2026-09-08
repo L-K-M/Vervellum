@@ -45,6 +45,15 @@ struct ProvidersView: View {
     /// fetched on its own — one provider being down must not blank another's list.
     @State private var catalogues: [UUID: CatalogueState] = [:]
 
+    /// The live model-list fetch for each row, so a newer one can retire an older.
+    ///
+    /// `stillCurrent` asks whether the row still points where it did, which two fetches
+    /// made with the *same* address and key both answer yes to — so the one that finishes
+    /// last wins even if it started first, and a slow failure can overwrite a fast
+    /// success with "Could not list models". Reachable because clearing the catalogue on
+    /// a key edit brings the refresh button back while the first fetch is still running.
+    @State private var modelFetches: [UUID: Task<Void, Never>] = [:]
+
     @State private var status: String?
     @State private var statusIsProblem = false
 
@@ -233,7 +242,8 @@ struct ProvidersView: View {
                     ProgressView().controlSize(.small)
                 } else {
                     Button {
-                        Task { await loadModels(for: profile.wrappedValue) }
+                        modelFetches[id]?.cancel()
+                        modelFetches[id] = Task { await loadModels(for: profile.wrappedValue) }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
@@ -303,10 +313,10 @@ struct ProvidersView: View {
                                         trace: ResearchTrace(sink: SilentLog()))
         do {
             let models = try await client.fetch()
-            guard stillCurrent(profile, entry: typed) else { return }
+            guard !Task.isCancelled, stillCurrent(profile, entry: typed) else { return }
             catalogues[profile.id] = .loaded(models)
         } catch {
-            guard stillCurrent(profile, entry: typed) else { return }
+            guard !Task.isCancelled, stillCurrent(profile, entry: typed) else { return }
             // The provider's own text is never shown — only a `ResearchError` Vervellum
             // wrote, and a bare type name for anything else.
             catalogues[profile.id] = .failed(
@@ -326,6 +336,10 @@ struct ProvidersView: View {
     ///
     /// The key entry is compared for the same reason, one field over: a fetch made with
     /// a rejected key must not repopulate the picker after the key has been corrected.
+    /// Both comparisons rest on `ForEach($profiles)` handing out bindings that write
+    /// straight into `profiles` as the user types. A draft binding that only landed on
+    /// Save would leave the old endpoint here while a new one was on screen, and the
+    /// stale result this guard exists to reject would pass it.
     private func stillCurrent(_ profile: ModelProfile, entry: String) -> Bool {
         guard profiles.first(where: { $0.id == profile.id })?.endpoint == profile.endpoint
         else { return false }
@@ -422,7 +436,10 @@ struct ProvidersView: View {
         searchKeyEntries = [:]
         accountsToDelete = []
         // Not carried across an open: the endpoints may have changed elsewhere, and a
-        // list is one click away.
+        // list is one click away. A fetch still running from the last open is retired
+        // with them, so it cannot land in the state this reset just cleared.
+        for fetch in modelFetches.values { fetch.cancel() }
+        modelFetches = [:]
         catalogues = [:]
         storedKeys = Set(profiles.filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
         storedSearchKeys = Set(searchProfiles
@@ -441,6 +458,7 @@ struct ProvidersView: View {
         profiles.remove(at: index)
         keyEntries[id] = nil
         catalogues[id] = nil
+        modelFetches.removeValue(forKey: id)?.cancel()
         storedKeys.remove(id)
         if selectedID == id { selectedID = profiles.first?.id }
     }

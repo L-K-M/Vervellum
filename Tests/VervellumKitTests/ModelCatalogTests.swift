@@ -63,6 +63,35 @@ final class ModelCatalogTests: XCTestCase {
                        "https://api.example.com/v1/mymodels/models")
     }
 
+    /// Azure's deployment-scoped route is the one shape whose model list is not its own
+    /// sibling: every deployment is listed at `/openai/models`. `chatCompletionsURL`
+    /// takes the deployment path as a custom route and leaves it alone, so without this
+    /// the address that answers questions 404s the moment the reader asks for a list.
+    func testAnAzureDeploymentPathListsAtTheAccountRoute() {
+        XCTAssertEqual(
+            ProviderSettings.modelListURL(
+                from: "https://r.openai.azure.com/openai/deployments/gpt-4o/chat/completions"
+                    + "?api-version=2024-02")?.absoluteString,
+            "https://r.openai.azure.com/openai/models?api-version=2024-02")
+        // Azure's newer v1 surface needs no folding — its sibling route is the real one.
+        XCTAssertEqual(
+            ProviderSettings.modelListURL(
+                from: "https://r.openai.azure.com/openai/v1/chat/completions?api-version=2024-02")?
+                .absoluteString,
+            "https://r.openai.azure.com/openai/v1/models?api-version=2024-02")
+    }
+
+    /// Only a bare deployment name is folded away. Anything deeper under `deployments/`
+    /// is somebody else's routing scheme, and guessing at it would be worse than
+    /// appending beside it.
+    func testADeeperDeploymentPathIsLeftAlone() {
+        XCTAssertEqual(
+            ProviderSettings.modelListURL(
+                from: "https://gateway.example.com/openai/deployments/team/gpt-4o")?
+                .absoluteString,
+            "https://gateway.example.com/openai/deployments/team/gpt-4o/models")
+    }
+
     func testTrailingSlashesAreDroppedAndTheFragmentWithThem() {
         XCTAssertEqual(ProviderSettings.modelListURL(from: "https://api.example.com/v1/")?
             .absoluteString,

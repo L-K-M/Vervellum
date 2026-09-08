@@ -493,6 +493,12 @@ struct ProviderSettings: Equatable, Codable {
     /// been told Vervellum can list models may well copy that line into the endpoint
     /// field. Appending blindly would ask for `/v1/models/models` and 404.
     ///
+    /// Azure's deployment-scoped route is the one shape whose model list is not its own
+    /// sibling. `chatCompletionsURL` accepts `/openai/deployments/<name>/chat/completions`
+    /// as a custom path and leaves it alone, but Azure lists every deployment at
+    /// `/openai/models` — so appending beside the deployment asks for a route that has
+    /// never existed, and the reader gets a 404 on an address whose questions work.
+    ///
     /// The query string is carried over, because `chatCompletionsURL` carries it and the
     /// two addresses have to describe the same provider. Azure's OpenAI-compatible
     /// surface is the case that makes this concrete: it requires `?api-version=` on every
@@ -508,6 +514,13 @@ struct ProviderSettings: Equatable, Codable {
         while path.hasSuffix("/") { path.removeLast() }
         if path.hasSuffix(chatCompletionsSuffix) { path.removeLast(chatCompletionsSuffix.count) }
         while path.hasSuffix("/") { path.removeLast() }
+        // Only a deployment name — one segment, nothing after it — is folded away. A
+        // deeper path under `deployments/` is somebody else's routing scheme, and
+        // guessing at it would be worse than appending beside it.
+        if let deployments = path.range(of: deploymentsInfix),
+           path[deployments.upperBound...].firstIndex(of: "/") == nil {
+            path = String(path[..<deployments.lowerBound]) + "/openai"
+        }
         components.path = path.hasSuffix(modelsSuffix) ? path : path + modelsSuffix
         components.fragment = nil
         return components.url
@@ -515,6 +528,7 @@ struct ProviderSettings: Equatable, Codable {
 
     private static let chatCompletionsSuffix = "/chat/completions"
     private static let modelsSuffix = "/models"
+    private static let deploymentsInfix = "/openai/deployments/"
 
     /// The SearXNG JSON search URL for an instance address.
     ///
