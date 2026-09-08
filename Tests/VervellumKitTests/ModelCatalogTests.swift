@@ -121,6 +121,15 @@ final class ModelCatalogTests: XCTestCase {
                 from: "https://api.example.com/v1/chat/completions?api-version=2024-02")?
                 .absoluteString,
             "https://api.example.com/v1/models?api-version=2024-02")
+        // And onto a paste that is already the list address. This is the one shape where
+        // a passthrough that rebuilt the URL from scheme, host and path — dropping the
+        // query — would satisfy every other assertion here, and Azure's list is unusable
+        // without `api-version`.
+        XCTAssertEqual(
+            ProviderSettings.modelListURL(
+                from: "https://r.openai.azure.com/openai/v1/models?api-version=2024-02")?
+                .absoluteString,
+            "https://r.openai.azure.com/openai/v1/models?api-version=2024-02")
     }
 
     /// The same endpoint hygiene every other address gets.
@@ -159,6 +168,34 @@ final class ModelCatalogTests: XCTestCase {
                            chat.path.replacingOccurrences(of: "/chat/completions",
                                                           with: "/models"),
                            paste)
+        }
+    }
+
+    /// The whole shape matrix in one place. `modelListURL` makes six decisions — trailing
+    /// slashes, the chat suffix, the Azure deployment fold and its "one segment, nothing
+    /// after" rule, `/models` idempotence, the query, the fragment — and a table is the
+    /// only form in which a later tweak to one of them is visibly a change to the others.
+    func testEveryShapeThePasteFieldAccepts() {
+        let cases = [
+            ("https://api.example.com", "https://api.example.com/models"),
+            ("https://api.example.com/v1", "https://api.example.com/v1/models"),
+            ("https://api.example.com/v1/", "https://api.example.com/v1/models"),
+            ("https://api.example.com/v1/chat/completions", "https://api.example.com/v1/models"),
+            // Idempotent: the list address is itself a plausible paste, because it is the
+            // line the provider's documentation prints.
+            ("https://api.example.com/v1/models", "https://api.example.com/v1/models"),
+            // The query survives and the fragment does not. Azure's list is unusable
+            // without `api-version`, and a fragment is never part of a request.
+            ("https://r.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-10-01#x",
+             "https://r.openai.azure.com/openai/models?api-version=2024-10-01"),
+            // A deeper path under `deployments/` is somebody else's routing scheme, so
+            // it is appended beside rather than folded away.
+            ("https://r.openai.azure.com/openai/deployments/gpt-4o/extra",
+             "https://r.openai.azure.com/openai/deployments/gpt-4o/extra/models"),
+        ]
+        for (paste, expected) in cases {
+            XCTAssertEqual(ProviderSettings.modelListURL(from: paste)?.absoluteString,
+                           expected, paste)
         }
     }
 

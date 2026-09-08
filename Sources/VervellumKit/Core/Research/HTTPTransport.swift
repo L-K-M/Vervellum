@@ -165,15 +165,17 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     /// every budget was the ten-minute `deadline` and reads as "did not finish within 0
     /// minutes" for anything shorter than one.
     static func tookTooLong(_ budget: TimeInterval) -> ResearchError {
-        // Singular too. The old message hard-coded "minutes" because the only budget was
-        // ten of them; generalising the number without generalising the word swaps "0
-        // minutes" for "1 minutes".
+        // Rounded once, and the unit chosen from the rounded value. Two ways to get this
+        // subtly wrong, both of which it has been: the message hard-coded "minutes"
+        // because the only budget was ten of them, so generalising the number alone
+        // turned "0 minutes" into "1 minutes"; and choosing the unit from the raw budget
+        // reported 59.6 seconds as "60 seconds" while 60 said "1 minute".
+        let seconds = Int(budget.rounded())
         let spelled: String
-        if budget < 60 {
-            let seconds = Int(budget.rounded())
+        if seconds < 60 {
             spelled = seconds == 1 ? "1 second" : "\(seconds) seconds"
         } else {
-            let minutes = Int(budget / 60)
+            let minutes = seconds / 60
             spelled = minutes == 1 ? "1 minute" : "\(minutes) minutes"
         }
         return ResearchError("The provider's response did not finish within \(spelled).")
@@ -251,6 +253,21 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
             throw ResearchError.invalidResponse
         }
         return (headers, object)
+    }
+
+    /// A cheap GET, with its two bounds set from one number.
+    ///
+    /// `getRequest`'s `timeout` and `sendJSON`'s `deadline` are different clocks — one
+    /// idle, one wall — and a caller that means "no longer than this" has to say both.
+    /// Saying it once is the difference between a rule and a habit: a later cheap GET
+    /// that set the timeout and forgot the deadline would keep the ten-minute wall clock
+    /// while reading as though it had thirty seconds.
+    func sendCheapJSON(url: URL,
+                       headers: [String: String] = [:],
+                       within budget: TimeInterval) async throws
+        -> (headers: [String: String], body: [String: Any]) {
+        try await sendJSON(Self.getRequest(url: url, headers: headers, timeout: budget),
+                           deadline: budget)
     }
 
     /// Sends `request` and returns its response head and complete body, **without**

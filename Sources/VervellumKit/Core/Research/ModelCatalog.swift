@@ -93,12 +93,12 @@ final class ModelCatalogClient {
     /// has or does not. Someone sitting in Settings watching a spinner is the wrong
     /// person to make wait on a generation deadline.
     ///
-    /// Passed twice, because one of them is not a bound. `getRequest`'s `timeout` sets
-    /// `URLRequest.timeoutInterval`, which URLSession treats as an *idle* timeout — it
-    /// restarts on every byte, so a host trickling one byte every 29 seconds would have
-    /// satisfied it and left the spinner turning until the transport's ten-minute wall
-    /// clock. `sendJSON`'s `deadline` is the wall clock, and it is what makes the number
-    /// above true.
+    /// Handed to `sendCheapJSON`, which sets both clocks from it. Two are needed and
+    /// only one is a bound: `URLRequest.timeoutInterval` is an *idle* timeout that
+    /// restarts on every byte, so a host trickling one byte every 29 seconds satisfies
+    /// it forever, and the wall clock is what makes the number above true. They were
+    /// two arguments at two call sites until a comment was the only thing keeping them
+    /// equal.
     static let listTimeout: TimeInterval = 30
 
     init(url: URL, apiKey: String?, trace: ResearchTrace, transport: HTTPTransport = .shared) {
@@ -120,10 +120,9 @@ final class ModelCatalogClient {
         // key. If chat ever learns a second scheme, this has to learn it too.
         var headers: [String: String] = [:]
         if let apiKey { headers["Authorization"] = "Bearer " + apiKey }
-        let request = HTTPTransport.getRequest(url: url, headers: headers, timeout: Self.listTimeout)
-
         let (_, body) = try await trace.stage("List models") {
-            try await self.transport.sendJSON(request, deadline: Self.listTimeout)
+            try await self.transport.sendCheapJSON(url: self.url, headers: headers,
+                                                   within: Self.listTimeout)
         }
         let models = ModelCatalog.parse(body)
         // Only a 2xx reply reaches here: `sendJSON` calls `checkStatus` before it
@@ -132,8 +131,13 @@ final class ModelCatalogClient {
         // models" cannot be a rejected key wearing the wrong message. Written down
         // because the guarantee lives in another file and reads like an omission here.
         guard !models.isEmpty else {
-            throw ResearchError("The endpoint answered but listed no models. "
-                                + "Type the model name instead.")
+            // Not "listed no models", which claims to know more than this does. `parse`
+            // reads the two shapes it knows; a server answering in a third leaves the
+            // same empty array as one that really has nothing, and telling a reader
+            // their provider is empty sends them to check the wrong thing. The half
+            // that is actionable is true either way.
+            throw ResearchError("The endpoint answered, but no model names could be read "
+                                + "from it. Type the model name instead.")
         }
         trace.log("Listed \(models.count) models")
         return models

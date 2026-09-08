@@ -81,14 +81,52 @@ final class HTTPLineReaderTests: XCTestCase {
         XCTAssertTrue(lines.isEmpty, "the guard runs before the chunk does")
     }
 
+    /// The budget is re-read between chunks, not once on the way in. A host that trickles
+    /// keeps every individual wait short, so a check hoisted out of the loop would bound
+    /// nothing at all — and the `-1` test above cannot tell the difference, because a
+    /// budget spent before the first chunk fails either way. Two seconds of sleep against
+    /// a one-second budget, so CI scheduling cannot flip it.
+    func testABudgetThatRunsOutBetweenChunksStopsBeforeTheNextLine() async {
+        var lines: [String] = []
+        let trickle = AsyncThrowingStream<Data, Error> { continuation in
+            continuation.yield(Data("first\n".utf8))
+            Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                continuation.yield(Data("second\n".utf8))
+                continuation.finish()
+            }
+        }
+        do {
+            try await HTTPTransport.readLines(from: trickle,
+                                              limit: HTTPTransport.maxStreamBytes,
+                                              deadline: 1) { line in
+                lines.append(line)
+                return true
+            }
+            XCTFail("Expected the spent budget to stop the read")
+        } catch {
+            XCTAssertEqual(error as? ResearchError, HTTPTransport.tookTooLong(1),
+                           "expected the deadline's error, got \(error)")
+        }
+        XCTAssertEqual(lines, ["first"], "the second line arrived after the budget was gone")
+    }
+
     /// Both readers used to divide the budget by 60 and write "minutes", which reads as
     /// "did not finish within 0 minutes" for every budget shorter than one — and the
     /// model list's is thirty seconds.
     func testTheOverdueMessageIsSpelledInTheUnitTheBudgetIsIn() {
         let halfMinute = HTTPTransport.tookTooLong(30).message
         XCTAssertTrue(halfMinute.contains("30 seconds"), halfMinute)
+        // The constant, pinned separately: feeding `deadline` in and expecting "10
+        // minutes" out made this test a silent second home for that number, so raising
+        // it would have failed here as a wording regression rather than as itself.
+        XCTAssertEqual(HTTPTransport.deadline, 600, "the ten-minute default")
         let tenMinutes = HTTPTransport.tookTooLong(HTTPTransport.deadline).message
         XCTAssertTrue(tenMinutes.contains("10 minutes"), tenMinutes)
+        // Rounded once rather than per unit: choosing the unit from the raw budget made
+        // 59.6 seconds "60 seconds" while 60 said "1 minute".
+        let almostAMinute = HTTPTransport.tookTooLong(59.6).message
+        XCTAssertTrue(almostAMinute.contains("1 minute."), almostAMinute)
         // Both sides of the unit switch, and both singulars. No budget in the app is one
         // of either today, which is exactly why the wording would rot unnoticed.
         let oneMinute = HTTPTransport.tookTooLong(60).message
