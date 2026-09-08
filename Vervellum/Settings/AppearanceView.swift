@@ -212,8 +212,17 @@ struct AppearanceView: View {
                 set: { isOn in
                     // Turning it on starts from what the panel is already showing rather
                     // than from black, so the first drag is an adjustment and not a
-                    // recovery.
-                    stored.wrappedValue = isOn ? (stored.wrappedValue ?? fallback(for: keyPath)) : nil
+                    // recovery. Turning it off remembers, because the toggle sits one
+                    // click away from a colour someone spent a while choosing and
+                    // "Automatic" should be a thing you can look at and undo.
+                    if isOn {
+                        stored.wrappedValue = stored.wrappedValue
+                            ?? setAside[keyPath]
+                            ?? fallback(for: keyPath)
+                    } else {
+                        setAside[keyPath] = stored.wrappedValue
+                        stored.wrappedValue = nil
+                    }
                 })) {
                 Text(title)
             }
@@ -225,6 +234,9 @@ struct AppearanceView: View {
                     set: { stored.wrappedValue = $0.themeColor ?? current }),
                             supportsOpacity: true)
                     .labelsHidden()
+                    // The label is hidden from the eye, not from VoiceOver: without this
+                    // all three of these read as "color well" and none says which.
+                    .accessibilityLabel(title)
             } else {
                 Text(automatic)
                     .font(.system(size: 11))
@@ -234,7 +246,12 @@ struct AppearanceView: View {
         }
     }
 
-    /// Where an optional colour starts when it is switched on.
+    /// Colours handed back to Automatic this session, so switching one on again returns
+    /// what it was rather than a constant. Not persisted: it is an undo for a click, not
+    /// a second copy of the theme.
+    @State private var setAside: [WritableKeyPath<PanelPalette, ThemeColor?>: ThemeColor] = [:]
+
+    /// Where an optional colour starts when it is switched on and nothing was set aside.
     private func fallback(for keyPath: WritableKeyPath<PanelPalette, ThemeColor?>) -> ThemeColor {
         if keyPath == \PanelPalette.surface { return ThemeColor(0.10, 0.10, 0.12) }
         if keyPath == \PanelPalette.secondaryText { return ThemeColor(0.55, 0.55, 0.58) }

@@ -20,7 +20,7 @@ struct ThemeColor: Codable, Equatable, Hashable {
         self.alpha = alpha.clampedToUnit
     }
 
-    /// Reads `#RGB`, `#RRGGBB` and `#RRGGBBAA`, with or without the hash.
+    /// Reads `#RGB`, `#RGBA`, `#RRGGBB` and `#RRGGBBAA`, with or without the hash.
     ///
     /// Lenient on purpose: this is the field someone pastes into from a palette site,
     /// and rejecting `0xFF8A4C` or a stray space would be a worse experience than
@@ -31,7 +31,9 @@ struct ThemeColor: Codable, Equatable, Hashable {
             text.removeFirst(prefix.count)
         }
         guard text.allSatisfy({ $0.isHexDigit }) else { return nil }
-        if text.count == 3 {
+        // CSS Color 4's short forms, both of them: `#FED` and `#FEDC` double each digit
+        // onto the six- and eight-digit paths below.
+        if text.count == 3 || text.count == 4 {
             text = text.map { "\($0)\($0)" }.joined()
         }
         guard text.count == 6 || text.count == 8, let value = UInt32(text, radix: 16) else {
@@ -69,6 +71,16 @@ struct ThemeColor: Codable, Equatable, Hashable {
     /// people hand-edit: a red of `5` or a `NaN` that reached a colour would otherwise
     /// draw as something undefined rather than as the nearest real colour.
     init(from decoder: Decoder) throws {
+        // A hex string where `encode` wrote components. `encode` never produces one, but
+        // this type's whole argument for storing plain sRGB is that a person can paste a
+        // colour into the settings file — and a string is what they will paste. Reading
+        // only the object form made that story true everywhere except the one place it
+        // was told, and the paste was discarded without a word.
+        if let text = try? decoder.singleValueContainer().decode(String.self),
+           let parsed = ThemeColor(hex: text) {
+            self = parsed
+            return
+        }
         let container = try decoder.container(keyedBy: CodingKeys.self)
         func component(_ key: CodingKeys, _ fallback: Double) -> Double {
             ((try? container.decodeIfPresent(Double.self, forKey: key)) ?? nil) ?? fallback
@@ -79,9 +91,17 @@ struct ThemeColor: Codable, Equatable, Hashable {
 
     /// Perceived brightness, 0…1, by the usual luma weights.
     ///
-    /// Used to decide whether a palette wants light or dark text over it, so a theme
-    /// somebody invented cannot end up with black text on a black panel.
-    var luminance: Double { 0.299 * red + 0.587 * green + 0.114 * blue }
+    /// What the preset tests measure to keep text off its own surface — no drawing code
+    /// reads it, and the comment here used to imply otherwise.
+    ///
+    /// Alpha blends the result toward mid-grey, because a translucent colour shows
+    /// whatever is behind it and the honest answer for one is "closer to unknown".
+    /// Reporting `ThemeColor(1, 1, 1, 0.1)` as fully light would wave through a preset
+    /// whose surface is, in practice, whatever the desktop is.
+    var luminance: Double {
+        let opaque = 0.299 * red + 0.587 * green + 0.114 * blue
+        return opaque * alpha + 0.5 * (1 - alpha)
+    }
 }
 
 private extension Double {

@@ -33,7 +33,14 @@ enum PanelTheme {
     /// thread during layout. It is set *before* SwiftUI re-renders — `Preferences` posts
     /// `objectWillChange` and then calls its `onChanged` hook, and the re-render happens
     /// on a later turn of the run loop — so a body never reads a stale palette.
-    static var palette: PanelPalette = .ember
+    static var palette: PanelPalette = .ember {
+        // The contract above is documented for readers; this is the part a compiler can
+        // check. A palette import or an async settings load is exactly the kind of
+        // future writer that would race a value SwiftUI reads during layout.
+        willSet {
+            assert(Thread.isMainThread, "PanelTheme.palette must only be set on the main thread")
+        }
+    }
 
     // MARK: Spacing
 
@@ -167,10 +174,17 @@ struct PanelBackground: View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         ZStack {
             backdrop(in: shape)
+            // The scrim is what stands in for a surface, not a wash over one. Painting
+            // both meant a theme with an opaque surface had to remember to clear its
+            // scrim or get an unasked-for tint, and it put the legibility rule in the
+            // theme data rather than in the code that depends on it. Compositing is
+            // associative, so a surface that wants a scrim's darkening can carry it in
+            // its own alpha; nothing is lost by choosing.
             if let surface = PanelTheme.Palette.surface {
                 shape.fill(surface)
+            } else {
+                shape.fill(PanelTheme.Palette.scrim)
             }
-            shape.fill(PanelTheme.Palette.scrim)
             shape.strokeBorder(PanelTheme.Palette.hairline, lineWidth: 0.5)
         }
     }
@@ -192,6 +206,9 @@ struct PanelBackground: View {
                     .clipShape(shape)
             }
         case .frosted, .solid:
+            // No `reduceTransparency` check, unlike `.glass` above: `VisualEffectBlur`
+            // wraps `NSVisualEffectView`, which answers the setting itself by turning
+            // its material opaque. The guarantee is kept here, just not by this code.
             VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
                 .clipShape(shape)
         }

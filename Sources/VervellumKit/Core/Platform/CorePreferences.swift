@@ -209,8 +209,17 @@ final class CorePreferences {
     /// theme is a bad afternoon, refusing to launch is worse.
     var panelPalette: PanelPalette {
         get {
-            guard let text = store.string(for: Key.panelPalette),
-                  let decoded = PanelPalette.decode(text) else { return .ember }
+            guard let text = store.string(for: Key.panelPalette) else { return .ember }
+            guard let decoded = PanelPalette.decode(text) else {
+                // Falling back is right; falling back in silence is not. "My theme keeps
+                // resetting itself" is unanswerable without knowing a stored value was
+                // there and would not parse.
+                let head = text.prefix(100)
+                FileHandle.standardError.write(Data(
+                    "vervellum warning: the stored theme could not be read and the default "
+                    + "was used. It began: \(head)\n".utf8))
+                return .ember
+            }
             return decoded
         }
         set {

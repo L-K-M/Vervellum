@@ -116,24 +116,83 @@ final class PanelPaletteTests: XCTestCase {
         }
     }
 
-    /// The panel floats over the whole desktop. A theme with no opaque surface of its own
-    /// needs a scrim, or the same paragraph is crisp over an editor and unreadable over a
-    /// bright photo.
-    func testEveryTranslucentPresetKeepsAScrim() {
-        for preset in PanelPalette.presets where preset.surface == nil {
+    /// The panel floats over the whole desktop, so a scrim is what stands in when there
+    /// is no surface — crisp over an editor, unreadable over a bright photo, otherwise.
+    ///
+    /// Every preset, not only the translucent ones: `surface` is a colour the reader can
+    /// hand back to Automatic, and the scrim is what they are handing it back to. The
+    /// filtered version of this test also passed vacuously if every preset shipped a
+    /// surface, which by then eight of the ten did.
+    func testEveryPresetKeepsAScrimToFallBackOn() {
+        XCTAssertFalse(PanelPalette.presets.isEmpty, "there is nothing to check otherwise")
+        for preset in PanelPalette.presets {
             XCTAssertGreaterThan(preset.scrim.alpha, 0,
-                                 "\(preset.name) has neither a surface nor a scrim")
+                                 "\(preset.name) leaves nothing behind a cleared surface")
         }
     }
 
     /// A preset that states its own text colour has to state one that can be read on its
     /// own surface.
     func testEveryPresetsTextCanBeReadOnItsSurface() {
+        var checked = 0
         for preset in PanelPalette.presets {
             guard let surface = preset.surface, let text = preset.primaryText else { continue }
+            checked += 1
             XCTAssertGreaterThan(abs(surface.luminance - text.luminance), 0.4,
                                  "\(preset.name) puts text too close to its own surface")
         }
+        // Counted, because `continue` on both optionals means a preset set that stopped
+        // stating its own colours would leave this test green while asserting nothing.
+        XCTAssertGreaterThan(checked, 0, "no preset states both a surface and a text colour")
+    }
+
+    // MARK: Colours a person typed
+
+    /// The type's argument for plain sRGB is that somebody can paste a colour into the
+    /// settings file. A string is what they will paste.
+    func testAHexStringDecodesWhereComponentsAreExpected() throws {
+        // Inside an array rather than as a bare top-level string: a JSON fragment is not
+        // what a settings file holds, and this keeps the test about the decoder.
+        let decoded = try JSONDecoder().decode(
+            [ThemeColor].self, from: Data(#"["#FF8A4C", "0xFED"]"#.utf8))
+        XCTAssertEqual(decoded.first, ThemeColor(hex: "#FF8A4C"))
+        XCTAssertEqual(decoded.first?.hexString, "#FF8A4C")
+        XCTAssertEqual(decoded[1], ThemeColor(hex: "#FFEEDD"), "the short form too")
+    }
+
+    /// A string that is not a colour is not silently read as black: it falls through to
+    /// the component path, which cannot read keys from a string and throws — which is
+    /// what `PanelPalette`'s lenient decoder is there to turn into that field's default.
+    func testAStringThatIsNotAColourIsNotDecoded() {
+        XCTAssertThrowsError(
+            try JSONDecoder().decode([ThemeColor].self, from: Data(#"["nonsense"]"#.utf8)))
+    }
+
+    /// And the object form `encode` actually writes still round-trips unchanged.
+    func testTheEncodedFormStillDecodesToItself() throws {
+        let colour = ThemeColor(0.2, 0.4, 0.6, 0.8)
+        let data = try JSONEncoder().encode(colour)
+        XCTAssertEqual(try JSONDecoder().decode(ThemeColor.self, from: data), colour)
+    }
+
+    /// CSS Color 4's four-digit short form, which the parser used to reject.
+    func testFourDigitHexCarriesItsAlpha() {
+        let colour = ThemeColor(hex: "#FEDC")
+        XCTAssertEqual(colour, ThemeColor(hex: "#FFEEDDCC"))
+        XCTAssertEqual(colour?.alpha ?? 0, 0.8, accuracy: 0.01)
+        // Still nothing that is not a short or a long form.
+        XCTAssertNil(ThemeColor(hex: "#FEDCB"))
+        XCTAssertNil(ThemeColor(hex: "#FE"))
+    }
+
+    /// A translucent colour shows whatever is behind it, so calling it fully light would
+    /// wave through a preset whose surface is in practice the desktop.
+    func testLuminanceAccountsForAlpha() {
+        XCTAssertEqual(ThemeColor(1, 1, 1).luminance, 1, accuracy: 0.001)
+        XCTAssertEqual(ThemeColor(0, 0, 0).luminance, 0, accuracy: 0.001)
+        XCTAssertEqual(ThemeColor(1, 1, 1, 0).luminance, 0.5, accuracy: 0.001,
+                       "a fully transparent colour is not a light one")
+        XCTAssertLessThan(ThemeColor(1, 1, 1, 0.1).luminance, 0.6)
     }
 
     func testPresetNamesAreUniqueSoThePickerCanUseThem() {

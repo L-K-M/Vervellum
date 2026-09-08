@@ -56,6 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 userInfo: ["text": questions.joined(separator: "\n\n")])
         }
 
+        // Before the controller, not after: the panel's content reads the palette, so
+        // assigning it later would leave the default theme one frame wide.
+        PanelTheme.palette = preferences.panelPalette
         let panelController = makePanelController()
         self.panelController = panelController
         self.settingsWindow = SettingsWindowController(
@@ -69,10 +72,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // show, so the only way to see what the width slider did was to close the panel
         // and open it again — with the previous width no longer on screen to compare to.
         // The theme is read through a stored value rather than the environment — see
-        // `PanelTheme.palette` — so the composition root is what keeps it in step. Set
-        // here as well as on change, because the panel can be built before anything is
-        // edited.
-        PanelTheme.palette = preferences.panelPalette
+        // `PanelTheme.palette` — so the composition root is what keeps it in step. It is
+        // seeded above, before the panel exists; this keeps it there.
         preferences.onChanged = { [weak self] in
             guard let self else { return }
             PanelTheme.palette = self.preferences.panelPalette

@@ -16,7 +16,10 @@ import Foundation
 ///   reader is entitled to.
 /// * **A scrim.** The panel floats over the whole desktop. Glass with no scrim is
 ///   readable over a dark editor and unreadable over a bright photo, and a preset is not
-///   a licence to ship the second one.
+///   a licence to ship the second one. It has to be real even on a preset that ships an
+///   opaque surface, because `surface` is one of the colours a reader can hand back to
+///   Automatic — and the scrim is what they are handing it back *to*. It costs nothing
+///   while the surface is set: `PanelBackground` paints one or the other, never both.
 extension PanelPalette {
 
     /// The default. The orange Vervellum has always used.
@@ -45,7 +48,7 @@ extension PanelPalette {
         cardFill: ThemeColor(0.45, 0.37, 0.25, 0.07),
         chipFill: ThemeColor(0.45, 0.37, 0.25, 0.12),
         hairline: ThemeColor(0.40, 0.34, 0.24, 0.22),
-        scrim: ThemeColor(1, 1, 1, 0),
+        scrim: ThemeColor(1, 1, 1, 0.45),
         supported: ThemeColor(0.18, 0.46, 0.28),
         contradicted: ThemeColor(0.996, 0.20, 0.20),
         mixed: ThemeColor(0.996, 0.48, 0.10),
@@ -65,7 +68,7 @@ extension PanelPalette {
         cardFill: ThemeColor(0.55, 0.70, 1.0, 0.07),
         chipFill: ThemeColor(0.55, 0.70, 1.0, 0.13),
         hairline: ThemeColor(0.60, 0.72, 1.0, 0.20),
-        scrim: ThemeColor(0, 0, 0, 0),
+        scrim: ThemeColor(0, 0, 0, 0.40),
         supported: ThemeColor(0.30, 0.82, 0.55),
         contradicted: ThemeColor(1.0, 0.42, 0.45),
         mixed: ThemeColor(1.0, 0.76, 0.32),
@@ -83,7 +86,7 @@ extension PanelPalette {
         cardFill: ThemeColor(0.20, 1.0, 0.45, 0.06),
         chipFill: ThemeColor(0.20, 1.0, 0.45, 0.12),
         hairline: ThemeColor(0.20, 1.0, 0.45, 0.26),
-        scrim: ThemeColor(0, 0, 0, 0),
+        scrim: ThemeColor(0, 0, 0, 0.40),
         supported: ThemeColor(0.20, 1.0, 0.45),
         contradicted: ThemeColor(1.0, 0.28, 0.28),
         mixed: ThemeColor(1.0, 0.86, 0.20),
@@ -103,7 +106,7 @@ extension PanelPalette {
         cardFill: ThemeColor(0.03, 0.21, 0.26, 0.85),
         chipFill: ThemeColor(0.35, 0.43, 0.46, 0.18),
         hairline: ThemeColor(0.35, 0.43, 0.46, 0.30),
-        scrim: ThemeColor(0, 0, 0, 0),
+        scrim: ThemeColor(0, 0, 0, 0.40),
         supported: ThemeColor(0.52, 0.60, 0.0),
         contradicted: ThemeColor(0.86, 0.20, 0.18),
         mixed: ThemeColor(0.80, 0.29, 0.09),
@@ -121,7 +124,7 @@ extension PanelPalette {
         cardFill: ThemeColor(1.0, 0.35, 0.68, 0.10),
         chipFill: ThemeColor(1.0, 0.35, 0.68, 0.18),
         hairline: ThemeColor(0.85, 0.40, 0.70, 0.30),
-        scrim: ThemeColor(1, 1, 1, 0),
+        scrim: ThemeColor(1, 1, 1, 0.45),
         supported: ThemeColor(0.11, 0.70, 0.50),
         contradicted: ThemeColor(0.95, 0.20, 0.42),
         mixed: ThemeColor(1.0, 0.62, 0.20),
@@ -140,7 +143,7 @@ extension PanelPalette {
         cardFill: ThemeColor(0.40, 0.90, 1.0, 0.08),
         chipFill: ThemeColor(1.0, 0.30, 0.85, 0.16),
         hairline: ThemeColor(0.40, 0.90, 1.0, 0.28),
-        scrim: ThemeColor(0, 0, 0, 0),
+        scrim: ThemeColor(0, 0, 0, 0.40),
         supported: ThemeColor(0.30, 1.0, 0.80),
         contradicted: ThemeColor(1.0, 0.25, 0.45),
         mixed: ThemeColor(1.0, 0.80, 0.30),
@@ -159,7 +162,7 @@ extension PanelPalette {
         cardFill: ThemeColor(0, 0, 0, 0.04),
         chipFill: ThemeColor(0, 0, 0, 0.08),
         hairline: ThemeColor(0, 0, 0, 0.30),
-        scrim: ThemeColor(1, 1, 1, 0),
+        scrim: ThemeColor(1, 1, 1, 0.45),
         supported: ThemeColor(0.10, 0.42, 0.20),
         contradicted: ThemeColor(0.72, 0.11, 0.11),
         mixed: ThemeColor(0.62, 0.42, 0.05),
@@ -179,7 +182,7 @@ extension PanelPalette {
         cardFill: ThemeColor(1, 1, 1, 0.10),
         chipFill: ThemeColor(1, 1, 1, 0.18),
         hairline: ThemeColor(1, 1, 1, 0.45),
-        scrim: ThemeColor(0, 0, 0, 0),
+        scrim: ThemeColor(0, 0, 0, 0.40),
         supported: ThemeColor(0.20, 1.0, 0.40),
         contradicted: ThemeColor(1.0, 0.35, 0.35),
         mixed: ThemeColor(1.0, 0.80, 0.0),
