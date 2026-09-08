@@ -468,13 +468,26 @@ struct PanelRootView: View {
                         // which command Return would take — the whole point of the list
                         // being keyboard-navigable.
                         .accessibilityAddTraits(index == selected ? .isSelected : [])
+                        // Says what activation actually does. Several of these commands
+                        // take an argument, so a row fills the field rather than running
+                        // it — which is not what "button named /new" would lead you to
+                        // expect if you could not see the trailing space appear.
+                        .accessibilityHint("Fills the composer with this command")
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .onHover { inside in onHover(inside ? index : nil) }
+                    // Claims only. A row that clears on exit can wipe the highlight the
+                    // pointer has just moved onto, because the leaving row's exit and the
+                    // entering row's enter are separate tracking events with no
+                    // guaranteed order — and an exiting row cannot know it was superseded.
+                    .onHover { inside in if inside { onHover(index) } }
                 }
             }
             .padding(.vertical, PanelTheme.Space.tight)
+            // The container is the reliable "the mouse left" signal: its hover stays true
+            // over any row and over the padding between them, so moving between rows
+            // never clears while leaving the list always does.
+            .onHover { inside in if !inside { onHover(nil) } }
             .background(PanelTheme.Palette.cardFill,
                         in: RoundedRectangle(cornerRadius: PanelTheme.Radius.card, style: .continuous))
         }

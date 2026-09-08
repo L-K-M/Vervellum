@@ -116,9 +116,12 @@ final class ComposerCommandTests: XCTestCase {
 
     // MARK: Completion-list navigation
 
-    /// Return accepts the highlighted row, so a preselected first row would turn typing
-    /// `/new` + Return from "start a thread" into "finish the word".
-    func testNothingIsHighlightedUntilAnArrowIsPressed() {
+    /// An empty list can never produce a selection, whichever way the arrow went.
+    ///
+    /// The *no preselection until an arrow* policy this used to be named for is the
+    /// view's initial `nil`, not arithmetic — the entry points are covered by
+    /// `testDownEntersAtTheTopAndUpEntersAtTheBottom`.
+    func testAnEmptyListNeverYieldsASelection() {
         XCTAssertNil(ComposerCommand.moveSelection(nil, up: true, count: 0))
         XCTAssertNil(ComposerCommand.moveSelection(nil, up: false, count: 0))
     }
@@ -153,6 +156,16 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertEqual(ComposerCommand.moveSelection(nil, up: true, count: 1), 0)
         XCTAssertEqual(ComposerCommand.moveSelection(0, up: false, count: 1), 0)
         XCTAssertNil(ComposerCommand.moveSelection(0, up: true, count: 1))
+    }
+
+    /// An index below the list is as possible as one beyond it, and the up path used to
+    /// clamp only the top: `min(-1, last)` is `-1`, which is not `0`, so it returned -2.
+    /// A negative result highlights nothing and makes the view's `indices.contains` guard
+    /// turn an intended accept into a submit — with a slash command in the field.
+    func testAnIndexBelowTheListIsClampedToo() {
+        XCTAssertNil(ComposerCommand.moveSelection(-1, up: true, count: 2),
+                     "clamped to the first row, and stepping up from there deselects")
+        XCTAssertEqual(ComposerCommand.moveSelection(-1, up: false, count: 2), 0)
     }
 
     /// The list shrinks as the user types, and the view clears the highlight on every

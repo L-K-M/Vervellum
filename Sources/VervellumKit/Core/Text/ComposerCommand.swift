@@ -120,7 +120,7 @@ enum ComposerCommand: Equatable {
             // must step up from the last row that exists, not from where it used to be:
             // returning 8 for a two-row list highlights nothing, and the view's own
             // `indices.contains` guard then falls through to submitting the draft.
-            let clamped = min(index, last)
+            let clamped = min(max(index, 0), last)
             return clamped == 0 ? nil : clamped - 1
         }
     }
