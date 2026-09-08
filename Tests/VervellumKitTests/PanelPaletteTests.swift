@@ -154,7 +154,7 @@ final class PanelPaletteTests: XCTestCase {
         // Inside an array rather than as a bare top-level string: a JSON fragment is not
         // what a settings file holds, and this keeps the test about the decoder.
         let decoded = try JSONDecoder().decode(
-            [ThemeColor].self, from: Data(#"["#FF8A4C", "0xFED"]"#.utf8))
+            [ThemeColor].self, from: Data(##"["#FF8A4C", "0xFED"]"##.utf8))
         XCTAssertEqual(decoded.first, ThemeColor(hex: "#FF8A4C"))
         XCTAssertEqual(decoded.first?.hexString, "#FF8A4C")
         XCTAssertEqual(decoded[1], ThemeColor(hex: "#FFEEDD"), "the short form too")
