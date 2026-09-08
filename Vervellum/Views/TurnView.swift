@@ -6,8 +6,9 @@ import AppKit
 /// could not settle, and where to go next.
 struct TurnView: View {
 
+    @Environment(\.panelTextScale) private var textScale
+
     let turn: ResearchTurn
-    let scale: Double
     let showsProcessTrail: Bool
     var onRetry: () -> Void
     var onAskFollowup: (String) -> Void
@@ -40,7 +41,7 @@ struct TurnView: View {
             }
 
             if !turn.answer.isEmpty {
-                MarkdownBody(markdown: turn.answer, sources: turn.sources, scale: scale)
+                MarkdownBody(markdown: turn.answer, sources: turn.sources, scale: textScale)
                     .padding(.vertical, PanelTheme.Space.hair)
                 answerFooter
             } else if turn.stage == .answering {
@@ -55,7 +56,7 @@ struct TurnView: View {
                 }
             } else if turn.stage == .assessing {
                 Label("Checking the answer's claims…", systemImage: "checkmark.seal")
-                    .font(PanelTheme.Font.caption)
+                    .font(PanelTheme.Font.caption(textScale))
                     .foregroundStyle(PanelTheme.Palette.tertiaryText)
             }
 
@@ -83,7 +84,7 @@ struct TurnView: View {
                 .fill(PanelTheme.Palette.accent)
                 .frame(width: 2)
             Text(turn.question)
-                .font(PanelTheme.Font.question)
+                .font(PanelTheme.Font.question(textScale))
                 .foregroundStyle(PanelTheme.Palette.primaryText)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -99,7 +100,7 @@ struct TurnView: View {
                 NSPasteboard.general.setString(turn.transcript, forType: .string)
             } label: {
                 Label("Copy", systemImage: "doc.on.doc")
-                    .font(PanelTheme.Font.caption)
+                    .font(PanelTheme.Font.caption(textScale))
             }
             .buttonStyle(.plain)
             .foregroundStyle(PanelTheme.Palette.tertiaryText)
@@ -111,7 +112,7 @@ struct TurnView: View {
             if turn.stage == .complete {
                 Button(action: onRetry) {
                     Label("Ask again", systemImage: "arrow.clockwise")
-                        .font(PanelTheme.Font.caption)
+                        .font(PanelTheme.Font.caption(textScale))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(PanelTheme.Palette.tertiaryText)
@@ -120,7 +121,7 @@ struct TurnView: View {
 
             if !turn.model.isEmpty {
                 Text(turn.model)
-                    .font(.system(size: 10))
+                    .font(PanelTheme.Font.at(10, textScale))
                     .foregroundStyle(PanelTheme.Palette.tertiaryText)
                     .lineLimit(1)
             }
@@ -152,6 +153,8 @@ struct StreamingCaret: View {
 /// limitations, and never collapsible. A notice exists precisely because something
 /// about this answer is less trustworthy than it looks.
 struct NoticesView: View {
+    @Environment(\.panelTextScale) private var textScale
+
     let notices: [TurnNotice]
 
     var body: some View {
@@ -159,11 +162,11 @@ struct NoticesView: View {
             ForEach(notices, id: \.rawValue) { notice in
                 Label {
                     Text(notice.message)
-                        .font(PanelTheme.Font.caption)
+                        .font(PanelTheme.Font.caption(textScale))
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 10))
+                        .font(PanelTheme.Font.at(10, textScale))
                 }
                 .foregroundStyle(PanelTheme.Palette.verdict(.mixed))
             }
@@ -177,13 +180,15 @@ struct NoticesView: View {
 
 /// What the research could not establish, in the model's own words.
 struct LimitationsView: View {
+    @Environment(\.panelTextScale) private var textScale
+
     let text: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
             SectionLabel(text: "Limitations")
             Text(text)
-                .font(PanelTheme.Font.caption)
+                .font(PanelTheme.Font.caption(textScale))
                 .foregroundStyle(PanelTheme.Palette.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -193,6 +198,8 @@ struct LimitationsView: View {
 
 /// The questions that would reduce the remaining uncertainty. One click asks them.
 struct FollowupsView: View {
+    @Environment(\.panelTextScale) private var textScale
+
     let followups: [String]
     var onSelect: (String) -> Void
 
@@ -205,10 +212,10 @@ struct FollowupsView: View {
                 } label: {
                     HStack(alignment: .top, spacing: PanelTheme.Space.small) {
                         Image(systemName: "arrow.turn.down.right")
-                            .font(.system(size: 9))
+                            .font(PanelTheme.Font.at(9, textScale))
                             .padding(.top, 2)
                         Text(followup)
-                            .font(PanelTheme.Font.caption)
+                            .font(PanelTheme.Font.caption(textScale))
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
@@ -224,6 +231,8 @@ struct FollowupsView: View {
 
 /// A failed turn: what went wrong, and one button to try again.
 struct FailureView: View {
+    @Environment(\.panelTextScale) private var textScale
+
     let message: String
     var onRetry: () -> Void
 
@@ -231,17 +240,17 @@ struct FailureView: View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.small) {
             Label {
                 Text(message)
-                    .font(PanelTheme.Font.caption)
+                    .font(PanelTheme.Font.caption(textScale))
                     .fixedSize(horizontal: false, vertical: true)
             } icon: {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
+                    .font(PanelTheme.Font.at(11, textScale))
             }
             .foregroundStyle(PanelTheme.Palette.verdict(.contradicted))
 
             Button("Try again", action: onRetry)
                 .buttonStyle(.plain)
-                .font(PanelTheme.Font.caption)
+                .font(PanelTheme.Font.caption(textScale))
                 .foregroundStyle(PanelTheme.Palette.accent)
         }
         .padding(PanelTheme.Space.medium)

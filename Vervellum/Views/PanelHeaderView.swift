@@ -8,6 +8,8 @@ import AppKit
 /// eventually in the way.
 struct PanelHeaderView: View {
 
+    @Environment(\.panelTextScale) private var textScale
+
     let title: String
     let isRunning: Bool
     @Binding var showsHistory: Bool
@@ -20,11 +22,11 @@ struct PanelHeaderView: View {
     var body: some View {
         HStack(spacing: PanelTheme.Space.small) {
             Image(systemName: "text.magnifyingglass")
-                .font(.system(size: 11, weight: .semibold))
+                .font(PanelTheme.Font.at(11, textScale, weight: .semibold))
                 .foregroundStyle(PanelTheme.Palette.accent)
 
             Text(showsHistory ? "Earlier threads" : title)
-                .font(.system(size: 12, weight: .medium))
+                .font(PanelTheme.Font.at(12, textScale, weight: .medium))
                 .foregroundStyle(PanelTheme.Palette.primaryText)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -57,6 +59,8 @@ struct PanelHeaderView: View {
 
 /// A small square icon button, styled once so every header control matches.
 private struct HeaderButton: View {
+    @Environment(\.panelTextScale) private var textScale
+
     let symbol: String
     let help: String
     var tint: Color = PanelTheme.Palette.secondaryText
@@ -67,7 +71,7 @@ private struct HeaderButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 10.5, weight: .medium))
+                .font(PanelTheme.Font.at(10.5, textScale, weight: .medium))
                 .foregroundStyle(tint)
                 .frame(width: 20, height: 18)
                 .background(isHovering ? PanelTheme.Palette.chipFill : .clear,

@@ -12,6 +12,8 @@ import SwiftUI
 /// user can expand if they want to audit it.
 struct ProcessTrailView: View {
 
+    @Environment(\.panelTextScale) private var textScale
+
     let turn: ResearchTurn
     @Binding var isExpanded: Bool
 
@@ -40,7 +42,7 @@ struct ProcessTrailView: View {
             HStack(spacing: PanelTheme.Space.small) {
                 stageGlyph
                 Text(summaryLine)
-                    .font(PanelTheme.Font.caption)
+                    .font(PanelTheme.Font.caption(textScale))
                     .foregroundStyle(PanelTheme.Palette.secondaryText)
                     .lineLimit(1)
                 if isRunning {
@@ -48,7 +50,7 @@ struct ProcessTrailView: View {
                     // provider is common enough that the wait should be visible.
                     TimelineView(.periodic(from: turn.askedAt, by: 1)) { context in
                         Text(Formatting.duration(context.date.timeIntervalSince(turn.askedAt)))
-                            .font(PanelTheme.Font.caption)
+                            .font(PanelTheme.Font.caption(textScale))
                             .monospacedDigit()
                             .foregroundStyle(PanelTheme.Palette.tertiaryText)
                     }
@@ -56,7 +58,7 @@ struct ProcessTrailView: View {
                 Spacer(minLength: 0)
                 if !isRunning {
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(PanelTheme.Font.at(9, textScale, weight: .semibold))
                         .foregroundStyle(PanelTheme.Palette.tertiaryText)
                 }
             }
@@ -76,7 +78,7 @@ struct ProcessTrailView: View {
                 .frame(width: 12, height: 12)
         } else {
             Image(systemName: terminalSymbol)
-                .font(.system(size: 10, weight: .semibold))
+                .font(PanelTheme.Font.at(10, textScale, weight: .semibold))
                 .foregroundStyle(terminalColor)
                 .frame(width: 12)
         }
@@ -136,7 +138,7 @@ struct ProcessTrailView: View {
             if !turn.reading.isEmpty {
                 labelled("Reading") {
                     Text(turn.reading)
-                        .font(PanelTheme.Font.caption)
+                        .font(PanelTheme.Font.caption(textScale))
                         .foregroundStyle(PanelTheme.Palette.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -147,15 +149,15 @@ struct ProcessTrailView: View {
                         ForEach(turn.searches) { search in
                             HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
                                 Image(systemName: "magnifyingglass")
-                                    .font(.system(size: 9))
+                                    .font(PanelTheme.Font.at(9, textScale))
                                     .foregroundStyle(PanelTheme.Palette.tertiaryText)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(search.displayQuery)
-                                        .font(PanelTheme.Font.caption)
+                                        .font(PanelTheme.Font.caption(textScale))
                                         .foregroundStyle(PanelTheme.Palette.primaryText)
                                     if !search.purpose.isEmpty {
                                         Text(search.purpose)
-                                            .font(.system(size: 10))
+                                            .font(PanelTheme.Font.at(10, textScale))
                                             .foregroundStyle(PanelTheme.Palette.tertiaryText)
                                     }
                                 }
@@ -172,7 +174,7 @@ struct ProcessTrailView: View {
                                          @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.hair) {
             Text(title.uppercased())
-                .font(PanelTheme.Font.label)
+                .font(PanelTheme.Font.label(textScale))
                 .tracking(0.7)
                 .foregroundStyle(PanelTheme.Palette.tertiaryText)
             content()
