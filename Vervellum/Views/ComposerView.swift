@@ -10,10 +10,10 @@ import AppKit
 ///   non-activating panel does not reliably re-take first responder when the panel is
 ///   shown again — the view never left the hierarchy, so nothing re-fires. Owning the
 ///   text view means focus can simply be *asserted*.
-/// * **Return.** A single-line field editor maps Shift-Return and Option-Return to
-///   `insertNewlineIgnoringFieldEditor:`, which never fires the field's action — so
-///   with a SwiftUI `TextField`, `.onSubmit` sees plain Return only and a modified
-///   Return silently does nothing.
+/// * **Return.** A modified Return never fires a field's action: Option-Return maps to
+///   `insertNewlineIgnoringFieldEditor:` and Shift-Return to `insertLineBreak:`, and
+///   neither is `insertNewline:` — so with a SwiftUI `TextField`, `.onSubmit` sees
+///   plain Return only and a modified Return silently does nothing.
 /// * **Growth.** The composer must grow from one line to several as the question gets
 ///   longer, and then stop. That is a height calculation on the layout manager, not
 ///   something a `TextField` exposes.
@@ -193,9 +193,21 @@ struct ComposerView: NSViewRepresentable {
                 parent.onSubmit()
                 return true
 
-            // Shift-Return and Option-Return arrive here. With submit-on-Return they
-            // insert a newline; with the inverse preference they submit.
-            case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+            // A Return that carries a modifier. With submit-on-Return these add a
+            // newline; with the inverse preference they submit.
+            //
+            // Both selectors, because AppKit's standard key bindings send *different*
+            // ones for the two keys: Option-Return is
+            // `insertNewlineIgnoringFieldEditor:` and Shift-Return is
+            // `insertLineBreak:`. Handling only the first is why Shift-Return did not
+            // add a line — it fell through to `default`, and `NSTextView`'s own
+            // `insertLineBreak:` inserts U+2028 LINE SEPARATOR rather than a newline,
+            // so the character that reached the model was not the one the user typed.
+            // Listing both is also what makes this robust if the bindings differ by
+            // keyboard layout or macOS version: whichever selector arrives, the
+            // composer does the same thing.
+            case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)),
+                 #selector(NSResponder.insertLineBreak(_:)):
                 if parent.submitOnReturn {
                     textView.insertText("\n", replacementRange: textView.selectedRange())
                 } else {
