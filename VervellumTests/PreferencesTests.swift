@@ -188,7 +188,12 @@ final class PreferencesTests: XCTestCase {
     }
 
     private func temporaryThreadsURL() -> URL {
-        URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("VervellumPrefsTest-\(UUID().uuidString).json")
+        // The retention test writes for real — forty threads at a zero debounce — so
+        // without this every run leaves a file behind. `ThreadArchiveTests` tears its
+        // directory down; this file had no equivalent.
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
     }
 }
