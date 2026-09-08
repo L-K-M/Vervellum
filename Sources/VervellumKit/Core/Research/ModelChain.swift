@@ -42,6 +42,16 @@ final class ModelChain {
     /// How far down the chain this turn has already moved.
     private var index = 0
 
+    /// Set while `perform` is running, so a debug build catches an overlapping call.
+    ///
+    /// The one-task rule is stated in this type's documentation and enforced by nothing.
+    /// Two stages running at once would race the cursor and the record of which provider
+    /// answered — which is a mis-attributed answer and a duplicated notice, arriving as a
+    /// bug that reproduces once in twenty runs. `assert` rather than a lock: serialising
+    /// would make the race safe and the caller still wrong, and this is a contract about
+    /// how a turn is structured, not a synchronisation problem to solve.
+    private var inFlight = false
+
     /// The client for each provider, created on first use and then kept.
     ///
     /// Kept rather than rebuilt because `ChatCompletionsClient` remembers whether its
@@ -115,6 +125,9 @@ final class ModelChain {
     func perform<T>(_ label: String,
                     beforeRetry: (() -> Void)? = nil,
                     _ body: (ChatCompletionsClient) async throws -> T) async throws -> T {
+        assert(!inFlight, "ModelChain runs one stage at a time; overlapping calls race the cursor")
+        inFlight = true
+        defer { inFlight = false }
         var firstError: ResearchError?
         var attempted = 0
         lastAnswered = nil

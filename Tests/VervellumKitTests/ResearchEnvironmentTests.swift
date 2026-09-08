@@ -74,6 +74,12 @@ final class ResearchEnvironmentTests: XCTestCase {
     func testAnEnvironmentStillSaysWhichProvidersHadAKey() {
         let (subject, profile, spare) = environment()
         let rendering = "\(subject)"
+        // The debug rendering too. The leak test covers three ways of printing this
+        // value and the usefulness tests covered one, so `debugDescription` could have
+        // drifted into redacted-but-useless — which is the rendering `debugPrint` and a
+        // debugger's quick-look both reach for — with nothing failing.
+        XCTAssertTrue(String(reflecting: subject).contains("modelKey: present"),
+                      "the debug rendering says less than the plain one")
         XCTAssertTrue(rendering.contains(profile.id.uuidString), "the selection is not named")
         // The spare too. Naming only the selected one would satisfy a rendering that
         // reported a bare count and never said which providers the map covers — which is

@@ -443,4 +443,22 @@ final class ProviderSettingsTests: XCTestCase {
         XCTAssertEqual(keys[beta.id], "beta-key")
         XCTAssertNil(keys[unkeyed.id], "a local server takes no key, and sends no header")
     }
+
+    /// With fallback off there is nowhere to fall back to, so the spare's key is neither
+    /// read nor held. `Environment` carries this map for the length of a turn and is the
+    /// value this app documents as the most expensive thing it owns to print — a secret
+    /// kept in it for a provider the turn cannot dial is a keychain read spent to widen
+    /// what one hurried `print` could spill.
+    func testOnlyTheSelectionsKeyIsCollectedWhenFallbackIsOff() throws {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let settings = ProviderSettings(modelProfiles: [alpha, beta], selectedModelID: beta.id,
+                                        modelFallback: false)
+        let secrets = EphemeralSecretStore()
+        try secrets.set("alpha-key", for: alpha.secretAccount)
+        try secrets.set("beta-key", for: beta.secretAccount)
+
+        XCTAssertEqual(secrets.modelKeys(for: settings), [beta.id: "beta-key"],
+                       "only the provider the chain can reach")
+    }
 }
