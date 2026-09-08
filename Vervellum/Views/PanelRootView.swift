@@ -191,21 +191,6 @@ struct PanelRootView: View {
                 // end of the shorter list, or at a command the user has just filtered out.
                 completionIndex = nil
             }
-            .onChange(of: completionIndex) { _, index in
-                // `.isSelected` only speaks while a VoiceOver cursor sits on the row, and
-                // during ↑/↓ the focus never leaves the text field — so the trait flips
-                // in silence and Return quietly changes meaning. Say the name instead.
-                guard let completions = visibleCompletions, let index,
-                      completions.indices.contains(index) else { return }
-                // With the position, because the announcement is the only feedback while
-                // arrowing and "help" alone says neither that it is a command nor how far
-                // down the list it sits.
-                let name = completions[index].name
-                NSAccessibility.post(
-                    element: NSApp as Any,
-                    notification: .announcementRequested,
-                    userInfo: [.announcement: "/\(name), \(index + 1) of \(completions.count)"])
-            }
             .onChange(of: engine.thread.turns.count) { _, _ in
                 scrollToBottom(proxy)
             }
@@ -529,6 +514,16 @@ struct PanelRootView: View {
     // MARK: Actions
 
     private func submit(_ text: String) {
+        // A half-typed command on screen — `/h` under `history` and `help` — is a command
+        // being chosen, and `parse` would send it to the model as a question, spending a
+        // real request on a typo. Declining keeps the text so the next keystroke finishes
+        // the word, which is what `/direct` with no argument already does below.
+        //
+        // Here rather than beside the Return key, because Return is not the only way in:
+        // the panel's own submit shortcut calls this directly, and so would anything
+        // added later. The send button knows the rule too, but only so it can grey itself
+        // out — a button can show the state, and this is where the state is enforced.
+        guard !ComposerCommand.isUnfinishedCommand(text) else { return }
         recallIndex = nil
         redactionNote = nil
         queueFullNote = false
@@ -708,11 +703,6 @@ struct PanelRootView: View {
             accept(completion: completions[index].name)
             return
         }
-        // Nothing highlighted, but a half-typed command on screen: `/h` under `history`
-        // and `help` is a command being chosen, and `parse` would otherwise send it to
-        // the model as a question. Declining keeps the text so the next keystroke
-        // finishes the word — the same thing `/direct` with no argument already does.
-        guard !ComposerCommand.isUnfinishedCommand(draft) else { return }
         submit(draft)
     }
 
@@ -728,7 +718,28 @@ struct PanelRootView: View {
         }
         completionIndex = ComposerCommand.moveSelection(completionIndex, up: up,
                                                         count: completions.count)
+        announceSelection(in: completions)
         return true
+    }
+
+    /// Speaks the highlighted command, because nothing else will.
+    ///
+    /// `.accessibilityAddTraits(.isSelected)` only speaks while a VoiceOver cursor sits
+    /// on the row, and during ↑/↓ the focus never leaves the text field — so the trait
+    /// flips in silence and Return quietly changes meaning. The position goes with the
+    /// name: this is the only feedback while arrowing, and "help" alone says neither that
+    /// it is a command nor how far down the list it sits.
+    ///
+    /// Called from the arrow keys alone, not from every write to `completionIndex`. The
+    /// mouse writes it too, and announcing there would talk over VoiceOver every time the
+    /// pointer crossed a row — noise aimed squarely at the people this is for.
+    private func announceSelection(in completions: [ComposerCommand.Entry]) {
+        guard let index = completionIndex, completions.indices.contains(index) else { return }
+        let name = completions[index].name
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [.announcement: "/\(name), \(index + 1) of \(completions.count)"])
     }
 
     /// ↑/↓ walk back through this thread's earlier questions, the way a shell does.

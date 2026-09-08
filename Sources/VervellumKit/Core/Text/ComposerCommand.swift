@@ -106,7 +106,11 @@ enum ComposerCommand: Equatable {
     /// * **↓ enters at the top, ↑ enters at the bottom**, the way a menu opened upward
     ///   behaves.
     /// * **↑ off the top returns to nothing highlighted** rather than wrapping. Wrapping
-    ///   would leave no way back to plain typing without the mouse.
+    ///   would leave no way back to plain typing without the mouse. A further ↑ then
+    ///   enters at the bottom again, by the rule above — which is not the wrap this
+    ///   forbids, because the state in between is a real one: nothing is highlighted, and
+    ///   Return submits rather than accepting. Going 0 → last in a single press would
+    ///   skip past it.
     /// * **↓ off the bottom stays**, because there is nowhere below the list to go.
     static func moveSelection(_ current: Int?, up: Bool, count: Int) -> Int? {
         guard count > 0 else { return nil }
