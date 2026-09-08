@@ -69,7 +69,9 @@ runs the searches and answers based on current sources.
 - **As many models as you want, chosen per question.** Configure several providers —
   a local server, a fast hosted model, a careful one — each with its own endpoint and
   its own key. Pick the one that answers next from the panel or with `/model`; every
-  turn records the model that produced it.
+  turn records the model that produced it. The refresh button beside a model field asks
+  the endpoint which models it serves, so the name is chosen from a list rather than
+  typed from memory — and the field stays typeable for a gateway that lists nothing.
 - **Three ways to read a page.** **Snippets only** is the old behaviour. **Fetch
   directly** is the default: Vervellum requests the page itself, with no key, no cookie
   and no referrer — the only thing it does that contacts a site you didn't configure, so

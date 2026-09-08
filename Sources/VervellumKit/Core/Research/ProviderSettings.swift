@@ -481,6 +481,61 @@ struct ProviderSettings: Equatable, Codable {
 
     private static let versionSuffix = try! NSRegularExpression(pattern: #"/v[0-9]+$"#)
 
+    /// The model-list URL for whatever the user pasted as their chat endpoint.
+    ///
+    /// The same three shapes `chatCompletionsURL` accepts, in reverse. A bare host or a
+    /// versioned base (`/v1`) gains `/models`; a full chat path (`/v1/chat/completions`)
+    /// has that suffix removed first, because appending to it would ask for
+    /// `/chat/completions/models`, which is nothing.
+    ///
+    /// The append is idempotent, because the model-list URL is itself a plausible paste:
+    /// it is the address the provider's documentation prints, and a reader who has just
+    /// been told Vervellum can list models may well copy that line into the endpoint
+    /// field. Appending blindly would ask for `/v1/models/models` and 404.
+    ///
+    /// Azure's deployment-scoped route is the one shape whose model list is not its own
+    /// sibling. `chatCompletionsURL` accepts `/openai/deployments/<name>/chat/completions`
+    /// as a custom path and leaves it alone, but Azure lists every deployment at
+    /// `/openai/models` — so appending beside the deployment asks for a route that has
+    /// never existed, and the reader gets a 404 on an address whose questions work.
+    ///
+    /// The shape is handled; Azure is not claimed. Its classic surface authenticates with
+    /// an `api-key` header and Vervellum sends `Authorization: Bearer` everywhere, so that
+    /// surface needs a credential scheme this app does not have — its own piece of work.
+    /// What the fold is worth today is any gateway presenting Azure's path layout over
+    /// bearer auth, and not asking a route that cannot exist.
+    ///
+    /// The query string is carried over, because `chatCompletionsURL` carries it and the
+    /// two addresses have to describe the same provider. Azure's OpenAI-compatible
+    /// surface is the case that makes this concrete: it requires `?api-version=` on every
+    /// call, so dropping it here produced the worst failure this feature can have —
+    /// questions work, listing 404s, and the message says nothing about a stripped
+    /// parameter. The fragment is still dropped, since it is never sent to a server.
+    ///
+    /// Here rather than on `ModelCatalog` so the endpoint rules — HTTPS, no credentials
+    /// in the URL, a host — stay in one place and keep their validator private.
+    static func modelListURL(from raw: String) -> URL? {
+        guard var components = validatedURLComponents(raw) else { return nil }
+        var path = components.path
+        while path.hasSuffix("/") { path.removeLast() }
+        if path.hasSuffix(chatCompletionsSuffix) { path.removeLast(chatCompletionsSuffix.count) }
+        while path.hasSuffix("/") { path.removeLast() }
+        // Only a deployment name — one segment, nothing after it — is folded away. A
+        // deeper path under `deployments/` is somebody else's routing scheme, and
+        // guessing at it would be worse than appending beside it.
+        if let deployments = path.range(of: deploymentsInfix),
+           path[deployments.upperBound...].firstIndex(of: "/") == nil {
+            path = String(path[..<deployments.lowerBound]) + "/openai"
+        }
+        components.path = path.hasSuffix(modelsSuffix) ? path : path + modelsSuffix
+        components.fragment = nil
+        return components.url
+    }
+
+    private static let chatCompletionsSuffix = "/chat/completions"
+    private static let modelsSuffix = "/models"
+    private static let deploymentsInfix = "/openai/deployments/"
+
     /// The SearXNG JSON search URL for an instance address.
     ///
     /// Users paste the instance's home page (`https://searx.example.org`), because that
