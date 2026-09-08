@@ -38,6 +38,8 @@ final class ResearchRunner: ResearchRunning {
         /// back is to reach a *different* endpoint, and each has a secret slot of its
         /// own. Captured with the rest of the environment, once, so a key edited
         /// mid-turn cannot change which credential a later stage sends.
+        /// - Note: every configured provider's live key, not just the selected one.
+        ///   Never log an `Environment`; turn diagnostics name profiles, never keys.
         var modelKeys: [UUID: String]
         var searchKey: String?
         var readerKey: String?

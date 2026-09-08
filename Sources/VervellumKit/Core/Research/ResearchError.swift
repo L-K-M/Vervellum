@@ -30,6 +30,10 @@ struct ResearchError: LocalizedError, Equatable {
     /// * `invalidContext` — the payload could not be encoded, or is larger than the
     ///   context budget. That is measured before a byte leaves the machine and is the
     ///   same at every endpoint, so every provider in the chain would fail identically.
+    ///   The budget is `ResearchContext.maxCharacters`, one app-wide constant — not a
+    ///   per-model context window. Should it ever become per-model, a spare with a
+    ///   larger window could serve a payload the head refused, and this exclusion would
+    ///   have to go.
     ///
     /// Everything else is worth another provider, including the ones that look like
     /// configuration rather than weather. A rejected key, a 404 from a wrong path, a

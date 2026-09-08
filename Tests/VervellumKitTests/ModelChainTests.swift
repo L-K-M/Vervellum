@@ -272,6 +272,26 @@ final class ModelChainTests: XCTestCase {
         }
     }
 
+    /// A provider that was skipped was never tried, so it must not be counted. One
+    /// usable provider that fails is a single-provider failure however many half-written
+    /// spares sit beside it, and "All 2 model providers failed" after one attempt would
+    /// be both wrong and unhelpful.
+    func testASkippedProviderDoesNotCountAsTried() async {
+        let profiles = [ModelProfile.new(name: "blank", endpoint: "", model: ""),
+                        profile("beta")]
+        do {
+            _ = try await chain(profiles).perform("Plan") { _ in
+                throw ResearchError.connectionFailed
+            }
+            XCTFail("expected the chain to fail")
+        } catch let error as ResearchError {
+            XCTAssertEqual(error, ResearchError.connectionFailed,
+                           "one provider tried, so its own error — not an exhaustion count")
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+    }
+
     /// With one provider the message must read exactly as it did before there was a
     /// chain at all — "All 1 model providers failed" would be a regression in prose.
     func testASingleProvidersFailureIsReportedUnchanged() async {

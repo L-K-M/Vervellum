@@ -322,9 +322,10 @@ struct ProvidersView: View {
         guard modelFallback else {
             return "A failing provider fails the question. Nothing else is tried."
         }
-        let selected = profiles.first { $0.id == selectedID } ?? profiles.first
-        guard let selected else { return "" }
-        let order = [selected] + profiles.filter { $0.id != selected.id }
+        // The chain's own rule, not a second copy of it: a caption that drifted would
+        // describe an order the runner does not walk.
+        let order = ProviderSettings.chainOrder(profiles, selectedID: selectedID)
+        guard !order.isEmpty else { return "" }
         return "Order: " + order.map(\.displayName).joined(separator: " → ")
             + ". The turn says which provider answered."
     }

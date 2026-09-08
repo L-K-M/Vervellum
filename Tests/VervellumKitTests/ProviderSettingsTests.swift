@@ -389,6 +389,30 @@ final class ProviderSettingsTests: XCTestCase {
         XCTAssertEqual(settings.modelChain.map(\.model), ["alpha", "beta"])
     }
 
+    /// The Settings caption prints the order back to the reader through this same
+    /// helper. Pinned as one rule so a caption cannot describe a chain the runner does
+    /// not walk — including when the saved selection no longer exists, where both have
+    /// to degrade to the first profile rather than disagree about which is the head.
+    func testTheSharedOrderingIsTheChainsOwn() {
+        let alpha = chainProfile("alpha")
+        let beta = chainProfile("beta")
+        let gamma = chainProfile("gamma")
+        let profiles = [alpha, beta, gamma]
+
+        let settings = ProviderSettings(modelProfiles: profiles, selectedModelID: beta.id)
+        XCTAssertEqual(
+            ProviderSettings.chainOrder(profiles, selectedID: beta.id).map(\.model),
+            settings.modelChain.map(\.model))
+        XCTAssertEqual(settings.modelChain.map(\.model), ["beta", "alpha", "gamma"])
+
+        let stale = ProviderSettings(modelProfiles: profiles, selectedModelID: UUID())
+        XCTAssertEqual(
+            ProviderSettings.chainOrder(profiles, selectedID: stale.selectedModelID).map(\.model),
+            stale.modelChain.map(\.model))
+
+        XCTAssertTrue(ProviderSettings.chainOrder([], selectedID: nil).isEmpty)
+    }
+
     func testNoProvidersIsAnEmptyChain() {
         XCTAssertTrue(ProviderSettings(modelProfiles: []).modelChain.isEmpty)
     }

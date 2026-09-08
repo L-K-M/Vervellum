@@ -316,7 +316,22 @@ struct ProviderSettings: Equatable, Codable {
     var modelChain: [ModelProfile] {
         guard let selected = selectedModel else { return [] }
         guard modelFallback else { return [selected] }
-        return [selected] + modelProfiles.filter { $0.id != selected.id }
+        return Self.chainOrder(modelProfiles, selectedID: selectedModelID)
+    }
+
+    /// The order a chain tries providers in: the selection first, then the rest as the
+    /// Providers list shows them.
+    ///
+    /// Static and separate from `modelChain` because the Settings pane prints this order
+    /// back to the reader, and it was deriving it a second time from the same rule. Two
+    /// copies of an ordering is how a caption ends up describing a chain the runner does
+    /// not walk. A selection that no longer exists degrades to the first profile, the
+    /// same way `selectedModel` does, so the caption cannot claim an order the chain
+    /// would not take.
+    static func chainOrder(_ profiles: [ModelProfile], selectedID: UUID?) -> [ModelProfile] {
+        guard let selected = profiles.first(where: { $0.id == selectedID }) ?? profiles.first
+        else { return [] }
+        return [selected] + profiles.filter { $0.id != selected.id }
     }
 
     /// Selects the profile whose name or model identifier matches `name`, exactly first

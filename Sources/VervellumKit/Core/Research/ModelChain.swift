@@ -75,6 +75,18 @@ final class ModelChain {
     /// mid-sentence: without it the next provider's answer would be appended to the
     /// dead one's fragment, producing a paragraph no model actually wrote.
     ///
+    /// Every failure `body` can raise arrives as a `ResearchError`: `HTTPTransport` and
+    /// `ChatCompletionsClient` convert everything they catch, so nothing else reaches the
+    /// clause below and slips past the chain unretried. That contract lives in those
+    /// files; it is written here because this loop silently depends on it.
+    ///
+    /// `Task.isCancelled` is checked as well as the error, and not only for belt and
+    /// braces. A cancellation almost always arrives as `ResearchError.cancelled`, which
+    /// the error test already excludes — but a request that fails for its own reason in
+    /// the same moment the user presses Stop arrives as something retryable, and
+    /// re-sending the question then would break the one promise this app makes about
+    /// Stop.
+    ///
     /// - Throws: the *first* provider's error when every provider fails, prefixed with
     ///   how many were tried. The first is the one the user selected and the one they
     ///   will act on; the last is whatever the least-preferred spare happened to say.
@@ -98,7 +110,8 @@ final class ModelChain {
             attempted += 1
             do {
                 return try await body(client)
-            } catch let error as ResearchError where error.isWorthAnotherProvider {
+            } catch let error as ResearchError
+                        where error.isWorthAnotherProvider && !Task.isCancelled {
                 if firstError == nil { firstError = error }
                 trace.warn("\(label) failed on \(profile.displayName): \(error.message)")
                 index += 1
