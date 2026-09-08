@@ -493,6 +493,13 @@ struct ProviderSettings: Equatable, Codable {
     /// been told Vervellum can list models may well copy that line into the endpoint
     /// field. Appending blindly would ask for `/v1/models/models` and 404.
     ///
+    /// The query string is carried over, because `chatCompletionsURL` carries it and the
+    /// two addresses have to describe the same provider. Azure's OpenAI-compatible
+    /// surface is the case that makes this concrete: it requires `?api-version=` on every
+    /// call, so dropping it here produced the worst failure this feature can have —
+    /// questions work, listing 404s, and the message says nothing about a stripped
+    /// parameter. The fragment is still dropped, since it is never sent to a server.
+    ///
     /// Here rather than on `ModelCatalog` so the endpoint rules — HTTPS, no credentials
     /// in the URL, a host — stay in one place and keep their validator private.
     static func modelListURL(from raw: String) -> URL? {
@@ -502,7 +509,6 @@ struct ProviderSettings: Equatable, Codable {
         if path.hasSuffix(chatCompletionsSuffix) { path.removeLast(chatCompletionsSuffix.count) }
         while path.hasSuffix("/") { path.removeLast() }
         components.path = path.hasSuffix(modelsSuffix) ? path : path + modelsSuffix
-        components.query = nil
         components.fragment = nil
         return components.url
     }

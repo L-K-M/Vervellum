@@ -10,7 +10,12 @@ import Foundation
 /// So the list is fetched instead. `GET <base>/models` is the one route every
 /// OpenAI-compatible server publishes — llama.cpp, Ollama's compatibility layer, vLLM,
 /// LM Studio and the hosted vendors all answer it — and it needs no request body, which
-/// makes it a cheap way to confirm the endpoint and key are right at the same time.
+/// makes it a cheap way to confirm the endpoint is right.
+///
+/// It confirms the *endpoint*, not necessarily the key. Several of the servers named
+/// above serve `/models` unauthenticated, so a list can arrive over a key that the first
+/// real question will reject. A hosted vendor that does check will refuse the list, and
+/// that refusal is worth having early — but a list is not a promise.
 ///
 /// Manual entry stays. This supplements the field, it never replaces it: a gateway that
 /// does not list its models, one that lists a hundred aliases, or a name only reachable

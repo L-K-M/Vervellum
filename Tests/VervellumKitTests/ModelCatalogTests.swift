@@ -63,13 +63,29 @@ final class ModelCatalogTests: XCTestCase {
                        "https://api.example.com/v1/mymodels/models")
     }
 
-    func testTrailingSlashesAndQueriesAreDropped() {
+    func testTrailingSlashesAreDroppedAndTheFragmentWithThem() {
         XCTAssertEqual(ProviderSettings.modelListURL(from: "https://api.example.com/v1/")?
             .absoluteString,
                        "https://api.example.com/v1/models")
-        XCTAssertEqual(ProviderSettings.modelListURL(from: "https://api.example.com/v1?key=x#f")?
+        XCTAssertEqual(ProviderSettings.modelListURL(from: "https://api.example.com/v1#f")?
             .absoluteString,
                        "https://api.example.com/v1/models")
+    }
+
+    /// The query is not the fragment: `chatCompletionsURL` carries it, so this must too,
+    /// or a provider that answers questions reports no models. Azure's OpenAI-compatible
+    /// surface requires `?api-version=` on every call.
+    func testTheQueryIsCarriedOntoTheListURL() {
+        XCTAssertEqual(
+            ProviderSettings.modelListURL(from: "https://api.example.com/v1?api-version=2024-02")?
+                .absoluteString,
+            "https://api.example.com/v1/models?api-version=2024-02")
+        // And from the full chat path, which is the shape Azure's docs actually print.
+        XCTAssertEqual(
+            ProviderSettings.modelListURL(
+                from: "https://api.example.com/v1/chat/completions?api-version=2024-02")?
+                .absoluteString,
+            "https://api.example.com/v1/models?api-version=2024-02")
     }
 
     /// The same endpoint hygiene every other address gets.

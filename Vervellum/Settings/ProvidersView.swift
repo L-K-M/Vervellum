@@ -237,6 +237,9 @@ struct ProvidersView: View {
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
+                    // `.help` is a hint, not a label: without this the button reads as
+                    // "arrow clockwise", which says nothing about what it does.
+                    .accessibilityLabel("List this provider's models")
                     .help("Ask this endpoint which models it serves")
                     .disabled(ProviderSettings.modelListURL(from: profile.wrappedValue.endpoint) == nil)
                 }
@@ -245,11 +248,14 @@ struct ProvidersView: View {
             switch catalogues[id] {
             case .loaded(let models):
                 Picker("", selection: profile.model) {
-                    // The typed value is offered back as a row of its own when the
-                    // endpoint did not list it, so choosing from the menu cannot silently
-                    // discard a name that works.
-                    if !models.contains(profile.wrappedValue.model),
-                       !profile.wrappedValue.model.isEmpty {
+                    // Every value the field can hold needs a row, or the menu draws
+                    // blank and SwiftUI complains that the selection matches no tag.
+                    if profile.wrappedValue.model.isEmpty {
+                        Text("Type or choose a model").tag("")
+                    } else if !models.contains(profile.wrappedValue.model) {
+                        // The typed value is offered back as a row of its own when the
+                        // endpoint did not list it, so choosing from the menu cannot
+                        // silently discard a name that works.
                         Text(profile.wrappedValue.model).tag(profile.wrappedValue.model)
                     }
                     ForEach(models, id: \.self) { Text($0).tag($0) }
@@ -284,7 +290,9 @@ struct ProvidersView: View {
     ///
     /// Uses the key typed in this session when there is one and the stored key otherwise,
     /// so a provider can be verified before Save — which is the moment the list is most
-    /// useful, and the moment a key that is wrong is cheapest to notice.
+    /// useful. A list proves the address, not the key: plenty of local servers answer
+    /// `/models` without looking at one. A hosted vendor that does check will refuse
+    /// here, and that is worth catching early, but a loaded list is not a working key.
     @MainActor
     private func loadModels(for profile: ModelProfile) async {
         guard let url = ProviderSettings.modelListURL(from: profile.endpoint) else { return }
@@ -432,6 +440,7 @@ struct ProvidersView: View {
         accountsToDelete.append(profiles[index].secretAccount)
         profiles.remove(at: index)
         keyEntries[id] = nil
+        catalogues[id] = nil
         storedKeys.remove(id)
         if selectedID == id { selectedID = profiles.first?.id }
     }
