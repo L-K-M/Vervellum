@@ -124,6 +124,11 @@ final class ComposerCommandTests: XCTestCase {
     func testAnEmptyListNeverYieldsASelection() {
         XCTAssertNil(ComposerCommand.moveSelection(nil, up: true, count: 0))
         XCTAssertNil(ComposerCommand.moveSelection(nil, up: false, count: 0))
+        // A selection left over from a list that has just collapsed — the slash deleted
+        // while an arrow key was already on its way. Only the nil seed was pinned, so a
+        // guard moved below the switch would have kept passing.
+        XCTAssertNil(ComposerCommand.moveSelection(0, up: false, count: 0))
+        XCTAssertNil(ComposerCommand.moveSelection(0, up: true, count: 0))
     }
 
     func testDownEntersAtTheTopAndUpEntersAtTheBottom() {
@@ -241,6 +246,12 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertFalse(ComposerCommand.isUnfinishedCommand("what is swift"))
         XCTAssertFalse(ComposerCommand.isUnfinishedCommand("and/or, in logic"))
         XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/direct why is the sky blue"))
+        // The in-between case, and the one the guard's own comment is about: an unknown
+        // slash word that has gained an argument. The list closed at the space, so this
+        // is prose again — and if `completions(for:)` ever widened to match past the
+        // command word, this is the assertion that would catch a question being eaten.
+        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/h why is the sky blue"),
+                       "an argument closes the list, so an unknown prefix plus prose asks")
         // No list is on screen for a slash word that prefixes nothing, so it stays a
         // question — the pre-existing behaviour this rule deliberately does not touch.
         XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/zzz"))

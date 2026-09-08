@@ -356,8 +356,12 @@ struct PanelRootView: View {
     /// the one left looking at it.
     private var unfinishedCommandHelp: String? {
         guard !isDraftBlank, ComposerCommand.isUnfinishedCommand(draft) else { return nil }
-        return "Finish the command name"
+        return Self.unfinishedCommandCopy
     }
+
+    /// Said twice — once to the eye as a tooltip, once to VoiceOver from `submit` — and
+    /// the comment there already promised they were the same sentence. Now they are.
+    private static let unfinishedCommandCopy = "Finish the command name"
 
     private var isDraftBlank: Bool {
         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -560,7 +564,7 @@ struct PanelRootView: View {
         guard !ComposerCommand.isUnfinishedCommand(text) else {
             // A dead key is indistinguishable from a broken one. The greyed-out send
             // button says this to anyone who can see it; this says it to everyone else.
-            announce("Finish the command name")
+            announce(Self.unfinishedCommandCopy)
             return
         }
         recallIndex = nil
@@ -642,10 +646,16 @@ struct PanelRootView: View {
     /// leave the history list, then clear a draft, then close the panel. Closing on
     /// the first press would throw away a half-typed question.
     private func backOut() {
-        if completionIndex != nil {
+        if effectiveCompletionIndex != nil {
             // Undoes the highlight before anything else, so Escape steps back out of the
             // command list without also throwing away the question being typed.
+            //
+            // Either index, because Return honours either: checking `completionIndex`
+            // alone left Escape doing nothing visible on a row the *pointer* had
+            // highlighted, and the next Return still accepted it. Splitting the two
+            // indices is what made that possible, so this is the other half of it.
             completionIndex = nil
+            hoverIndex = nil
             // Leaving the list changes what Return does, exactly as entering it did, and
             // a change of meaning nobody is told about is the thing the announcements on
             // the way in exist to prevent.
@@ -774,7 +784,15 @@ struct PanelRootView: View {
                                                   count: completions.count)
         hoverIndex = nil
         completionIndex = moved
-        announceSelection(moved, in: completions)
+        if moved == nil {
+            // ↑ off the top is a way out of the list, and leaving changes what Return
+            // does exactly as Escape's does. Only `announceSelection` spoke here, and it
+            // has nothing to say about nil — so the one exit a reader is most likely to
+            // take by accident was the silent one.
+            announce("Left the command list")
+        } else {
+            announceSelection(moved, in: completions)
+        }
         return true
     }
 
