@@ -58,9 +58,11 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertEqual(ComposerCommand.completions(for: "/")?.count, ComposerCommand.catalogue.count)
     }
 
-    /// The rule two things now share: the list is open for exactly these inputs, and
-    /// Return is withheld for exactly these inputs. Pinned directly so the shape cannot
-    /// be loosened by accident on its way to either caller.
+    /// The ceiling two things now share: the list can only open on one of these inputs,
+    /// and Return is only withheld inside them. Neither is the same set — `/zzz` is a bare
+    /// command word that opens nothing and is sent as typed — so what is pinned here is
+    /// the shape both narrow down from, which cannot be loosened by accident on its way to
+    /// either caller.
     func testWhatCountsAsACommandWordStillBeingTyped() {
         XCTAssertTrue(ComposerCommand.isBareCommandWord("/"))
         XCTAssertTrue(ComposerCommand.isBareCommandWord("/h"))
@@ -149,6 +151,11 @@ final class ComposerCommandTests: XCTestCase {
         // guard moved below the switch would have kept passing.
         XCTAssertNil(ComposerCommand.moveSelection(0, up: false, count: 0))
         XCTAssertNil(ComposerCommand.moveSelection(0, up: true, count: 0))
+        // The guard reads `count > 0`, not `count != 0`, and only the zero half of that
+        // was pinned. A "tidier" `let last = max(count - 1, 0)` would keep every
+        // assertion above green while handing back row 0 of a list that has no rows.
+        XCTAssertNil(ComposerCommand.moveSelection(nil, up: false, count: -1))
+        XCTAssertNil(ComposerCommand.moveSelection(0, up: true, count: -1))
     }
 
     func testDownEntersAtTheTopAndUpEntersAtTheBottom() {

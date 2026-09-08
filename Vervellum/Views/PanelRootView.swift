@@ -384,6 +384,10 @@ struct PanelRootView: View {
     /// Said twice — once to the eye as a tooltip, once to VoiceOver from `submit` — and
     /// the comment there already promised they were the same sentence. Now they are.
     private static let unfinishedCommandCopy = "Finish the command name"
+    /// Spoken by both ways out of the list — Escape, and ↑ off the top. Named because
+    /// two literals for one transition is how a screen reader ends up describing the
+    /// same thing two ways after somebody tunes the wording at one of them.
+    private static let leftCommandListCopy = "Left the command list"
 
     private var isDraftBlank: Bool {
         draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -687,7 +691,7 @@ struct PanelRootView: View {
             // Leaving the list changes what Return does, exactly as entering it did, and
             // a change of meaning nobody is told about is the thing the announcements on
             // the way in exist to prevent.
-            announce("Left the command list")
+            announce(Self.leftCommandListCopy)
         } else if showsHistory {
             showsHistory = false
         } else if notice != nil {
@@ -773,6 +777,9 @@ struct PanelRootView: View {
     /// trailing space is where the argument goes; a command that takes none is one more
     /// Return away, which is what clicking has always cost.
     private func accept(completion name: String) {
+        // Replaces the whole draft, which cannot discard a typed argument: the list is
+        // only open while `isBareCommandWord` holds, and the first space closes it. So
+        // there is never an argument in the field for this to lose.
         draft = "/\(name) "
         completionIndex = nil
         // Both, here, rather than leaving the hover to the draft change that follows.
@@ -791,7 +798,14 @@ struct PanelRootView: View {
     private func submitFromComposer() {
         if let completions = visibleCompletions,
            let index = effectiveCompletionIndex, completions.indices.contains(index) {
-            accept(completion: completions[index].name)
+            let name = completions[index].name
+            accept(completion: name)
+            // The last keystroke in the sequence the other announcements narrate, and the
+            // one that was silent: Return closed the list and rewrote the field without
+            // moving the focus, so a reader arrowing through the list heard every step up
+            // to the one that mattered. Spoken here rather than inside `accept`, which the
+            // mouse also reaches — the rule in `announce` is that only keys speak.
+            announce("Selected /\(name)")
             return
         }
         submit(draft)
@@ -819,7 +833,16 @@ struct PanelRootView: View {
         // the documented "↓ enters at the top, ↑ enters at the bottom" — so the only
         // route to nil is stepping up off row 0. The announcement below cannot fire for
         // an exit that did not happen.
-        let moved = ComposerCommand.moveSelection(effectiveCompletionIndex, up: up,
+        //
+        // A highlight that is no longer a row reads as no highlight, exactly as
+        // `submitFromComposer` treats one. Today `onChange(of: draft)` clears both
+        // indices so this cannot bite; doing it here makes the paragraph above true by
+        // construction instead of by that convention — a stale index past the end would
+        // otherwise reach `moveSelection` and could answer nil for an exit nobody made.
+        let startIndex = effectiveCompletionIndex.flatMap {
+            completions.indices.contains($0) ? $0 : nil
+        }
+        let moved = ComposerCommand.moveSelection(startIndex, up: up,
                                                   count: completions.count)
         hoverIndex = nil
         completionIndex = moved
@@ -828,7 +851,7 @@ struct PanelRootView: View {
             // does exactly as Escape's does. Only `announceSelection` spoke here, and it
             // has nothing to say about nil — so the one exit a reader is most likely to
             // take by accident was the silent one.
-            announce("Left the command list")
+            announce(Self.leftCommandListCopy)
         } else {
             announceSelection(moved, in: completions)
         }

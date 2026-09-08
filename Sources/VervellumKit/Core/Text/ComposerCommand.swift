@@ -103,20 +103,26 @@ enum ComposerCommand: Equatable {
     /// A slash and one unbroken word: `/`, `/h`, `/model`. Not `/model gpt-4o`, and not
     /// prose that happens to contain a slash.
     ///
-    /// One function because two things depend on it and they must not drift: the
-    /// completion list is open for exactly these inputs, and `isHalfTypedCommand`
-    /// withholds Return for exactly these inputs. Widening this widens both, which is
-    /// the right coupling — it is what "still typing the command word" means.
+    /// One function because two things depend on it and they must not drift, and each
+    /// asks something *narrower* than this rather than the same question: the completion
+    /// list can only open on one of these inputs — a bare word matching no command, `/zzz`,
+    /// keeps it shut — and `isHalfTypedCommand` only withholds Return inside them, not for
+    /// every one. So this is the ceiling on both, not their definition. Widening it widens
+    /// both, which is the right coupling: it is what "still typing the command word" means.
     static func isBareCommandWord(_ input: String) -> Bool {
-        // `.whitespacesAndNewlines`, matching `parse`, because the interior test below is
-        // `Character.isWhitespace` — which counts newlines, where `CharacterSet
-        // .whitespaces` does not. Trimming the narrower set left `/h\n` failing the
-        // interior test while `/h ` passed it, so a half-typed command followed by
-        // Shift-Return closed the list, escaped the withhold, and went to the model as
-        // the question "/h". Two character sets in one function, disagreeing.
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        // One set for the edges and the interior alike, so the two cannot disagree about
+        // a character. They did once: trimming `CharacterSet.whitespaces` while testing
+        // `Character.isWhitespace` left `/h\n` failing the interior test where `/h `
+        // passed it, so a half-typed command plus Shift-Return closed the list, escaped
+        // the withhold, and went to the model as the question "/h". Naming the set twice
+        // fixed that case and left the general shape of it — two different notions of
+        // whitespace, agreeing today because Foundation's `Z*` and Unicode's `White_Space`
+        // happen to line up on everything a keyboard produces. Asking one set removes the
+        // question rather than answering it again for the next character somebody pastes.
+        let whitespace = CharacterSet.whitespacesAndNewlines
+        let trimmed = input.trimmingCharacters(in: whitespace)
         return trimmed.hasPrefix("/")
-            && !trimmed.dropFirst().contains(where: { $0.isWhitespace })
+            && !trimmed.dropFirst().unicodeScalars.contains { whitespace.contains($0) }
     }
 
     /// Where ↑/↓ moves the highlight in a completion list of `count` rows.
