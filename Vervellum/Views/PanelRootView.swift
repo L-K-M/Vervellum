@@ -621,6 +621,10 @@ struct PanelRootView: View {
             notice = nil
             showsHistory = false
             handle(engine.ask(question, mode: .direct))
+        case .deepResearch(let question):
+            notice = nil
+            showsHistory = false
+            handle(engine.ask(question, mode: .deep))
         case .newThread:
             draft = ""
             newThread()

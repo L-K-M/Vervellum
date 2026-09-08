@@ -141,7 +141,38 @@ final class ResearchRunner: ResearchRunning {
         case research
         /// No search: answer from the model's own knowledge, badged as unsourced.
         case direct
+        /// The full pipeline, but the plan is allowed to come back for more. Each round
+        /// reads what the last one found and asks for what is still missing; the answer
+        /// is written once, over everything gathered.
+        ///
+        /// Evidence is kept whole rather than summarised between rounds. The answer may
+        /// cite only the numbered sources this turn collected, so a digest would buy
+        /// room by dissolving the very things the citations point at. Rounds stop when
+        /// the budget is close to spent instead — see `deepRoundsAreWorthwhile`.
+        case deep
+
+        /// Every mode but `direct` gathers evidence before answering.
+        var searches: Bool { self != .direct }
+
+        /// What the trace calls this. Named here rather than spelled at the call site,
+        /// which was a ternary and so had no room for a third answer — it would have
+        /// logged `deep` turns as `research` and been right about nothing.
+        var traceName: String {
+            switch self {
+            case .research: return "research"
+            case .direct: return "direct"
+            case .deep: return "deep"
+            }
+        }
     }
+
+    /// The most rounds of planning `deep` may run, the first included.
+    ///
+    /// Three, because the second round is where the gaps the first could not have known
+    /// about get asked, and the third is where a gap the second opened gets closed. A
+    /// fourth mostly re-asks the third in other words, and each round is
+    /// `maxSearches` billed requests.
+    static let maxDeepRounds = 3
 
     /// The most searches one turn may run. Each is a billed request, and past three or
     /// four the marginal source rarely changes the answer.
@@ -240,7 +271,7 @@ final class ResearchRunner: ResearchRunning {
         let settings = environment.settings
         let problems = settings.problems(hasModelKey: environment.modelKey != nil,
                                          hasSearchKey: environment.searchKey != nil,
-                                         requiresSearch: mode != .direct)
+                                         requiresSearch: mode.searches)
         guard problems.isEmpty else {
             throw ResearchError("Vervellum is not configured yet. " + problems.joined(separator: " "))
         }
@@ -267,7 +298,7 @@ final class ResearchRunner: ResearchRunning {
         // announcing every provider it starts.
         let today = ResearchContext.todayString()
 
-        trace.log("Turn started mode=\(mode == .direct ? "direct" : "research") history=\(history.count)")
+        trace.log("Turn started mode=\(mode.traceName) history=\(history.count)")
 
         if mode == .direct {
             try await answerDirectly(chain: chain, question: question, history: history, today: today)

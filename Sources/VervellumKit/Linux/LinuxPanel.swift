@@ -228,6 +228,9 @@ final class LinuxPanel {
         case .direct(let question):
             GTK.setText(composer, "")
             ask(question, mode: .direct)
+        case .deepResearch(let question):
+            GTK.setText(composer, "")
+            ask(question, mode: .deep)
         }
     }
 
