@@ -513,6 +513,9 @@ final class ResearchRunner: ResearchRunning {
             // exactly the way this function exists to fix, and a blank badge is the only
             // symptom — so fail where it can be found instead.
             assertionFailure("The answer streamed but no provider was recorded for it.")
+            // And a line for the builds where that assertion is compiled out, which are
+            // the ones a reader would be running when they noticed the blank badge.
+            trace.warn("The answer finished with no provider recorded; the turn is unattributed.")
             return
         }
         update { turn in
