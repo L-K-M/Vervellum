@@ -523,7 +523,12 @@ struct PanelRootView: View {
         // the panel's own submit shortcut calls this directly, and so would anything
         // added later. The send button knows the rule too, but only so it can grey itself
         // out — a button can show the state, and this is where the state is enforced.
-        guard !ComposerCommand.isUnfinishedCommand(text) else { return }
+        guard !ComposerCommand.isUnfinishedCommand(text) else {
+            // A dead key is indistinguishable from a broken one. The greyed-out send
+            // button says this to anyone who can see it; this says it to everyone else.
+            announce("Finish the command name")
+            return
+        }
         recallIndex = nil
         redactionNote = nil
         queueFullNote = false
@@ -607,6 +612,10 @@ struct PanelRootView: View {
             // Undoes the highlight before anything else, so Escape steps back out of the
             // command list without also throwing away the question being typed.
             completionIndex = nil
+            // Leaving the list changes what Return does, exactly as entering it did, and
+            // a change of meaning nobody is told about is the thing the announcements on
+            // the way in exist to prevent.
+            announce("Left the command list")
         } else if showsHistory {
             showsHistory = false
         } else if notice != nil {
@@ -735,11 +744,18 @@ struct PanelRootView: View {
     /// pointer crossed a row — noise aimed squarely at the people this is for.
     private func announceSelection(in completions: [ComposerCommand.Entry]) {
         guard let index = completionIndex, completions.indices.contains(index) else { return }
-        let name = completions[index].name
-        NSAccessibility.post(
-            element: NSApp as Any,
-            notification: .announcementRequested,
-            userInfo: [.announcement: "/\(name), \(index + 1) of \(completions.count)"])
+        announce("/\(completions[index].name), \(index + 1) of \(completions.count)")
+    }
+
+    /// Speaks one line to VoiceOver.
+    ///
+    /// Only ever from a key the reader pressed. Every announcement here exists because
+    /// a keystroke changed what Return will do without moving the focus, and a mouse
+    /// gesture that did the same would be talking over them for nothing.
+    private func announce(_ message: String) {
+        NSAccessibility.post(element: NSApp as Any,
+                             notification: .announcementRequested,
+                             userInfo: [.announcement: message])
     }
 
     /// ↑/↓ walk back through this thread's earlier questions, the way a shell does.

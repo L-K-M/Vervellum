@@ -124,7 +124,11 @@ enum ComposerCommand: Equatable {
         // a half-typed slash command in the field. Before the clamping, `-1` was the one
         // negative the down path survived, `min(-1 + 1, last)` having landed on `0` by
         // luck, and `-2` and below came back negative.
-        case (false, let index?): return min(max(index + 1, 0), last)
+        // `index >= last` before the step, not `min` after it: this function's whole job
+        // is to take any integer and return a safe one, and `Int.max + 1` traps rather
+        // than clamping. The one input it exists to survive should not be the one input
+        // that crashes.
+        case (false, let index?): return index >= last ? last : max(index + 1, 0)
         case (true, let index?):
             // An index left over from a longer list must step up from the last row that
             // exists, not from where it used to be: stepping up from 9 in a two-row list

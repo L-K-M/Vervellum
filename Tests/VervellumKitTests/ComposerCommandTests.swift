@@ -180,6 +180,8 @@ final class ComposerCommandTests: XCTestCase {
     /// edit — but the arithmetic must not trust that and index past the end.
     func testAnIndexBeyondAShrunkListIsClamped() {
         XCTAssertEqual(ComposerCommand.moveSelection(9, up: false, count: 2), 1)
+        // The value that would trap on `index + 1` rather than clamp.
+        XCTAssertEqual(ComposerCommand.moveSelection(Int.max, up: false, count: 2), 1)
         XCTAssertEqual(ComposerCommand.moveSelection(9, up: true, count: 2), 0,
                        "clamped to the last row, then stepped up from there")
     }
@@ -208,6 +210,22 @@ final class ComposerCommandTests: XCTestCase {
         // `/direct` alone is already withheld by `parse` returning nil, and must not be
         // withheld twice — the composer's own note explains what it wants.
         XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/direct"))
+    }
+
+    /// Every word the list offers has to submit on its own, or Return withholds a
+    /// command the user can see and has finished typing — and accepting the completion
+    /// would not help, because the trailing space trims back to the same word and the
+    /// list comes straight back. A deadlock with no feedback at all.
+    ///
+    /// The invariant holds today: `parse` knows every catalogue name. It is pinned
+    /// because it is a relationship between two lists that are edited separately, and
+    /// adding a word to one of them is the obvious way to break it.
+    func testEveryOfferedCommandCanBeSubmitted() {
+        XCTAssertFalse(ComposerCommand.catalogue.isEmpty)
+        for entry in ComposerCommand.catalogue {
+            XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/\(entry.name)"),
+                           "/\(entry.name) is offered in the list, but Return would withhold it")
+        }
     }
 
     /// Ordinary questions must reach the engine untouched, slashes and all.
