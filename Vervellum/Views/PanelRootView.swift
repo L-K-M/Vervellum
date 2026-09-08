@@ -751,6 +751,11 @@ struct PanelRootView: View {
     private func accept(completion name: String) {
         draft = "/\(name) "
         completionIndex = nil
+        // Both, here, rather than leaving the hover to the draft change that follows.
+        // `onChange(of: draft)` does clear it, so this is not a fix — it is the same
+        // pair `backOut` and that handler clear together, kept together in the third
+        // place that touches them.
+        hoverIndex = nil
         // Ends the recall walk, the way submitting does. Choosing a command is a decision
         // about what the field holds, and leaving the walk open means a later ↑ — once an
         // argument makes the list close — replaces that choice with a question from
@@ -784,6 +789,12 @@ struct PanelRootView: View {
         // dropped, because a pointer that is no longer moving must not keep out-voting
         // the keys: it sends no further events, so without this the arrows would walk an
         // index nothing draws. Moving the mouse again claims the highlight back.
+        //
+        // A nil back from `moveSelection` always means a row was left: ↑ into an
+        // unhighlighted list enters at the *bottom* rather than answering nil — that is
+        // the documented "↓ enters at the top, ↑ enters at the bottom" — so the only
+        // route to nil is stepping up off row 0. The announcement below cannot fire for
+        // an exit that did not happen.
         let moved = ComposerCommand.moveSelection(effectiveCompletionIndex, up: up,
                                                   count: completions.count)
         hoverIndex = nil

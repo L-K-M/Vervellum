@@ -250,8 +250,14 @@ final class ComposerCommandTests: XCTestCase {
     func testEveryOfferedCommandCanBeSubmitted() {
         XCTAssertFalse(ComposerCommand.catalogue.isEmpty)
         for entry in ComposerCommand.catalogue {
-            XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/\(entry.name)"),
-                           "/\(entry.name) is offered in the list, but Return would withhold it")
+            // Both forms. The spaced one is what `accept` leaves in the field, so if a
+            // command were withheld in that shape, picking it from the list would brick
+            // Return for it — the trailing space trims back to the same word, the list
+            // comes straight back, and nothing ever sends.
+            for candidate in ["/\(entry.name)", "/\(entry.name) "] {
+                XCTAssertFalse(ComposerCommand.isHalfTypedCommand(candidate),
+                               "\(candidate) is offered in the list, but Return withholds it")
+            }
         }
     }
 

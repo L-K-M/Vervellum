@@ -85,12 +85,18 @@ enum ComposerCommand: Equatable {
     }
 
     /// Command names matching a partially typed `/prefix`, for the completion list.
-    /// Returns nil when the input is not a bare command word being typed.
+    ///
+    /// Nil when the input is not a bare command word being typed — and nil, not `[]`,
+    /// when it is one that matches nothing. A caller holding a list is holding rows, so
+    /// nothing has to decide what an empty completion card would look like.
     static func completions(for input: String) -> [Entry]? {
         guard isBareCommandWord(input) else { return nil }
         let trimmed = input.trimmingCharacters(in: .whitespaces)
         let prefix = String(trimmed.dropFirst()).lowercased()
-        let matches = catalogue.filter { $0.name.hasPrefix(prefix) }
+        // Both sides lowered. Every catalogue name is lowercase today, so this is a
+        // no-op — but `parse` matches case-insensitively, and a name that arrived
+        // capitalised would otherwise submit fine while never appearing in the list.
+        let matches = catalogue.filter { $0.name.lowercased().hasPrefix(prefix) }
         return matches.isEmpty ? nil : matches
     }
 
