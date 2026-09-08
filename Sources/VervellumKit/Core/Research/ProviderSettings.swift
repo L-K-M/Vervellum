@@ -488,6 +488,11 @@ struct ProviderSettings: Equatable, Codable {
     /// has that suffix removed first, because appending to it would ask for
     /// `/chat/completions/models`, which is nothing.
     ///
+    /// The append is idempotent, because the model-list URL is itself a plausible paste:
+    /// it is the address the provider's documentation prints, and a reader who has just
+    /// been told Vervellum can list models may well copy that line into the endpoint
+    /// field. Appending blindly would ask for `/v1/models/models` and 404.
+    ///
     /// Here rather than on `ModelCatalog` so the endpoint rules — HTTPS, no credentials
     /// in the URL, a host — stay in one place and keep their validator private.
     static func modelListURL(from raw: String) -> URL? {
@@ -496,13 +501,14 @@ struct ProviderSettings: Equatable, Codable {
         while path.hasSuffix("/") { path.removeLast() }
         if path.hasSuffix(chatCompletionsSuffix) { path.removeLast(chatCompletionsSuffix.count) }
         while path.hasSuffix("/") { path.removeLast() }
-        components.path = path + "/models"
+        components.path = path.hasSuffix(modelsSuffix) ? path : path + modelsSuffix
         components.query = nil
         components.fragment = nil
         return components.url
     }
 
     private static let chatCompletionsSuffix = "/chat/completions"
+    private static let modelsSuffix = "/models"
 
     /// The SearXNG JSON search URL for an instance address.
     ///

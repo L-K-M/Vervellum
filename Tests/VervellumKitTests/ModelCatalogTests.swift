@@ -40,6 +40,29 @@ final class ModelCatalogTests: XCTestCase {
             "https://api.example.com/v1/models")
     }
 
+    /// The model-list URL is itself a plausible paste — it is the line a provider's
+    /// documentation prints — so appending must be idempotent rather than producing
+    /// `/v1/models/models`, which no provider serves.
+    func testAPastedModelsPathIsUsedAsIs() {
+        XCTAssertEqual(ProviderSettings.modelListURL(from: "https://api.example.com/v1/models")?
+            .absoluteString,
+                       "https://api.example.com/v1/models")
+        XCTAssertEqual(ProviderSettings.modelListURL(from: "https://api.example.com/v1/models/")?
+            .absoluteString,
+                       "https://api.example.com/v1/models")
+        XCTAssertEqual(ProviderSettings.modelListURL(from: "https://api.example.com/models")?
+            .absoluteString,
+                       "https://api.example.com/models")
+    }
+
+    /// Only a whole path component counts: a path merely *ending* in the letters is a
+    /// different resource, and still needs its own `/models` sibling.
+    func testAPathThatOnlyEndsInTheLettersStillGetsItsOwnSuffix() {
+        XCTAssertEqual(ProviderSettings.modelListURL(from: "https://api.example.com/v1/mymodels")?
+            .absoluteString,
+                       "https://api.example.com/v1/mymodels/models")
+    }
+
     func testTrailingSlashesAndQueriesAreDropped() {
         XCTAssertEqual(ProviderSettings.modelListURL(from: "https://api.example.com/v1/")?
             .absoluteString,

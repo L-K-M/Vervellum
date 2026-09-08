@@ -270,6 +270,14 @@ struct ProvidersView: View {
         .onChange(of: profile.wrappedValue.endpoint) { _, _ in
             catalogues[id] = nil
         }
+        // It belongs to the key just as much. Multi-tenant gateways filter `/models` by
+        // entitlement, so a list fetched with the wrong key describes a different account
+        // than the one the question will be asked with. Save clears the field too, which
+        // discards a list that was in fact fetched with the key now stored — a click to
+        // rebuild, and the same price this view already pays on every open.
+        .onChange(of: keyEntries[id] ?? "") { _, _ in
+            catalogues[id] = nil
+        }
     }
 
     /// Asks one provider for its model list.
@@ -287,10 +295,10 @@ struct ProvidersView: View {
                                         trace: ResearchTrace(sink: SilentLog()))
         do {
             let models = try await client.fetch()
-            guard stillCurrent(profile) else { return }
+            guard stillCurrent(profile, entry: typed) else { return }
             catalogues[profile.id] = .loaded(models)
         } catch {
-            guard stillCurrent(profile) else { return }
+            guard stillCurrent(profile, entry: typed) else { return }
             // The provider's own text is never shown — only a `ResearchError` Vervellum
             // wrote, and a bare type name for anything else.
             catalogues[profile.id] = .failed(
@@ -299,15 +307,22 @@ struct ProvidersView: View {
         }
     }
 
-    /// Whether the row still points where it did when the request went out.
+    /// Whether the row still asks what it asked when the request went out — same
+    /// address, same typed key.
     ///
     /// Editing an endpoint clears its list, but a request already in flight would resume
     /// afterwards and write the *old* host's models under the new address — which is
     /// exactly the "a picker still offering the old host's models" outcome that clearing
     /// exists to prevent. It also settles two overlapping fetches: whichever finishes
-    /// last, only the one matching the address on screen is allowed to land.
-    private func stillCurrent(_ profile: ModelProfile) -> Bool {
-        profiles.first { $0.id == profile.id }?.endpoint == profile.endpoint
+    /// last, only the one matching what is on screen is allowed to land.
+    ///
+    /// The key entry is compared for the same reason, one field over: a fetch made with
+    /// a rejected key must not repopulate the picker after the key has been corrected.
+    private func stillCurrent(_ profile: ModelProfile, entry: String) -> Bool {
+        guard profiles.first(where: { $0.id == profile.id })?.endpoint == profile.endpoint
+        else { return false }
+        return (keyEntries[profile.id] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines) == entry
     }
 
     /// One search provider's fields. The protocol picker comes first, because it decides
