@@ -197,9 +197,14 @@ struct PanelRootView: View {
                 // in silence and Return quietly changes meaning. Say the name instead.
                 guard let completions = visibleCompletions, let index,
                       completions.indices.contains(index) else { return }
-                NSAccessibility.post(element: NSApp as Any,
-                                     notification: .announcementRequested,
-                                     userInfo: [.announcement: completions[index].name])
+                // With the position, because the announcement is the only feedback while
+                // arrowing and "help" alone says neither that it is a command nor how far
+                // down the list it sits.
+                let name = completions[index].name
+                NSAccessibility.post(
+                    element: NSApp as Any,
+                    notification: .announcementRequested,
+                    userInfo: [.announcement: "/\(name), \(index + 1) of \(completions.count)"])
             }
             .onChange(of: engine.thread.turns.count) { _, _ in
                 scrollToBottom(proxy)
@@ -273,8 +278,15 @@ struct PanelRootView: View {
                              placeholder: placeholder,
                              submitOnReturn: preferences.submitOnReturn,
                              // Return takes the highlighted command when there is one,
-                             // and otherwise asks. The send button below always asks:
-                             // clicking it is not a way to pick from a list.
+                             // and otherwise asks. The send button below never takes a
+                             // highlighted row — clicking is not a way to pick from a
+                             // list — but it declines a half-typed command just as
+                             // Return does, so the same text cannot mean two things.
+                             //
+                             // `onSubmit` is the user's submit gesture, not the Return
+                             // key: with submit-on-Return off, `ComposerView` routes
+                             // Shift-Return here instead. Whatever key sends a question
+                             // is the key that takes the highlighted command.
                              onSubmit: { submitFromComposer() },
                              onArrow: moveThroughCompletionsOrHistory)
                     // The composer's height for its content, laid out at the width the
@@ -303,7 +315,7 @@ struct PanelRootView: View {
                 CircularComposerButton(symbol: "arrow.up",
                                        tint: PanelTheme.Palette.accent,
                                        help: engine.isRunning ? "Ask next" : "Ask",
-                                       isEnabled: !isDraftBlank,
+                                       isEnabled: isAskable,
                                        action: { submit(draft) })
             }
             // Measured on the row, not the composer: the composer's own width already
@@ -324,6 +336,17 @@ struct PanelRootView: View {
     /// until real geometry arrives. Same arithmetic the row itself applies.
     private var estimatedComposerRowWidth: CGFloat {
         preferences.panelWidth - PanelTheme.Space.medium * 2
+    }
+
+    /// Whether the draft is something to send.
+    ///
+    /// Blank is the obvious case. A slash word still being typed is the other: Return
+    /// declines it rather than spending a request on `/h`, and a send button that did
+    /// spend one would make the same text mean two different things depending on
+    /// whether the user reached for the mouse. Disabled rather than silently ignored,
+    /// because a button can show the state and a key press cannot.
+    private var isAskable: Bool {
+        !isDraftBlank && !ComposerCommand.isUnfinishedCommand(draft)
     }
 
     private var isDraftBlank: Bool {
