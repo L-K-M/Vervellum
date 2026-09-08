@@ -305,7 +305,12 @@ final class ModelChainTests: XCTestCase {
         // that is not the chain's. Five seconds is far past what starting an attempt
         // takes and still fails rather than hanging if it never starts at all.
         let deadline = Date().addingTimeInterval(5)
-        while !started, Date() < deadline {
+        // `!Task.isCancelled` as well as the deadline. `try?` swallows the
+        // `CancellationError` the sleep throws, so a test task cancelled from outside —
+        // a framework timeout, a wrapping group — would stop sleeping and spin this loop
+        // flat out until the deadline, burning a core on the busy runner the rest of this
+        // change is about.
+        while !started, !Task.isCancelled, Date() < deadline {
             try? await Task.sleep(nanoseconds: 1_000_000)
         }
         XCTAssertTrue(started, "the head's attempt never started, so nothing was tested")
