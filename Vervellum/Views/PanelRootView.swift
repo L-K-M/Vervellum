@@ -191,10 +191,16 @@ struct PanelRootView: View {
                             .padding(.top, PanelTheme.Space.medium)
                     }
                     ForEach(engine.thread.turns) { turn in
+                        // `.equatable()` is what keeps a long thread usable: without it
+                        // every turn re-renders on every streamed snapshot, because the
+                        // two callbacks below are new closures each time and SwiftUI
+                        // therefore never finds a turn equal to its predecessor. See
+                        // `TurnView`'s own docs for the whole story.
                         TurnView(turn: turn,
                                  showsProcessTrail: preferences.showProcessTrail,
                                  onRetry: { engine.retry(turn.id) },
                                  onAskFollowup: askFollowup)
+                            .equatable()
                             .id(turn.id)
                     }
                     // A scroll anchor rather than scrolling to the last turn: the last

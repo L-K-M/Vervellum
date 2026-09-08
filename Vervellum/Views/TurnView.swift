@@ -4,7 +4,27 @@ import AppKit
 /// One question and its research, rendered top to bottom in the order a reader needs
 /// it: what was asked, what was done, the answer, what the answer rests on, what it
 /// could not settle, and where to go next.
-struct TurnView: View {
+///
+/// `Equatable`, and rendered through `.equatable()`, because otherwise a thread of any
+/// length freezes the panel while an answer streams. SwiftUI decides whether to re-run
+/// a view's body by comparing its stored properties, and two of these are closures.
+/// A closure is a fresh heap box every time the enclosing body runs, so no `TurnView`
+/// was ever equal to its predecessor — and since a streamed snapshot republishes the
+/// engine ten times a second, *every* turn in the thread re-laid itself out ten times a
+/// second, whether or not anything in it had changed. Each of those turns re-created
+/// the AppKit text views behind `.textSelection(.enabled)` on every one of its
+/// paragraphs, which is where a process sample of the frozen app spent its time.
+///
+/// Comparing the two values the render actually depends on collapses that to the one
+/// turn that changed. The callbacks are deliberately left out of the comparison: they
+/// capture the engine (a reference that outlives the render) and this row's turn id
+/// (which never changes for the life of the row), so a skipped update cannot leave a
+/// stale one behind.
+struct TurnView: View, Equatable {
+
+    static func == (lhs: TurnView, rhs: TurnView) -> Bool {
+        lhs.turn == rhs.turn && lhs.showsProcessTrail == rhs.showsProcessTrail
+    }
 
     @Environment(\.panelTextScale) private var textScale
 
