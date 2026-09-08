@@ -9,6 +9,8 @@ import AppKit
 /// user should be able to see the fourteen it passed over.
 struct SourcesView: View {
 
+    @Environment(\.panelTextScale) private var textScale
+
     let sources: [Source]
     let citedNumbers: Set<Int>
     @Binding var showsAll: Bool
@@ -36,7 +38,7 @@ struct SourcesView: View {
                     Text(showsAll
                          ? "Hide the \(uncited.count) uncited"
                          : "Show \(uncited.count) found but not cited")
-                        .font(PanelTheme.Font.caption)
+                        .font(PanelTheme.Font.caption(textScale))
                         .foregroundStyle(PanelTheme.Palette.accent)
                 }
                 .buttonStyle(.plain)
@@ -59,6 +61,8 @@ struct SourcesView: View {
 /// The row therefore describes the evidence the answer had, never the request that was
 /// made on its behalf.
 struct SourceRow: View {
+    @Environment(\.panelTextScale) private var textScale
+
     let source: Source
     var isCited: Bool
     @State private var isHovering = false
@@ -70,14 +74,14 @@ struct SourceRow: View {
         } label: {
             HStack(alignment: .top, spacing: PanelTheme.Space.small) {
                 Text("\(source.number)")
-                    .font(PanelTheme.Font.citation(1.0))
+                    .font(PanelTheme.Font.citation(textScale))
                     .foregroundStyle(isCited ? PanelTheme.Palette.accent : PanelTheme.Palette.tertiaryText)
                     .frame(width: 18, alignment: .trailing)
                     .padding(.top, 1)
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(source.title)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(PanelTheme.Font.at(12, textScale, weight: .medium))
                         .foregroundStyle(isCited
                                          ? PanelTheme.Palette.primaryText
                                          : PanelTheme.Palette.secondaryText)
@@ -85,12 +89,12 @@ struct SourceRow: View {
                         .multilineTextAlignment(.leading)
                     HStack(spacing: PanelTheme.Space.tight) {
                         Text(source.domain)
-                            .font(.system(size: 10.5))
+                            .font(PanelTheme.Font.at(10.5, textScale))
                             .foregroundStyle(PanelTheme.Palette.tertiaryText)
                         if let published = source.publishedAt, !published.isEmpty {
                             Text("·").foregroundStyle(PanelTheme.Palette.tertiaryText)
                             Text(published)
-                                .font(.system(size: 10.5))
+                                .font(PanelTheme.Font.at(10.5, textScale))
                                 .foregroundStyle(PanelTheme.Palette.tertiaryText)
                         }
                         if source.wasRead {
@@ -98,26 +102,26 @@ struct SourceRow: View {
                             // a citation to this source is worth, which is not a detail.
                             Text("·").foregroundStyle(PanelTheme.Palette.tertiaryText)
                             Label("page read", systemImage: "doc.text")
-                                .font(.system(size: 10))
+                                .font(PanelTheme.Font.at(10, textScale))
                                 .foregroundStyle(PanelTheme.Palette.verdict(.supported))
                         }
                     }
                     if isHovering, !source.snippet.isEmpty {
                         Text(source.snippet)
-                            .font(.system(size: 10.5))
+                            .font(PanelTheme.Font.at(10.5, textScale))
                             .foregroundStyle(PanelTheme.Palette.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 2)
                         Text(source.wasRead
                              ? "Search summary. The answer also had this page's own text."
                              : "Search summary — not the full page")
-                            .font(.system(size: 9.5))
+                            .font(PanelTheme.Font.at(9.5, textScale))
                             .foregroundStyle(PanelTheme.Palette.tertiaryText)
                     }
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "arrow.up.forward.square")
-                    .font(.system(size: 9))
+                    .font(PanelTheme.Font.at(9, textScale))
                     .foregroundStyle(PanelTheme.Palette.tertiaryText)
                     .opacity(isHovering ? 1 : 0)
                     .padding(.top, 2)

@@ -43,8 +43,33 @@ struct ProvidersView: View {
     @State private var readerKeyEntry = ""
     @State private var hasReaderKey = false
 
+    /// What each provider's model list is doing. Keyed by profile id because a card is
+    /// fetched on its own — one provider being down must not blank another's list.
+    @State private var catalogues: [UUID: CatalogueState] = [:]
+
+    /// The live model-list fetch for each row, so a newer one can retire an older.
+    ///
+    /// `stillCurrent` alone was not enough: two fetches made with the *same* address and
+    /// key both answered yes to it, so the one that finished last won even if it started
+    /// first, and a slow failure could overwrite a fast success with "Could not list
+    /// models". It was reachable, because clearing the catalogue on a key edit brings the
+    /// refresh button back while the first fetch is still running.
+    ///
+    /// It is not reachable now, and that is what this holds: a new fetch cancels the one
+    /// it replaces, and both guards test `Task.isCancelled` on the main actor with no
+    /// suspension before the write, so a superseded task cannot land.
+    @State private var modelFetches: [UUID: Task<Void, Never>] = [:]
+
     @State private var status: String?
     @State private var statusIsProblem = false
+
+    /// A provider's model list, and why it is not showing one.
+    enum CatalogueState: Equatable {
+        case loading
+        case loaded([String])
+        /// The reason, already user-facing. The field stays editable underneath it.
+        case failed(String)
+    }
 
     var body: some View {
         SettingsPane {
@@ -198,8 +223,7 @@ struct ProvidersView: View {
                     .textFieldStyle(.roundedBorder)
             }
             LabeledContent("Model") {
-                TextField("model-name", text: profile.model)
-                    .textFieldStyle(.roundedBorder)
+                modelRow(profile)
             }
             keyRow(title: "API key",
                    entry: Binding(get: { keyEntries[id] ?? "" },
@@ -215,6 +239,165 @@ struct ProvidersView: View {
         .padding(10)
         .background(Color.primary.opacity(0.04),
                     in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
+    /// The model field, plus whatever the endpoint will tell us about itself.
+    ///
+    /// The text field never goes away. Fetching is an offer, not a replacement: a gateway
+    /// that lists nothing, one that lists a hundred routing aliases, or a name reachable
+    /// only through a prefix all have to stay typeable, and a picker that had swallowed
+    /// the field would make those providers unusable.
+    @ViewBuilder
+    private func modelRow(_ profile: Binding<ModelProfile>) -> some View {
+        let id = profile.wrappedValue.id
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                TextField("model-name", text: profile.model)
+                    .textFieldStyle(.roundedBorder)
+
+                if case .loading = catalogues[id] {
+                    ProgressView().controlSize(.small)
+                        // A bare indeterminate spinner reads as "busy" and nothing else,
+                        // and there is one of these per provider card.
+                        .accessibilityLabel("Listing models")
+                }
+                // Beside the spinner rather than replaced by it. The button already
+                // cancels whatever is in flight before starting again, so leaving it up
+                // costs nothing and buys the way out of a request that is going nowhere:
+                // `sendCheapJSON` bounds the idle clock and the wall clock at thirty
+                // seconds *each*, and they run one after the other, so a host that
+                // accepts the connection and then says nothing can hold this row for the
+                // better part of a minute. Hiding it also took the only labelled action
+                // on the row away from VoiceOver for exactly that window.
+                Button {
+                    modelFetches[id]?.cancel()
+                    // Read the row now, not when the task body runs. `profile` is a
+                    // binding into the edited array: the body is enqueued and can run
+                    // after other main-actor work, so `.wrappedValue` inside it would
+                    // be whatever the field held *then* — or, if the row was deleted
+                    // in between, a subscript into an index that is gone. It also
+                    // makes `stillCurrent`'s comparison true to its own comment,
+                    // which says the endpoint is the one the row asked with.
+                    let asked = profile.wrappedValue
+                    modelFetches[id] = Task { await loadModels(for: asked) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                // `.help` is a hint, not a label: without this the button reads as
+                // "arrow clockwise", which says nothing about what it does.
+                .accessibilityLabel("List this provider's models")
+                .help("Ask this endpoint which models it serves")
+                .disabled(ProviderSettings.modelListURL(from: profile.wrappedValue.endpoint) == nil)
+            }
+
+            switch catalogues[id] {
+            case .loaded(let models):
+                Picker("", selection: profile.model) {
+                    // Every value the field can hold needs a row, or the menu draws
+                    // blank and SwiftUI complains that the selection matches no tag.
+                    if profile.wrappedValue.model.isEmpty {
+                        Text("Type or choose a model").tag("")
+                    } else if !models.contains(profile.wrappedValue.model) {
+                        // The typed value is offered back as a row of its own when the
+                        // endpoint did not list it, so choosing from the menu cannot
+                        // silently discard a name that works.
+                        Text(profile.wrappedValue.model).tag(profile.wrappedValue.model)
+                    }
+                    ForEach(models, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+                // Hidden from the eye, not from VoiceOver — otherwise this is an
+                // anonymous pop-up button, and the "Model" label beside it belongs to a
+                // different view.
+                .accessibilityLabel("Model")
+                .help("\(models.count) models listed by this endpoint")
+            case .failed(let reason):
+                Text(reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .loading, .none:
+                EmptyView()
+            }
+        }
+        // A list belongs to the endpoint it came from. Editing the address makes it
+        // stale, and a picker still offering the old host's models would be worse than
+        // offering none.
+        .onChange(of: profile.wrappedValue.endpoint) { _, _ in
+            // Retired, not just ignored. `stillCurrent` already refuses to let the result
+            // land, so this is about the request rather than the outcome: there is no
+            // reason to keep asking an address the reader has moved off, with a key they
+            // may have moved off too. Deleting a provider and reopening Settings both
+            // cancel; these two were the ones that did not.
+            modelFetches.removeValue(forKey: id)?.cancel()
+            catalogues[id] = nil
+        }
+        // It belongs to the key just as much. Multi-tenant gateways filter `/models` by
+        // entitlement, so a list fetched with the wrong key describes a different account
+        // than the one the question will be asked with. Save clears the field too, which
+        // discards a list that was in fact fetched with the key now stored — a click to
+        // rebuild, and the same price this view already pays on every open.
+        .onChange(of: keyEntries[id] ?? "") { _, _ in
+            modelFetches.removeValue(forKey: id)?.cancel()
+            catalogues[id] = nil
+        }
+    }
+
+    /// Asks one provider for its model list.
+    ///
+    /// Uses the key typed in this session when there is one and the stored key otherwise,
+    /// so a provider can be verified before Save — which is the moment the list is most
+    /// useful. A list proves the address, not the key: plenty of local servers answer
+    /// `/models` without looking at one. A hosted vendor that does check will refuse
+    /// here, and that is worth catching early, but a loaded list is not a working key.
+    @MainActor
+    private func loadModels(for profile: ModelProfile) async {
+        guard let url = ProviderSettings.modelListURL(from: profile.endpoint) else { return }
+        // Cancellation is cooperative: a task cancelled before its first instruction still
+        // runs its body. Without this, a fetch retired in that window would go on to write
+        // `.loading`, fail, and decline to write anything else — leaving the row spinning
+        // over a request nobody is waiting for. The refresh button now stays up beside the
+        // spinner, so that state is recoverable rather than terminal; it is still wrong,
+        // and this is what keeps it from happening rather than what rescues it.
+        guard !Task.isCancelled else { return }
+        catalogues[profile.id] = .loading
+        let typed = (keyEntries[profile.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = typed.isEmpty ? keychain.value(for: profile.secretAccount) : typed
+        let client = ModelCatalogClient(url: url, apiKey: key,
+                                        trace: ResearchTrace(sink: SilentLog()))
+        do {
+            let models = try await client.fetch()
+            guard !Task.isCancelled, stillCurrent(profile, entry: typed) else { return }
+            catalogues[profile.id] = .loaded(models)
+        } catch {
+            guard !Task.isCancelled, stillCurrent(profile, entry: typed) else { return }
+            // The provider's own text is never shown — only a `ResearchError` Vervellum
+            // wrote, and a bare type name for anything else.
+            catalogues[profile.id] = .failed(
+                (error as? ResearchError)?.message
+                    ?? "Could not list models. Type the model name instead.")
+        }
+    }
+
+    /// Whether the row still asks what it asked when the request went out — same
+    /// address, same typed key.
+    ///
+    /// Editing an endpoint clears its list, but a request already in flight would resume
+    /// afterwards and write the *old* host's models under the new address — which is
+    /// exactly the "a picker still offering the old host's models" outcome that clearing
+    /// exists to prevent. It also settles two overlapping fetches: whichever finishes
+    /// last, only the one matching what is on screen is allowed to land.
+    ///
+    /// The key entry is compared for the same reason, one field over: a fetch made with
+    /// a rejected key must not repopulate the picker after the key has been corrected.
+    /// Both comparisons rest on `ForEach($profiles)` handing out bindings that write
+    /// straight into `profiles` as the user types. A draft binding that only landed on
+    /// Save would leave the old endpoint here while a new one was on screen, and the
+    /// stale result this guard exists to reject would pass it.
+    private func stillCurrent(_ profile: ModelProfile, entry: String) -> Bool {
+        guard profiles.first(where: { $0.id == profile.id })?.endpoint == profile.endpoint
+        else { return false }
+        return (keyEntries[profile.id] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines) == entry
     }
 
     /// One search provider's fields. The protocol picker comes first, because it decides
@@ -305,6 +488,17 @@ struct ProvidersView: View {
         keyEntries = [:]
         searchKeyEntries = [:]
         accountsToDelete = []
+        // Not carried across an open: the endpoints may have changed elsewhere, and a
+        // list is one click away. A fetch still running is cancelled with them — which
+        // reaches the ones this view still has a handle on, meaning a pane switch inside
+        // a Settings window that stayed open. Close the window and the `@State` goes with
+        // it, so on the next open there is nothing here to cancel and the old request
+        // runs out its own budget writing into storage nobody reads. That costs one
+        // request and cannot land anywhere, because it is a different view's dictionary;
+        // it is not, as this said before, retired.
+        for fetch in modelFetches.values { fetch.cancel() }
+        modelFetches = [:]
+        catalogues = [:]
         storedKeys = Set(profiles.filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
         storedSearchKeys = Set(searchProfiles
             .filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
@@ -337,6 +531,8 @@ struct ProvidersView: View {
         accountsToDelete.append(profiles[index].secretAccount)
         profiles.remove(at: index)
         keyEntries[id] = nil
+        catalogues[id] = nil
+        modelFetches.removeValue(forKey: id)?.cancel()
         storedKeys.remove(id)
         if selectedID == id { selectedID = profiles.first?.id }
     }

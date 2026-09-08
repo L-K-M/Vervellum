@@ -8,7 +8,7 @@ Vervellum server: the app talks only to the endpoints you configure and to GitHu
 
 ## What leaves this Mac
 
-Vervellum makes network requests in exactly three cases, each with a fixed purpose.
+Vervellum makes network requests in exactly five cases, each with a fixed purpose.
 
 - **Research.** Requested research sends your question, earlier thread context, and
   retrieved evidence to the model provider selected when you asked. `/direct` uses that
@@ -29,6 +29,23 @@ Vervellum makes network requests in exactly three cases, each with a fixed purpo
   to the search provider selected when you asked — an MCP server, or a SearXNG instance
   queried directly — and to no other configured provider. They are shown to you in the
   panel's process trail before the answer arrives.
+- **Reading pages.** Only while page reading is on, and only for addresses a search
+  just returned. **Fetch pages directly** (Settings ▸ Providers) sends a plain `GET`
+  from this Mac to each of those sites, so their text can be read rather than only
+  their search snippet — the one case in which Vervellum contacts a host you did not
+  configure. Those requests carry no key and no cookie: the app refuses cookies
+  entirely, and a redirect is followed by starting a fresh request at the new address
+  rather than re-sending anything, at most twice. The sites learn your IP address and
+  which page was asked for, as any browser visit would. **Use a reader service** sends
+  the addresses to the reader endpoint you configured instead, with that endpoint's
+  key — the sites then see the service rather than you, and the service sees the
+  addresses. **Snippets only** fetches nothing at all.
+- **Listing a provider's models.** Only when you press the refresh button beside a
+  model field in Settings ▸ Providers. It sends `GET <endpoint>/models` to that one
+  provider, with that provider's key, and nothing else — no question, no thread, no
+  context. Nothing is fetched when Settings merely opens, and no other provider is
+  contacted. The reply is a list of model names, used to fill the picker; the field
+  stays typeable whether it succeeds or not.
 - **Update checks.** Vervellum asks GitHub's public releases API whether a newer version
   exists — on launch and about once a day while automatic checks are enabled (they can
   be turned off in Settings), or when you choose Check for Updates. The request contains
