@@ -292,16 +292,21 @@ final class ModelChainTests: XCTestCase {
                 // after landing. Holding the attempt open until the Stop arrives makes
                 // the failure-path guard — the one this test is named for — the only
                 // thing that can produce the result below.
-                while !Task.isCancelled { await Task.yield() }
+                // `Task.sleep` throws the moment the task is cancelled, so `try?` falls
+                // straight through and the loop exits with no added latency — the same
+                // promptness as a spin, without burning turns on a busy runner.
+                while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000) }
                 throw ResearchError.connectionFailed
             }
         }
-        // Bounded, so a chain that never reaches the body fails here rather than hanging
-        // the suite. The body needs one scheduling turn; ten thousand is only a ceiling.
-        var spins = 0
-        while !started, spins < 10_000 {
-            await Task.yield()
-            spins += 1
+        // Bounded in *time*, which a yield count is not: on a loaded runner — the case
+        // this whole change is about — the body can miss any number of scheduling turns
+        // before it gets a slice, so a turn ceiling would fail spuriously for a reason
+        // that is not the chain's. Five seconds is far past what starting an attempt
+        // takes and still fails rather than hanging if it never starts at all.
+        let deadline = Date().addingTimeInterval(5)
+        while !started, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 1_000_000)
         }
         XCTAssertTrue(started, "the head's attempt never started, so nothing was tested")
         task.cancel()
@@ -334,7 +339,7 @@ final class ModelChainTests: XCTestCase {
             // cancelled. Cancelling straight after `Task { }` would race the body and
             // decide nothing — which is the flake this pair was written to remove, and
             // re-creating it here to cover the other guard would be no better.
-            while !Task.isCancelled { await Task.yield() }
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: 1_000_000) }
             return try await subject.perform("Answer", beforeRetry: { resets += 1 }) { client in
                 asked.append(client.model)
                 throw ResearchError.connectionFailed
