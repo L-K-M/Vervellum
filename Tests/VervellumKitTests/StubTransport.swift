@@ -2,7 +2,13 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+#if canImport(VervellumKit)
+// Linux: the portable code is its own SwiftPM module.
 @testable import VervellumKit
+#else
+// macOS: it is compiled straight into the app target, so there is no separate module.
+@testable import Vervellum
+#endif
 
 /// A scripted `HTTPTransporting`, so a whole research turn can be run without a network.
 ///
@@ -165,8 +171,16 @@ extension StubTransport.Reply {
 
     /// A chat-completions reply carrying `text` as the assistant's whole message, which
     /// is what `ChatCompletionsClient.completeJSON` reads.
+    ///
+    /// Carries `finish_reason` for the same reason the streamed form does:
+    /// `messageContent(from:)` checks it before it looks at the content, and a reply
+    /// without one is an interrupted reply. A fixture that omitted it would fail every
+    /// stage with "the model's reply ended without a valid completion" — which is the
+    /// rule working, not the rule being in the way.
     static func completion(_ text: String) -> StubTransport.Reply {
-        .json(["choices": [["message": ["role": "assistant", "content": text]]]])
+        let choice: [String: Any] = ["message": ["role": "assistant", "content": text],
+                                     "finish_reason": "stop"]
+        return .json(["choices": [choice]])
     }
 
     /// The same, for a call whose reply is parsed as JSON.
