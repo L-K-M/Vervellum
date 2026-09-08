@@ -42,7 +42,8 @@ final class ReaderMCPClient: PageReading {
     /// consulted against what the server actually advertised.
     private static let urlArgumentNames = ["url", "uri", "link", "page_url", "pageUrl", "target"]
 
-    init(endpoint: URL, apiKey: String, trace: ResearchTrace, transport: HTTPTransport = .shared) {
+    init(endpoint: URL, apiKey: String, trace: ResearchTrace,
+         transport: any HTTPTransporting = HTTPTransport.shared) {
         self.session = MCPSession(endpoint: endpoint, apiKey: apiKey, subject: "page reader",
                                   trace: trace, transport: transport)
         self.trace = trace

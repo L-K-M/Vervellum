@@ -158,7 +158,10 @@ VervellumTests/              macOS-only tests (hotkeys, panel geometry, Accessib
 
 - `Research/` — the pipeline. `ResearchRunner` orchestrates the stages and is
   driven by both front ends; `ChatCompletionsClient` talks to the model over
-  `HTTPTransport`, and search goes through the `SearchBackend` seam —
+  `HTTPTransporting` — the seam every outbound call passes through, implemented in
+  production by `HTTPTransport` and in `Tests/` by `StubTransport`, which is what lets
+  a whole turn be run without a network — and search goes through the `SearchBackend`
+  seam —
   `SearchMCPClient` for an MCP server, `SearXNGClient` for a SearXNG instance's own
   JSON API, chosen by `SearchBackendFactory`. `MCPSession` is the shared
   MCP-over-HTTP transport those clients and the page reader all speak; `PageReading`

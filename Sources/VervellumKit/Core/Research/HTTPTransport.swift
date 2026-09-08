@@ -39,7 +39,7 @@ import FoundationNetworking
 /// completion-handler form switches the session's drain mode to in-memory and buffers
 /// the whole body before returning a single blob, which for a streamed answer means
 /// the user watches a spinner until the last token.
-final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+final class HTTPTransport: NSObject, URLSessionDataDelegate, HTTPTransporting, @unchecked Sendable {
 
     /// Hard ceiling on a single buffered response body.
     static let maxResponseBytes = 2_000_000
@@ -226,10 +226,15 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     /// seconds satisfies a 30-second `timeoutInterval` forever. A caller that means "do
     /// not make someone wait longer than this" has to say both, and only this one is a
     /// bound on the whole exchange.
+    ///
+    /// No default arguments: this is `HTTPTransporting`'s requirement, and the shorter
+    /// form callers write comes from that protocol's extension. Defaults here as well
+    /// would mean two spellings of the same call resolving to two different methods
+    /// depending only on whether the caller held the protocol or the class.
     func sendJSON(_ request: URLRequest,
-                  expectedID: Int? = nil,
-                  isNotification: Bool = false,
-                  deadline: TimeInterval = HTTPTransport.deadline) async throws -> (headers: [String: String], body: [String: Any]) {
+                  expectedID: Int?,
+                  isNotification: Bool,
+                  deadline: TimeInterval) async throws -> (headers: [String: String], body: [String: Any]) {
         let (http, body) = try await open(request, limit: Self.maxResponseBytes)
         let headers = Self.headerDictionary(http)
 
@@ -260,21 +265,6 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
             throw ResearchError.invalidResponse
         }
         return (headers, object)
-    }
-
-    /// A cheap GET, with its two bounds set from one number.
-    ///
-    /// `getRequest`'s `timeout` and `sendJSON`'s `deadline` are different clocks — one
-    /// idle, one wall — and a caller that means "no longer than this" has to say both.
-    /// Saying it once is the difference between a rule and a habit: a later cheap GET
-    /// that set the timeout and forgot the deadline would keep the ten-minute wall clock
-    /// while reading as though it had thirty seconds.
-    func sendCheapJSON(url: URL,
-                       headers: [String: String] = [:],
-                       within budget: TimeInterval) async throws
-        -> (headers: [String: String], body: [String: Any]) {
-        try await sendJSON(Self.getRequest(url: url, headers: headers, timeout: budget),
-                           deadline: budget)
     }
 
     /// Sends `request` and returns its response head and complete body, **without**

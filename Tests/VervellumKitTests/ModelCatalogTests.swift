@@ -259,13 +259,26 @@ final class ModelCatalogTests: XCTestCase {
             HTTPTransport.getRequest(url: url, timeout: ModelCatalogClient.listTimeout).timeoutInterval,
             ModelCatalogClient.listTimeout)
         XCTAssertLessThan(ModelCatalogClient.listTimeout, HTTPTransport.deadline)
-        // What these two do not prove, said out loud rather than left to be discovered:
-        // that `fetch()` passes `listTimeout` at all. It does — `sendCheapJSON(within:)`
-        // in `ModelCatalog.swift` — but the only way to *test* it is to watch the request
-        // the client actually builds, and `HTTPTransport` has no seam to watch through.
-        // A `fetch` that dropped the argument would keep both assertions above green and
-        // hold this row for the generation-sized deadline. That seam is its own change,
-        // wanted by three branches now.
+        // What these two do not prove is that `fetch()` passes `listTimeout` at all —
+        // a `fetch` that dropped the argument would keep both assertions above green and
+        // hold this row for the generation-sized deadline. The test below watches the
+        // request the client actually builds and says so.
+    }
+
+    /// The bound is only real if the client applies it, which needs the request itself.
+    func testFetchAsksWithTheShortListTimeout() async throws {
+        let url = try XCTUnwrap(ProviderSettings.modelListURL(from: "https://api.example.com/v1"))
+        let transport = StubTransport { _ in .json(["data": [["id": "gpt-4o"]]]) }
+        let client = ModelCatalogClient(url: url, apiKey: "k",
+                                        trace: ResearchTrace(sink: SilentLog()),
+                                        transport: transport)
+
+        let models = try await client.fetch()
+        XCTAssertEqual(models, ["gpt-4o"])
+        let call = try XCTUnwrap(transport.calls.first)
+        XCTAssertEqual(call.method, "GET")
+        XCTAssertEqual(call.timeout, ModelCatalogClient.listTimeout,
+                       "the list request must not inherit the transport's ten-minute deadline")
     }
 
     // MARK: The reply

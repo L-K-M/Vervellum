@@ -33,12 +33,13 @@ final class ChatCompletionsClient {
     let model: String
     let apiKey: String?
     let trace: ResearchTrace
-    let transport: HTTPTransport
+    let transport: any HTTPTransporting
 
     /// Whether the endpoint has, so far, accepted the optional parameters.
     private var sendsOptionalParameters = true
 
-    init(url: URL, model: String, apiKey: String?, trace: ResearchTrace, transport: HTTPTransport = .shared) {
+    init(url: URL, model: String, apiKey: String?, trace: ResearchTrace,
+         transport: any HTTPTransporting = HTTPTransport.shared) {
         self.url = url
         self.model = model
         self.apiKey = apiKey

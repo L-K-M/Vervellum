@@ -51,7 +51,8 @@ final class SearchMCPClient: SearchBackend {
         "searxng_web_search", "web_search",
     ]
 
-    init(endpoint: URL, apiKey: String, trace: ResearchTrace, transport: HTTPTransport = .shared) {
+    init(endpoint: URL, apiKey: String, trace: ResearchTrace,
+         transport: any HTTPTransporting = HTTPTransport.shared) {
         self.session = MCPSession(endpoint: endpoint, apiKey: apiKey, subject: "search provider",
                                   trace: trace, transport: transport)
         self.trace = trace

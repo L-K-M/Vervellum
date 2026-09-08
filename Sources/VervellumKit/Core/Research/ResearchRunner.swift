@@ -225,7 +225,7 @@ final class ResearchRunner: ResearchRunning {
 
     private let environment: Environment
     private let trace: ResearchTrace
-    private let transport: HTTPTransport
+    private let transport: any HTTPTransporting
 
     /// The turn being run, and where to report it. Instance state rather than threaded
     /// through every stage: a runner executes exactly one turn, and passing an
@@ -234,7 +234,8 @@ final class ResearchRunner: ResearchRunning {
     private var current: ResearchTurn?
     private var report: ((ResearchTurn) -> Void)?
 
-    init(environment: Environment, trace: ResearchTrace, transport: HTTPTransport = .shared) {
+    init(environment: Environment, trace: ResearchTrace,
+         transport: any HTTPTransporting = HTTPTransport.shared) {
         self.environment = environment
         self.trace = trace
         self.transport = transport

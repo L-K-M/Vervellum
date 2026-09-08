@@ -30,11 +30,12 @@ final class SearXNGClient: SearchBackend {
     private let searchURL: URL
     private let apiKey: String?
     private let trace: ResearchTrace
-    private let transport: HTTPTransport
+    private let transport: any HTTPTransporting
 
     let backendName = "SearXNG"
 
-    init(searchURL: URL, apiKey: String?, trace: ResearchTrace, transport: HTTPTransport = .shared) {
+    init(searchURL: URL, apiKey: String?, trace: ResearchTrace,
+         transport: any HTTPTransporting = HTTPTransport.shared) {
         self.searchURL = searchURL
         self.apiKey = apiKey?.isEmpty == true ? nil : apiKey
         self.trace = trace

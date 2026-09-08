@@ -37,7 +37,7 @@ final class ModelChain {
     private let profiles: [ModelProfile]
     private let keys: [UUID: String]
     private let trace: ResearchTrace
-    private let transport: HTTPTransport
+    private let transport: any HTTPTransporting
 
     /// How far down the chain this turn has already moved.
     private var index = 0
@@ -91,7 +91,7 @@ final class ModelChain {
     init(profiles: [ModelProfile],
          keys: [UUID: String],
          trace: ResearchTrace,
-         transport: HTTPTransport = .shared) {
+         transport: any HTTPTransporting = HTTPTransport.shared) {
         self.profiles = profiles
         self.keys = keys
         self.trace = trace
