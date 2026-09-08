@@ -314,8 +314,18 @@ struct ProvidersView: View {
                         Image(systemName: "chevron.down")
                     }
                     .fixedSize()
+                    // The label is already a chevron, and a `Menu` draws an indicator of
+                    // its own after whatever label it is given — so without this the row
+                    // grows two of them side by side. A doubled affordance reads as a
+                    // rendering fault, which is a poor thing to add to a change whose
+                    // whole purpose is that this pane stops looking like one.
+                    .menuIndicator(.hidden)
                     .accessibilityLabel("Choose a listed model")
-                    .help("\(models.count) models listed by this endpoint")
+                    // Pluralised, because one model is the ordinary case for a local
+                    // server with a single model loaded, and "1 models" is the tooltip
+                    // that setup would always see.
+                    .help("\(models.count) model\(models.count == 1 ? "" : "s") "
+                          + "listed by this endpoint")
                 }
             }
 
