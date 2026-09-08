@@ -473,7 +473,8 @@ final class ThreadArchiveTests: XCTestCase {
     /// twenty-five looking at two hundred until they had asked two hundred more questions.
     func testLoweringTheLimitPrunesWhatIsAlreadyThere() {
         var library = ThreadLibrary()
-        for index in 0..<60 { library.upsert(thread("q\(index)"), keeping: 100) }
+        let ceiling = ThreadLibrary.keptThreadsRange.upperBound
+        for index in 0..<60 { library.upsert(thread("q\(index)"), keeping: ceiling) }
         XCTAssertEqual(library.threads.count, 60)
         XCTAssertEqual(library.prune(to: 20), 40)
         XCTAssertEqual(library.threads.count, 20)
@@ -482,8 +483,9 @@ final class ThreadArchiveTests: XCTestCase {
 
     func testPruningToAHigherLimitDropsNothing() {
         var library = ThreadLibrary()
-        for index in 0..<5 { library.upsert(thread("q\(index)"), keeping: 100) }
-        XCTAssertEqual(library.prune(to: 500), 0)
+        let ceiling = ThreadLibrary.keptThreadsRange.upperBound
+        for index in 0..<5 { library.upsert(thread("q\(index)"), keeping: ceiling) }
+        XCTAssertEqual(library.prune(to: ceiling), 0)
         XCTAssertEqual(library.threads.count, 5)
     }
 
@@ -492,8 +494,14 @@ final class ThreadArchiveTests: XCTestCase {
     /// nothing" is what turning history off means, and it says so out loud.
     func testAnAbsurdLimitIsClampedRatherThanObeyed() {
         var library = ThreadLibrary()
-        for index in 0..<40 { library.upsert(thread("q\(index)"), keeping: 100) }
-        library.prune(to: 0)
+        let ceiling = ThreadLibrary.keptThreadsRange.upperBound
+        for index in 0..<40 { library.upsert(thread("q\(index)"), keeping: ceiling) }
+        // The dropped count as well as what is left. Every sibling test asserts what
+        // `prune` reports, because that number is its contract — it is what a caller
+        // would surface as "removed N" — and this was the one clamping path where a
+        // return of the pre-clamp delta, or of nothing at all, went unnoticed.
+        XCTAssertEqual(library.prune(to: 0), 40 - ThreadLibrary.keptThreadsRange.lowerBound,
+                       "the reported count is the clamped delta, not the raw one")
         XCTAssertEqual(library.threads.count, ThreadLibrary.keptThreadsRange.lowerBound)
 
         var negative = ThreadLibrary()
@@ -571,7 +579,9 @@ final class ThreadArchiveTests: XCTestCase {
         XCTAssertEqual(narrowed.library.threads.count, 12)
 
         // Same file, limit restored: nothing was actually dropped from disk.
-        let restored = ThreadArchive(fileURL: fileURL, keptThreads: 500, debounce: 0)
+        let restored = ThreadArchive(fileURL: fileURL,
+                                     keptThreads: ThreadLibrary.keptThreadsRange.upperBound,
+                                     debounce: 0)
         XCTAssertEqual(restored.library.threads.count, 40,
                        "the load-time trim must be recoverable by raising the limit")
     }
@@ -595,10 +605,36 @@ final class ThreadArchiveTests: XCTestCase {
         writer.flush()
 
         let archive = ThreadArchive(fileURL: fileURL, historyEnabled: false,
-                                    keptThreads: 100, debounce: 0)
+                                    keptThreads: ThreadLibrary.keptThreadsRange.upperBound,
+                                    debounce: 0)
         XCTAssertTrue(archive.library.threads.isEmpty, "history off adopts nothing")
         archive.keptThreads = 10
         XCTAssertEqual(archive.keptThreads, 10, "the value is remembered, just not applied")
         XCTAssertTrue(archive.library.threads.isEmpty)
+    }
+
+    /// The initializer clamped and the property did not, so `archive.keptThreads = 3`
+    /// read back as 3 while `prune(to:)` quietly enforced 10 — a limit the archive was
+    /// not applying, reported by the one thing a caller can ask. No thread was ever lost
+    /// to it, which is why nothing noticed.
+    func testALimitAssignedAfterConstructionIsClampedToo() {
+        let archive = ThreadArchive(fileURL: fileURL, debounce: 0)
+        for index in 0..<40 { archive.save(thread("q\(index)")) }
+
+        archive.keptThreads = 3
+        XCTAssertEqual(archive.keptThreads, ThreadLibrary.keptThreadsRange.lowerBound,
+                       "the floor, not the number it was handed")
+        XCTAssertEqual(archive.library.threads.count,
+                       ThreadLibrary.keptThreadsRange.lowerBound,
+                       "and the prune obeyed the same floor")
+
+        archive.keptThreads = 99_999
+        XCTAssertEqual(archive.keptThreads, ThreadLibrary.keptThreadsRange.upperBound,
+                       "the ceiling, not the number it was handed")
+        // Raising cannot restore what pruning dropped, so the count stays where the
+        // floor left it. Asserted rather than assumed: a clamp that had been applied by
+        // re-entering the observer would have pruned again on the way past.
+        XCTAssertEqual(archive.library.threads.count,
+                       ThreadLibrary.keptThreadsRange.lowerBound)
     }
 }

@@ -77,8 +77,19 @@ final class ThreadArchive {
     /// Setting it prunes immediately rather than at the next write: a reader who has just
     /// asked to keep fifty expects to see fifty, not to wait for a hundred and fifty more
     /// questions to push the rest out.
+    ///
+    /// Clamped on every assignment, not only in `init`. `prune(to:)` clamps the number
+    /// it is handed, so an out-of-range value never cost a thread — but the property went
+    /// on reporting it, and a limit that says 3 while the archive enforces 10 is honest
+    /// about nothing. The same door `PanelPalette.cornerScale` was left standing open by:
+    /// clamping the initializer and trusting the property afterwards.
     var keptThreads: Int {
         didSet {
+            // Before the `oldValue` comparison, so assigning 3 to an archive already at
+            // the floor settles back to 10 and then does nothing, rather than pruning to
+            // 10 a second time. Assigning inside `didSet` does not re-enter it.
+            let clamped = ThreadLibrary.clampedKeptThreads(keptThreads)
+            if clamped != keptThreads { keptThreads = clamped }
             guard keptThreads != oldValue, isHistoryEnabled, !isReadOnly else { return }
             guard library.prune(to: keptThreads) > 0 else { return }
             onChange?()
@@ -95,10 +106,10 @@ final class ThreadArchive {
         self.fileManager = fileManager
         self.debounce = debounce
         self.isHistoryEnabled = historyEnabled
-        // Clamped here rather than in the setter: `didSet` never fires for an initial
-        // assignment, and the setter reads `isReadOnly`, which is not assigned until
-        // further down. Without it the property reports what it was handed while
-        // `prune(to:)` quietly enforces the floor — a value that is honest about nothing.
+        // Clamped here *as well as* in the setter, because `didSet` never fires for an
+        // initial assignment. Nothing else in the observer would be right here either:
+        // it reads `isReadOnly` and `library`, neither of which is assigned until
+        // further down.
         //
         // Clamped, not replaced. `CorePreferences.keptThreads` reads a non-positive
         // number as a damaged file and answers with the default; this layer has no idea
@@ -106,8 +117,7 @@ final class ThreadArchive {
         // production callers hand it the already-normalised preference, so the two rules
         // never disagree in practice — a caller that builds an archive from raw input
         // has to normalise first if it wants the damage rule.
-        self.keptThreads = min(max(keptThreads, ThreadLibrary.keptThreadsRange.lowerBound),
-                               ThreadLibrary.keptThreadsRange.upperBound)
+        self.keptThreads = ThreadLibrary.clampedKeptThreads(keptThreads)
 
         // The file is read for its *version* even when history is off, and only adopted
         // when it is on. Skipping the read entirely would leave `isReadOnly` false, so a

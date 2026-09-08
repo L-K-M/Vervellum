@@ -72,9 +72,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.onChanged = { [weak self] in
             guard let self else { return }
             self.panelController?.preferencesDidChange()
-            // The archive reads the limit when it is built, so without this a reader who
-            // lowered it would keep the threads they asked to drop until the next launch.
+            // The archive reads both of these when it is built, so without this a reader
+            // who lowered the limit would keep the threads they asked to drop, and one
+            // who turned history off would keep the file, until the next launch. Both
+            // forwarded from here rather than from the control that changed them: a
+            // settings pane that writes the preference *and* the store is two paths to
+            // keep in step by hand, and the one that goes stale is the one that leaves a
+            // control showing a state the archive is not in. `LinuxEnvironment` has
+            // forwarded both from its own change hook since it was written.
             self.store.keptThreads = self.preferences.keptThreads
+            self.store.isHistoryEnabled = self.preferences.historyEnabled
         }
         observePanelPreview()
 

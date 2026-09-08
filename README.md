@@ -49,7 +49,10 @@ runs the searches and answers based on current sources.
   (on screen at once, and on disk with the save that follows). A limit lowered behind
   the app's back — a hand edit, a sync tool — is different: that one trims in memory at
   the next launch and leaves the file alone, so raising it again brings the threads
-  back. Be aware how small "until something is saved" is, though: asking one question
+  back — at the *next* launch, and only if nothing was saved in between. The trim the
+  running app already did is in memory, and raising the limit cannot undo it: nothing
+  restores a thread the list has dropped, it is re-read from the file that still has it.
+  Be aware how small "until something is saved" is, though: asking one question
   writes the trimmed list, and that is what makes the trim permanent. The write rotates
   the previous file to `threads.json.bak` first, so there is one more chance after that
   and no more. Active turns are

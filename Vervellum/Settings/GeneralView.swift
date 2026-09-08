@@ -112,10 +112,12 @@ struct GeneralView: View {
                     + "merely hide it.") {
                 Toggle("Keep past threads", isOn: Binding(
                     get: { preferences.historyEnabled },
-                    set: { enabled in
-                        preferences.historyEnabled = enabled
-                        store.isHistoryEnabled = enabled
-                    }))
+                    // Only the preference, for the reason spelled out at the picker
+                    // below: `AppDelegate` forwards both to the live store, and writing
+                    // the store here as well would be a second path to keep in step by
+                    // hand. This used to do both, five lines above a comment arguing
+                    // against it.
+                    set: { preferences.historyEnabled = $0 }))
                 // Shown only while history is on: a limit on a history that is not being
                 // kept is a control with nothing to do.
                 if preferences.historyEnabled {

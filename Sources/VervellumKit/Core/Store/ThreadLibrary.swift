@@ -26,6 +26,19 @@ struct ThreadLibrary: Codable, Equatable {
     /// starts to be felt.
     static let keptThreadsRange = 10...2000
 
+    /// `value` inside `keptThreadsRange`: the one definition of a legal limit.
+    ///
+    /// Three layers clamp — the preference on read and write, the archive on assignment,
+    /// and `prune` on the value it is handed — because each of them can be reached from
+    /// somewhere the others cannot. They may disagree about what a *damaged* value means
+    /// (`CorePreferences` reads a non-positive number as a broken file and answers with
+    /// the default; the other two treat it as a number out of range), but they must not
+    /// disagree about where the range is, and three spellings of the same `min`/`max` is
+    /// how that drift starts.
+    static func clampedKeptThreads(_ value: Int) -> Int {
+        min(max(value, keptThreadsRange.lowerBound), keptThreadsRange.upperBound)
+    }
+
     var version: Int = ThreadLibrary.currentVersion
     /// Newest first.
     var threads: [ResearchThread] = []
@@ -57,8 +70,7 @@ struct ThreadLibrary: Codable, Equatable {
     /// silently erase the history.
     @discardableResult
     mutating func prune(to limit: Int) -> Int {
-        let bounded = min(max(limit, Self.keptThreadsRange.lowerBound),
-                          Self.keptThreadsRange.upperBound)
+        let bounded = Self.clampedKeptThreads(limit)
         guard threads.count > bounded else { return 0 }
         let dropped = threads.count - bounded
         threads.removeLast(dropped)

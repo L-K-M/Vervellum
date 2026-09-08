@@ -54,6 +54,11 @@ final class ThreadStore: ObservableObject {
     var isHistoryEnabled: Bool {
         get { archive.isHistoryEnabled }
         set {
+            // Guarded for the reason `keptThreads` below is: `AppDelegate` forwards this
+            // on *every* preference change, and most of them are a width drag or a text
+            // size step. The archive's own observer already ignores a repeat, so this is
+            // about not redrawing the thread list for a setting that never moved.
+            guard archive.isHistoryEnabled != newValue else { return }
             objectWillChange.send()
             archive.isHistoryEnabled = newValue
         }

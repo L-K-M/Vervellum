@@ -232,9 +232,8 @@ final class CorePreferences {
             return Int(bounded.rounded())
         }
         set {
-            let range = ThreadLibrary.keptThreadsRange
-            let bounded = min(max(newValue, range.lowerBound), range.upperBound)
-            store.setDouble(Double(bounded), for: Key.keptThreads)
+            store.setDouble(Double(ThreadLibrary.clampedKeptThreads(newValue)),
+                            for: Key.keptThreads)
             onChange?()
         }
     }
