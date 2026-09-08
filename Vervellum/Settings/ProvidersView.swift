@@ -476,8 +476,13 @@ struct ProvidersView: View {
         searchKeyEntries = [:]
         accountsToDelete = []
         // Not carried across an open: the endpoints may have changed elsewhere, and a
-        // list is one click away. A fetch still running from the last open is retired
-        // with them, so it cannot land in the state this reset just cleared.
+        // list is one click away. A fetch still running is cancelled with them — which
+        // reaches the ones this view still has a handle on, meaning a pane switch inside
+        // a Settings window that stayed open. Close the window and the `@State` goes with
+        // it, so on the next open there is nothing here to cancel and the old request
+        // runs out its own budget writing into storage nobody reads. That costs one
+        // request and cannot land anywhere, because it is a different view's dictionary;
+        // it is not, as this said before, retired.
         for fetch in modelFetches.values { fetch.cancel() }
         modelFetches = [:]
         catalogues = [:]
