@@ -200,14 +200,14 @@ final class ResearchRunner: ResearchRunning {
         // that actually produced the words.
         let chain = ModelChain(profiles: settings.modelChain, keys: environment.modelKeys,
                                trace: trace, transport: transport)
-        // No `onSwitch` handler. Both halves of what the reader is told — the name on
+        // Nothing is hooked here. Both halves of what the reader is told — the name on
         // the turn and the note explaining it — are settled after the stage that produced
         // the words, because both are statements about the answer. A turn whose answer
         // streamed from the selection can still fall through for the assessment, and a
         // notice fired there would say "the next provider answered instead" over an
-        // answer the badge correctly credits to the selection. `ModelChain.onSwitch`
-        // remains the chain's own announcement hook; this caller does not need it,
-        // because a switch that did not reach the answer is not news about the answer.
+        // answer the badge correctly credits to the selection. So the chain is asked who
+        // answered, at the one moment the question has a right answer, rather than
+        // announcing every provider it starts.
         let today = ResearchContext.todayString()
 
         trace.log("Turn started mode=\(mode == .direct ? "direct" : "research") history=\(history.count)")

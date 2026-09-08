@@ -66,20 +66,6 @@ final class ModelChainTests: XCTestCase {
         XCTAssertEqual(result, "beta")
     }
 
-    /// The switch is announced, so the runner can rename the turn's model and post the
-    /// notice. Announcing the head too would fire a "fell back" notice on every turn.
-    func testAnnouncesOnlyTheProvidersItMovesTo() async throws {
-        let profiles = [profile("alpha"), profile("beta"), profile("gamma")]
-        let subject = chain(profiles)
-        var announced: [String] = []
-        subject.onSwitch = { announced.append($0.model) }
-        _ = try await subject.perform("Plan") { client in
-            if client.model != "gamma" { throw ResearchError.connectionFailed }
-            return client.model
-        }
-        XCTAssertEqual(announced, ["beta", "gamma"], "the head is the selection, not a switch")
-    }
-
     /// A provider that died mid-sentence has already streamed text into the turn. The
     /// next one starts from the beginning, so the fragment has to go first.
     func testRunsTheResetBeforeEachRetryAndNotBeforeTheFirstTry() async throws {
@@ -203,46 +189,6 @@ final class ModelChainTests: XCTestCase {
                        "the insecure endpoint must never be contacted")
     }
 
-    /// A skipped *head* reaches the next provider without any failure being caught, so
-    /// announcing on the failure path alone left the spare answering under the
-    /// selection's name — the silent substitution the type's third rule forbids.
-    func testAnnouncesTheSpareWhenTheHeadIsSkippedEntirely() async throws {
-        let profiles = [ModelProfile.new(name: "blank", endpoint: "", model: ""),
-                        profile("beta")]
-        let subject = chain(profiles)
-        var switched: [String] = []
-        subject.onSwitch = { switched.append($0.model) }
-        let result = try await subject.perform("Plan") { $0.model }
-        XCTAssertEqual(result, "beta")
-        XCTAssertEqual(switched, ["beta"],
-                       "the provider that actually answered must be announced")
-    }
-
-    /// A turn runs three stages through the same chain. The switch happened once, so it
-    /// is announced once — three notices for one substitution would be noise.
-    func testASwitchIsAnnouncedOncePerTurnNotOncePerStage() async throws {
-        let profiles = [profile("alpha"), profile("beta")]
-        let subject = chain(profiles)
-        var switched: [String] = []
-        subject.onSwitch = { switched.append($0.model) }
-        _ = try await subject.perform("Plan") { client in
-            if client.model == "alpha" { throw ResearchError.connectionFailed }
-            return client.model
-        }
-        _ = try await subject.perform("Search") { $0.model }
-        _ = try await subject.perform("Answer") { $0.model }
-        XCTAssertEqual(switched, ["beta"])
-    }
-
-    /// The head answering is not a switch, and must never be announced as one.
-    func testTheHeadIsNeverAnnounced() async throws {
-        let subject = chain([profile("alpha"), profile("beta")])
-        var switched: [String] = []
-        subject.onSwitch = { switched.append($0.model) }
-        _ = try await subject.perform("Plan") { $0.model }
-        XCTAssertTrue(switched.isEmpty, "the selection answering is not a substitution")
-    }
-
     // MARK: Which provider answered
 
     /// The head answering is the ordinary case, and it has to be recorded too — the
@@ -280,6 +226,22 @@ final class ModelChainTests: XCTestCase {
             return client.model
         }
         XCTAssertEqual(subject.lastAnswered?.model, "beta")
+    }
+
+    /// A skipped *head* reaches the next provider without any failure being caught: the
+    /// loop steps past a profile it cannot build a client for and never enters the catch.
+    /// Recording on the failure path alone left that answer under the selection's name —
+    /// the silent substitution the type's third rule forbids — so this is the case that
+    /// says why `lastAnswered` is written at the point of success.
+    func testASkippedHeadStillLeavesTheSpareRecorded() async throws {
+        let profiles = [ModelProfile.new(name: "blank", endpoint: "", model: ""),
+                        profile("beta")]
+        let subject = chain(profiles)
+        let result = try await subject.perform("Plan") { $0.model }
+        XCTAssertEqual(result, "beta")
+        XCTAssertEqual(subject.lastAnswered?.model, "beta")
+        XCTAssertNotEqual(subject.lastAnswered?.id, subject.head?.id,
+                          "the head did not answer, and the notice hangs on that comparison")
     }
 
     /// Nothing answered, so there is nothing to attribute — a turn that failed must not
