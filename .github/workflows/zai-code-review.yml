@@ -21,7 +21,8 @@ jobs:
   review:
     name: Review PR with GLM 5.3
     runs-on: ubuntu-latest
-    # A 15-minute inactivity window plus adaptive retries can exceed 30 minutes.
+    # Adaptive splits can recurse; this is the global failure budget, not a
+    # promise that every no-response path will exhaust its retries.
     timeout-minutes: 90
     # pull_request_target exposes repository secrets and a write-capable token.
     # Never run this privileged job for branches from untrusted forks.
@@ -34,11 +35,12 @@ jobs:
       - name: Z.ai Code Review
         if: ${{ env.ZAI_API_KEY != '' }}
         # Pin privileged third-party actions to an immutable commit.
-        # 8e718ac = v0.0.13. Verify before bumping:
-        #   git ls-remote https://github.com/L-K-M/zai-code-review 'refs/tags/v0.0.13^{}'
+        # 8e718ac = v0.0.13; its peeled tag, source diff, and bundle were verified.
         uses: L-K-M/zai-code-review@8e718ac45f13c5ae0e57b19a00afd54d42e5b8f7
         with:
           ZAI_API_KEY: ${{ env.ZAI_API_KEY }}
+          # Explicit bounds replace the max-effort, unbounded calls that crossed
+          # v0.0.9's fixed 300-second timeout (PR #70).
           ZAI_MODEL: glm-5.3-flash
           ZAI_REASONING_EFFORT: high
           ZAI_MAX_OUTPUT_TOKENS: 32768
