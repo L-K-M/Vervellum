@@ -86,6 +86,14 @@ final class ModelCatalogClient {
     private let trace: ResearchTrace
     private let transport: HTTPTransport
 
+    /// How long to wait for a list of model names.
+    ///
+    /// Not the transport's default. That one is ten minutes, sized for a local model
+    /// chewing through an evidence block; this is a small JSON document a server either
+    /// has or does not. Someone sitting in Settings watching a spinner is the wrong
+    /// person to make wait on a generation deadline.
+    static let listTimeout: TimeInterval = 30
+
     init(url: URL, apiKey: String?, trace: ResearchTrace, transport: HTTPTransport = .shared) {
         self.url = url
         self.apiKey = apiKey?.isEmpty == true ? nil : apiKey
@@ -105,7 +113,7 @@ final class ModelCatalogClient {
         // key. If chat ever learns a second scheme, this has to learn it too.
         var headers: [String: String] = [:]
         if let apiKey { headers["Authorization"] = "Bearer " + apiKey }
-        let request = HTTPTransport.getRequest(url: url, headers: headers)
+        let request = HTTPTransport.getRequest(url: url, headers: headers, timeout: Self.listTimeout)
 
         let (_, body) = try await trace.stage("List models") {
             try await self.transport.sendJSON(request)

@@ -165,10 +165,16 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     /// to encode and cannot be an SSE call, and every caller of the POST builder passes
     /// a payload. The end-to-end budget applies, not the idle one — a search API is
     /// silent until it has finished querying its own upstreams, which is not a stall.
-    static func getRequest(url: URL, headers: [String: String] = [:]) -> URLRequest {
+    /// `timeout` defaults to the ten-minute `deadline`, which is sized for a local model
+    /// working through an evidence block. A GET that fetches a small JSON document has
+    /// nothing to think about and should say so much sooner: a caller that knows its
+    /// request is cheap passes its own.
+    static func getRequest(url: URL,
+                           headers: [String: String] = [:],
+                           timeout: TimeInterval = deadline) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.timeoutInterval = deadline
+        request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         return request

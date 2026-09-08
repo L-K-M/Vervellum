@@ -141,6 +141,13 @@ final class ModelCatalogTests: XCTestCase {
         // And nothing is attached when there is no key: a local server that takes none
         // must not be sent an empty credential.
         XCTAssertNil(HTTPTransport.getRequest(url: url).value(forHTTPHeaderField: "Authorization"))
+        // And it does not inherit the transport's generation-sized deadline: a reader
+        // waiting on a list of names should not be held for ten minutes by a host that
+        // has stopped answering.
+        XCTAssertEqual(
+            HTTPTransport.getRequest(url: url, timeout: ModelCatalogClient.listTimeout).timeoutInterval,
+            ModelCatalogClient.listTimeout)
+        XCTAssertLessThan(ModelCatalogClient.listTimeout, HTTPTransport.deadline)
     }
 
     // MARK: The reply

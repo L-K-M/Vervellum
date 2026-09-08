@@ -317,6 +317,11 @@ struct ProvidersView: View {
     @MainActor
     private func loadModels(for profile: ModelProfile) async {
         guard let url = ProviderSettings.modelListURL(from: profile.endpoint) else { return }
+        // Cancellation is cooperative: a task cancelled before its first instruction still
+        // runs its body. Without this, a fetch retired in that window would go on to write
+        // `.loading`, fail, and decline to write anything else — parking the row on a
+        // spinner with the refresh button hidden and nothing left to clear it.
+        guard !Task.isCancelled else { return }
         catalogues[profile.id] = .loading
         let typed = (keyEntries[profile.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let key = typed.isEmpty ? keychain.value(for: profile.secretAccount) : typed

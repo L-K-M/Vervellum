@@ -499,6 +499,12 @@ struct ProviderSettings: Equatable, Codable {
     /// `/openai/models` — so appending beside the deployment asks for a route that has
     /// never existed, and the reader gets a 404 on an address whose questions work.
     ///
+    /// The shape is handled; Azure is not claimed. Its classic surface authenticates with
+    /// an `api-key` header and Vervellum sends `Authorization: Bearer` everywhere, so that
+    /// surface needs a credential scheme this app does not have — its own piece of work.
+    /// What the fold is worth today is any gateway presenting Azure's path layout over
+    /// bearer auth, and not asking a route that cannot exist.
+    ///
     /// The query string is carried over, because `chatCompletionsURL` carries it and the
     /// two addresses have to describe the same provider. Azure's OpenAI-compatible
     /// surface is the case that makes this concrete: it requires `?api-version=` on every
