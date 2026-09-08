@@ -26,6 +26,53 @@ final class ModelChainTests: XCTestCase {
         ModelChain(profiles: profiles, keys: [:], trace: trace())
     }
 
+    /// Every other test here builds the chain with an empty key map, which says nothing
+    /// about *routing*: `ProviderSettingsTests` proves each profile's key is collected,
+    /// and this proves each client is built with its own. A wiring slip that handed
+    /// every client the selection's key would send alpha's question under beta's
+    /// credential — a live 401 from the wrong account, and one provider's secret
+    /// presented to another provider's endpoint.
+    func testEachProviderRunsUnderItsOwnKey() async throws {
+        let alpha = profile("alpha")
+        let beta = profile("beta")
+        let subject = ModelChain(profiles: [alpha, beta],
+                                 keys: [alpha.id: "alpha-key", beta.id: "beta-key"],
+                                 trace: trace())
+        var alphaKey: String?
+        var betaKey: String?
+        _ = try await subject.perform("Plan") { client in
+            if client.model == "alpha" {
+                alphaKey = client.apiKey
+                throw ResearchError.connectionFailed
+            }
+            betaKey = client.apiKey
+            return client.model
+        }
+        XCTAssertEqual(alphaKey, "alpha-key")
+        XCTAssertEqual(betaKey, "beta-key")
+    }
+
+    /// And a provider the map says nothing about sends no header rather than inheriting
+    /// its neighbour's. This is the local-server case — llama.cpp and Ollama take no key
+    /// — and getting it wrong would put a hosted vendor's secret on a request to
+    /// localhost.
+    func testAProviderWithNoKeyOfItsOwnCarriesNone() async throws {
+        let alpha = profile("alpha")
+        let local = profile("local")
+        let subject = ModelChain(profiles: [alpha, local],
+                                 keys: [alpha.id: "alpha-key"], trace: trace())
+        var localKey: String?
+        var localWasReached = false
+        _ = try await subject.perform("Plan") { client in
+            if client.model == "alpha" { throw ResearchError.connectionFailed }
+            localWasReached = true
+            localKey = client.apiKey
+            return client.model
+        }
+        XCTAssertTrue(localWasReached, "the unkeyed provider was never contacted")
+        XCTAssertNil(localKey, "an unkeyed provider sends no header")
+    }
+
     // MARK: The head
 
     /// The picker says which provider answers. A chain that started anywhere else would
@@ -101,6 +148,47 @@ final class ModelChainTests: XCTestCase {
         XCTAssertEqual(seenAtEntry, [0, 1, 2],
                        "no reset before the first provider, one before each later one")
         XCTAssertEqual(resets, 2)
+    }
+
+    /// The same count, reached by failing everything. The happy-path test above cannot
+    /// tell "before each retry" from "after each failure": the last provider succeeds
+    /// there, so the trailing reset an after-failure hook would run never appears and
+    /// both spellings give 2. Here the last provider fails too, and only one of them
+    /// still gives 2.
+    func testTheFinalFailureRunsNoReset() async {
+        let profiles = [profile("alpha"), profile("beta"), profile("gamma")]
+        var resets = 0
+        do {
+            _ = try await chain(profiles).perform("Answer", beforeRetry: { resets += 1 }) { _ in
+                throw ResearchError.streamInterrupted
+            }
+            XCTFail("expected the chain to fail")
+        } catch let error as ResearchError {
+            XCTAssertTrue(error.message.contains("All 3 model providers failed"), error.message)
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+        XCTAssertEqual(resets, 2, "one before beta, one before gamma, none after gamma")
+    }
+
+    /// A skipped spare is not a retry. alpha streamed and died, the blank profile was
+    /// never contacted, gamma answers — so exactly one reset separates alpha's fragment
+    /// from gamma's first token. Resetting per slot would clear twice for no reason;
+    /// resetting only when the next provider is adjacent would leave alpha's fragment
+    /// standing under gamma's answer, which is the paragraph no model wrote.
+    func testASkippedSpareDoesNotConsumeAReset() async throws {
+        let profiles = [profile("alpha"),
+                        ModelProfile.new(name: "blank", endpoint: "", model: ""),
+                        profile("gamma")]
+        var resets = 0
+        var seenAtEntry: [Int] = []
+        _ = try await chain(profiles).perform("Answer", beforeRetry: { resets += 1 }) { client in
+            seenAtEntry.append(resets)
+            if client.model == "alpha" { throw ResearchError.streamInterrupted }
+            return client.model
+        }
+        XCTAssertEqual(seenAtEntry, [0, 1], "one reset before gamma, none for the skipped spare")
+        XCTAssertEqual(resets, 1)
     }
 
     // MARK: Not falling back

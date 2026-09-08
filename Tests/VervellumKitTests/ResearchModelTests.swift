@@ -251,6 +251,21 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertFalse(ResearchTurn(question: "Q").wasAskedDirectly)
     }
 
+    /// A turn can move down the chain more than once, and the runner posts the notice on
+    /// each switch. One row is what the reader should see: "a provider failed, so the
+    /// next one answered" is a fact about the turn, not a tally. `addNotice` is what
+    /// keeps that true, and nothing else does — the runner posts blindly.
+    func testANoticePostedTwiceIsShownOnce() {
+        var turn = ResearchTurn(question: "Q")
+        turn.addNotice(.modelFellBack)
+        turn.addNotice(.modelFellBack)
+        XCTAssertEqual(turn.notices, [.modelFellBack])
+        // And a different notice still gets its own row, so the guard above is a
+        // deduplication rather than a first-one-wins.
+        turn.addNotice(.noEvidence)
+        XCTAssertEqual(turn.notices, [.modelFellBack, .noEvidence])
+    }
+
     // MARK: Stages
 
     func testTerminalStages() {

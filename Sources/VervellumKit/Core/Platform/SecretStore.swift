@@ -34,18 +34,25 @@ extension SecretStore {
 
     func hasModelKey(for settings: ProviderSettings) -> Bool { modelKey(for: settings) != nil }
 
-    /// Every configured model provider's key, by profile id.
+    /// The key for every provider this turn may reach, by profile id.
     ///
     /// Read in one pass at the start of a turn because the fallback chain may reach any
     /// of them, and a key looked up lazily at the moment of the switch would be read
     /// after the user had already had time to change it — a turn that sends one
     /// provider's old key and another's new one is not reproducible.
     ///
+    /// `modelChain` rather than `modelProfiles`, and the same expression `ResearchRunner`
+    /// builds the chain from, so the two cannot describe different provider sets. With
+    /// fallback off the chain is the selection alone, and reading the rest would be a
+    /// keychain hit per configured provider for a key the turn cannot dial — and, worse,
+    /// would hold it in memory for the length of the turn inside the one value this app
+    /// documents as the most expensive thing it owns to print.
+    ///
     /// Providers with no key are simply absent: a local llama.cpp or Ollama server
     /// takes none, and an absent entry sends no `Authorization` header at all.
     func modelKeys(for settings: ProviderSettings) -> [UUID: String] {
         var keys: [UUID: String] = [:]
-        for profile in settings.modelProfiles {
+        for profile in settings.modelChain {
             if let key = value(for: profile.secretAccount) { keys[profile.id] = key }
         }
         return keys
