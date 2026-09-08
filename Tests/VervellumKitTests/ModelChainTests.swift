@@ -13,6 +13,12 @@ import XCTest
 /// No network anywhere. `ModelChain.perform` hands the body a `ChatCompletionsClient`,
 /// and a client is identified well enough by its `model`, so a test body can decide to
 /// fail or succeed per provider and the chain's own logic is what is under test.
+///
+/// The counters below — `asked`, `resets`, `seenAtEntry` — are plain captured `var`s, and
+/// what makes that safe is the contract they are testing: `perform` awaits the body and
+/// calls `beforeRetry` from the task that awaited it, never from a detached one. An
+/// implementation that moved either onto another executor would not fail these tests, it
+/// would make them flaky, so it is written down here rather than left to be discovered.
 final class ModelChainTests: XCTestCase {
 
     private func trace() -> ResearchTrace { ResearchTrace(sink: SilentLog()) }
@@ -253,6 +259,46 @@ final class ModelChainTests: XCTestCase {
         } catch {
             XCTFail("expected a ResearchError, got \(error)")
         }
+        XCTAssertEqual(resets, 0, "nothing was retried, so nothing was reset")
+    }
+
+    /// A *real* Stop, not the one the tests hand themselves.
+    ///
+    /// Every other cancellation test throws `ResearchError.cancelled` from the body — a
+    /// value the test chose, which proves the classification and nothing about the two
+    /// `Task.isCancelled` guards that exist for the case where the error is a provider's
+    /// own. That is the case a Stop actually produces: the user presses it, the request
+    /// dies of its own reasons, and the chain must not read the corpse as this provider's
+    /// bad day and spend the spare.
+    ///
+    /// The body always throws something retryable, so the only way this passes is for a
+    /// guard to have caught the cancellation: an unguarded chain asks beta, fails it too,
+    /// and reports "All 2 model providers failed".
+    func testAStopIsNotHandedToTheNextProviderHoweverTheFailureArrives() async {
+        let profiles = [profile("alpha"), profile("beta")]
+        var asked: [String] = []
+        var resets = 0
+        let subject = chain(profiles)
+        let task = Task {
+            try await subject.perform("Answer", beforeRetry: { resets += 1 }) { client in
+                asked.append(client.model)
+                throw ResearchError.connectionFailed
+            }
+        }
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("expected the cancellation to propagate")
+        } catch let error as ResearchError {
+            XCTAssertEqual(error, ResearchError.cancelled,
+                           "a Stop is a Stop, not the failure it interrupted")
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+        // Either guard may be the one that fires — the cancellation can land before the
+        // head is asked or while it is failing — so what is pinned is what neither may
+        // allow: reaching the spare, or clearing the answer on the way out.
+        XCTAssertNotEqual(asked, ["alpha", "beta"], "the spare must never be asked")
         XCTAssertEqual(resets, 0, "nothing was retried, so nothing was reset")
     }
 

@@ -298,12 +298,17 @@ final class ResearchRunner: ResearchRunning {
             extra: ["search_tool": search.toolDescriptor])
         if planContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
 
-        let planObject = try await chain.perform("Plan") { chat in
-            try await chat.completeJSON(
+        // Parsed *inside* the chain, not after it. A provider that answers with valid
+        // JSON in the wrong shape has failed at the same job as one that answers with
+        // no JSON at all, and only the second was worth another provider while the
+        // first killed the turn. `PlanParser`'s own messages give the game away — "Try
+        // again or choose another model" is the advice the chain exists to take.
+        let plan = try await chain.perform("Plan") { chat in
+            let object = try await chat.completeJSON(
                 system: ResearchPrompts.plan(maxSearches: Self.maxSearches, today: today),
                 payload: planContext.payload, label: "Plan")
+            return try PlanParser.parse(object, maxSearches: Self.maxSearches)
         }
-        let plan = try PlanParser.parse(planObject, maxSearches: Self.maxSearches)
         update { turn in
             turn.reading = plan.reading
             turn.searches = plan.searches
