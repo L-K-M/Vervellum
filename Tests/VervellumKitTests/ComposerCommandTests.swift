@@ -261,7 +261,8 @@ final class ComposerCommandTests: XCTestCase {
     /// Typing a slash and nothing else offers everything, which is the list the arrow
     /// keys are most often used on.
     func testABareSlashOffersTheWholeCatalogue() {
-        XCTAssertEqual(ComposerCommand.completions(for: "/")?.count,
-                       ComposerCommand.catalogue.count)
+        let everything = ComposerCommand.completions(for: "/")
+        XCTAssertNotNil(everything, "a bare slash offers the whole catalogue, not nothing")
+        XCTAssertEqual(everything?.count, ComposerCommand.catalogue.count)
     }
 }

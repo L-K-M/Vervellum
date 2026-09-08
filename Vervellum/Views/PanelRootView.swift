@@ -502,6 +502,11 @@ struct PanelRootView: View {
                 }
             }
             .padding(.vertical, PanelTheme.Space.tight)
+            // A group rather than a pile of buttons: without this, arriving here by
+            // VoiceOver gives no sense of having entered anything, and the rows' hints
+            // are the only clue what they are.
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Command completions")
             // The container is the reliable "the mouse left" signal: its hover stays true
             // over any row and over the padding between them, so moving between rows
             // never clears while leaving the list always does.
@@ -703,6 +708,11 @@ struct PanelRootView: View {
     private func accept(completion name: String) {
         draft = "/\(name) "
         completionIndex = nil
+        // Ends the recall walk, the way submitting does. Choosing a command is a decision
+        // about what the field holds, and leaving the walk open means a later ↑ — once an
+        // argument makes the list close — replaces that choice with a question from
+        // history.
+        recallIndex = nil
     }
 
     /// Return from the composer: take the highlighted command, or ask.
@@ -718,9 +728,10 @@ struct PanelRootView: View {
     /// ↑/↓ drive the command list while it is open, and the question history otherwise.
     ///
     /// The list wins because it is the thing on screen: an arrow key that walked past a
-    /// visible list to change the text underneath it would be startling. Nothing is lost
-    /// — history recall already declines to run while the draft is non-empty, and a
-    /// visible completion list means the draft starts with a slash.
+    /// visible list to change the text underneath it would be startling. Nothing is lost:
+    /// a visible completion list means the draft starts with a slash, and recall declines
+    /// on a non-empty draft — unless a walk is already open, which is why `accept` and
+    /// `submit` both close one.
     private func moveThroughCompletionsOrHistory(_ up: Bool) -> Bool {
         guard let completions = visibleCompletions, !completions.isEmpty else {
             return recall(up)

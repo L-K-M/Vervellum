@@ -152,6 +152,13 @@ enum ComposerCommand: Equatable {
     /// the text so the next keystroke continues it. An exact command still submits:
     /// `parse` recognises `/new`, so this is false for it, and Return starts a thread.
     ///
+    /// What the two answers mean, because only one of them is a decision: `true` means
+    /// keep the text and send nothing. `false` means carry on to `parse`, which can
+    /// still keep it — `/direct` alone returns nil there and the composer holds the
+    /// draft. `false` is not, on its own, permission to submit, and a caller that
+    /// treated it as one would break the command this function deliberately leaves
+    /// alone.
+    ///
     /// Pure and here rather than in the view for the same reason as `moveSelection` —
     /// the rule is the interesting part, and it should be testable on both platforms.
     static func isUnfinishedCommand(_ input: String) -> Bool {
