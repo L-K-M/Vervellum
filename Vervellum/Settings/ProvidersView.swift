@@ -298,7 +298,14 @@ struct ProvidersView: View {
                 // retires the tag bookkeeping a `Picker` needed, where every value the
                 // field could hold — empty, or typed and unlisted — had to be offered back
                 // as a row or the menu drew blank.
-                if case .loaded(let models) = catalogues[id] {
+                // `!models.isEmpty`, because a successful listing can be empty: a fresh
+                // Ollama before its first pull, or LM Studio with nothing loaded, answer
+                // `/models` with a well-formed empty list. Without this the row grows a
+                // chevron that opens onto nothing — an affordance that cannot do
+                // anything, offered exactly to the local-first setup this pane is for.
+                // The old pop-up never had the problem because a `Picker` had to carry
+                // the typed value as a row whatever the endpoint said.
+                if case .loaded(let models) = catalogues[id], !models.isEmpty {
                     Menu {
                         ForEach(models, id: \.self) { name in
                             Button(name) { profile.model.wrappedValue = name }
@@ -312,10 +319,18 @@ struct ProvidersView: View {
                 }
             }
 
-            // Only the failure stays under the row: it is a sentence to read, not a
-            // control to reach for.
+            // Only sentences stay under the row: something to read, not a control to
+            // reach for.
             if case .failed(let reason) = catalogues[id] {
                 Text(reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            // An empty list is a real answer and needs saying. The spinner stops, the
+            // menu does not appear, and without this the only difference between "asked
+            // and told nothing" and "never asked" is a chevron nobody was watching for.
+            if case .loaded(let models) = catalogues[id], models.isEmpty {
+                Text("This endpoint listed no models. Type the name instead.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
