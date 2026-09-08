@@ -1,6 +1,7 @@
 import Foundation
 
-/// URL hygiene for everything that came from a search result or a model.
+/// URL hygiene for every URL Vervellum did not construct itself — a search result's,
+/// a model's, or one the user pasted into a question.
 ///
 /// Two of its pieces are on the main path. `normalized(_:)` is what
 /// `EvidenceExtractor` accepts as a source link — anything that is not an absolute
@@ -82,6 +83,36 @@ enum SourceHarvester {
     }
 
     private static let urlRegex = try? NSRegularExpression(pattern: #"https?://[^\s<>"'\\)\]}]+"#)
+
+    /// The links the user pasted into a question, in the order they were typed.
+    ///
+    /// Deduplicated, because the same address typed twice is one page — and reading it
+    /// twice would spend two requests to put the same text in the evidence under two
+    /// numbers, which is an invitation to cite it as if two sources agreed.
+    ///
+    /// `limit` is applied last, so it counts *pages* rather than occurrences: a question
+    /// that repeats one link and then adds a second still gets both.
+    ///
+    /// This is prose, so `bareURLs` trims the punctuation a URL picks up at the end of a
+    /// sentence — "see https://example.com/a." is a link and a full stop, not a path
+    /// ending in a dot. That is the opposite of what a search hit's `url` field wants,
+    /// and it is why `normalized` takes the choice as a parameter.
+    static func links(inQuestion question: String, limit: Int) -> [String] {
+        guard limit > 0 else { return [] }
+        var seen: Set<String> = []
+        var ordered: [String] = []
+        for url in bareURLs(in: question) where !seen.contains(url) {
+            seen.insert(url)
+            ordered.append(url)
+        }
+        return Array(ordered.prefix(limit))
+    }
+
+    /// How many distinct links the question carries, so a caller that reads only the
+    /// first few can say that the rest were left rather than silently dropping them.
+    static func linkCount(inQuestion question: String) -> Int {
+        Set(bareURLs(in: question)).count
+    }
 
     /// Rejects anything that isn't an absolute http(s) URL with a host and, for a URL
     /// lifted out of prose, trims the punctuation it picked up at the end of a sentence.

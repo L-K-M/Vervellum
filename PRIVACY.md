@@ -29,11 +29,15 @@ Vervellum makes network requests in exactly five cases, each with a fixed purpos
   to the search provider selected when you asked — an MCP server, or a SearXNG instance
   queried directly — and to no other configured provider. They are shown to you in the
   panel's process trail before the answer arrives.
-- **Reading pages.** Only while page reading is on, and only for addresses a search
-  just returned. **Fetch pages directly** (Settings ▸ Providers) sends a plain `GET`
-  from this Mac to each of those sites, so their text can be read rather than only
-  their search snippet — the one case in which Vervellum contacts a host you did not
-  configure. Those requests carry no key and no cookie: the app refuses cookies
+- **Reading pages.** Only while page reading is on, and only for two kinds of address:
+  one a search just returned, and one you pasted into the question yourself. A link in
+  your question is read *before* the searches are planned, so the plan can account for
+  what that page says; the page then becomes one of the turn's numbered sources.
+  **Fetch pages directly** (Settings ▸ Providers) sends a plain `GET` from this Mac to
+  each of those sites, so their text can be read rather than only their search snippet
+  — the one case in which Vervellum contacts a host you did not configure. Pasting a
+  link is a request to contact that host, but it does not override the setting: with
+  page reading off, a link in a question is left unread and the turn says so. Those requests carry no key and no cookie: the app refuses cookies
   entirely, and a redirect is followed by starting a fresh request at the new address
   rather than re-sending anything, at most twice. The sites learn your IP address and
   which page was asked for, as any browser visit would. **Use a reader service** sends

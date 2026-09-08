@@ -409,10 +409,39 @@ final class ResearchRunner: ResearchRunning {
             trace.log("Deep research over \(engines.count) search engine(s)")
         }
 
+        // 1b — read what the question linked to, before anything is planned.
+        //
+        // Before the planner, not alongside the search results, because a link the user
+        // pasted is not a candidate source — it is part of the question. What the page
+        // says changes which searches are worth running: "is this benchmark sound?"
+        // cannot be planned until the benchmark has been read. Reading it afterwards
+        // would spend the whole search budget on the guesses a planner makes when it
+        // has only the URL to go on.
+        let linked = await readLinkedPages(in: question, settings: settings)
+        // Reading three pages can take most of a minute at the per-page timeout, and
+        // `PageReading.read` does not throw — so a Stop pressed during it is noticed
+        // here rather than after a planning call the user has already cancelled.
+        try Task.checkCancellation()
+
         // 2 — plan.
+        var planExtra: [String: Any] = ["search_tool": search.toolDescriptor]
+        if !linked.isEmpty {
+            // Excerpts, not the pages. This call chooses queries and cites nothing, so
+            // it needs to know what each page is about rather than what it says in full
+            // — the same division the `deep` follow-up planner already makes. The whole
+            // text goes to the answer, which is the call that may cite it.
+            planExtra["linked_pages"] = linked.map { source in
+                [
+                    "number": source.number,
+                    "url": source.url,
+                    "title": source.title,
+                    "excerpt": ResearchContext.shorten(source.fullText ?? "",
+                                                       to: Self.linkedExcerptCharacters),
+                ]
+            }
+        }
         let planContext = ResearchContext.assemble(
-            question: question, history: history, today: today,
-            extra: ["search_tool": search.toolDescriptor])
+            question: question, history: history, today: today, extra: planExtra)
         if planContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
 
         // Parsed *inside* the chain, not after it. A provider that answers with valid
@@ -422,7 +451,8 @@ final class ResearchRunner: ResearchRunning {
         // again or choose another model" is the advice the chain exists to take.
         let plan = try await chain.perform("Plan") { chat in
             let object = try await chat.completeJSON(
-                system: ResearchPrompts.plan(maxSearches: Self.maxSearches, today: today),
+                system: ResearchPrompts.plan(maxSearches: Self.maxSearches, today: today,
+                                             hasLinkedPages: !linked.isEmpty),
                 payload: planContext.payload, label: "Plan")
             return try PlanParser.parse(object, maxSearches: Self.maxSearches)
         }
@@ -439,7 +469,7 @@ final class ResearchRunner: ResearchRunning {
         // answer from the model alone, badged exactly as `/direct` is, instead of failing
         // the turn with "no sources were found" for a question that never asked for any.
         // The reading stays on the turn, because it is where the planner says why.
-        if plan.searches.isEmpty {
+        if plan.searches.isEmpty, linked.isEmpty {
             trace.log("Plan asked for no searches; answering without evidence")
             update { turn in
                 turn.addNotice(.noEvidence)
@@ -453,6 +483,14 @@ final class ResearchRunner: ResearchRunning {
             }
             try await answerDirectly(chain: chain, question: question, history: history, today: today)
             return
+        }
+        if plan.searches.isEmpty {
+            // The other half of that branch: a plan with no searches and a question that
+            // carried links is not an unsourced turn — it is "read this and tell me",
+            // which the linked pages answer on their own. It keeps the evidence path so
+            // the answer is written over numbered sources it can cite, rather than being
+            // badged `noEvidence` over pages Vervellum actually read.
+            trace.log("Plan asked for no searches; answering from the linked page(s)")
         }
 
         // 3 — search. Sequential on purpose: the MCP session is stateful, and one
@@ -515,6 +553,11 @@ final class ResearchRunner: ResearchRunning {
                 attempted += 1
                 update { $0.searchesCompleted = attempted }
             }
+            // Nothing was asked, so nothing was proven unproductive. Without this an
+            // empty plan — which a question carrying links can legitimately produce —
+            // would report every engine as silent, and `deep` would skip the very rounds
+            // that exist to ask what the first pass did not.
+            if planned.isEmpty { return asked }
             return asked.filter { productive.contains(ObjectIdentifier($0)) }
         }
 
@@ -538,7 +581,7 @@ final class ResearchRunner: ResearchRunning {
             var everySearch = plan.searches
             for round in 2...Self.maxDeepRounds {
                 try Task.checkCancellation()
-                let soFar = EvidenceExtractor.sources(from: rawResults)
+                let soFar = Self.combined(linked: linked, results: rawResults)
                 guard ResearchContext.evidence(from: soFar).dropped == 0 else {
                     trace.log("Round \(round) not run: the evidence budget is already full")
                     break
@@ -596,7 +639,7 @@ final class ResearchRunner: ResearchRunning {
             }
         }
 
-        var harvested = EvidenceExtractor.sources(from: rawResults)
+        var harvested = Self.combined(linked: linked, results: rawResults)
 
         // 3b — read the pages behind the top sources, if the user asked for that.
         //
@@ -604,7 +647,14 @@ final class ResearchRunner: ResearchRunning {
         // the page text in hand, or a page would be fetched and then silently dropped.
         // Still inside the searching stage — see `ResearchTurn.runningProgressLabel` for
         // why this does not get a `ResearchStage` case of its own.
-        harvested = await readPages(harvested, settings: settings)
+        // What the links already spent comes off the turn's page budget rather than
+        // being added to it: `PageReaderFactory.maxPages` is a statement about one
+        // turn's requests and context, and it does not stop being true because the
+        // pages were chosen by the user instead of by relevance.
+        harvested = await readPages(harvested,
+                                    settings: settings,
+                                    budget: PageReaderFactory.maxPages - linked.count,
+                                    alreadyRead: linked.count)
         try Task.checkCancellation()
 
         // Trimmed to what fits the evidence budget *before* it becomes the turn's source
@@ -716,15 +766,150 @@ final class ResearchRunner: ResearchRunning {
                   + String(format: "%.1fs", trace.elapsed))
     }
 
-    /// Reads the pages behind the highest-ranked sources, when page reading is on.
+    /// How much of a linked page the *planner* is shown. The answer sees the whole
+    /// text; this is only enough for the planner to know what the page covers, which is
+    /// what it needs to decide what the question still lacks.
+    static let linkedExcerptCharacters = 1_500
+    /// How much of a linked page becomes its entry in the source list. Long enough to
+    /// recognise the page, short enough that three of them do not crowd the list.
+    static let linkedSnippetCharacters = 300
+    /// The most links one question is read from. The same ceiling as the pages behind
+    /// search results, and for the same reason — each is a request and several thousand
+    /// characters of the evidence budget.
+    static var maxLinks: Int { PageReaderFactory.maxPages }
+
+    /// The turn's sources: what the question linked to, then what the searches found.
+    ///
+    /// The links come first because the user chose them, and because
+    /// `ResearchContext.evidence` keeps a prefix — so an evidence block that will not
+    /// fit drops a search hit before it drops the page the question pointed at.
+    ///
+    /// A search hit for a URL the question already linked is dropped rather than
+    /// numbered twice: `EvidenceExtractor` deduplicates within one call, but it never
+    /// sees the linked sources, which did not come from a search result. The survivors
+    /// are then renumbered, because a hole left by a dropped duplicate would show the
+    /// model a numbering that skips — and a gap is an invitation to cite the number that
+    /// is missing, which is the same reason `ResearchContext.evidence` drops a suffix
+    /// rather than stepping over an entry that does not fit.
+    static func combined(linked: [Source], results: [Any]) -> [Source] {
+        guard !linked.isEmpty else { return EvidenceExtractor.sources(from: results) }
+        let already = Set(linked.map(\.url))
+        let found = EvidenceExtractor.sources(from: results).filter { !already.contains($0.url) }
+        // Numbered here rather than through `startingAt`, because the filter above can
+        // drop an entry and the numbering has to be settled after that — two places
+        // assigning numbers to one list is how a gap gets in.
+        return linked + found.enumerated().map { offset, source -> Source in
+            var renumbered = source
+            renumbered.number = linked.count + 1 + offset
+            return renumbered
+        }
+    }
+
+    /// A name for a linked source: the host and path the user typed.
+    ///
+    /// Built from the URL rather than from the page, because this is the line the reader
+    /// scans to see where a claim came from, and the address is the thing they will
+    /// recognise — they pasted it. Taking it from the page's own `<title>` would also
+    /// work, and every search hit's title arrives that way, but there is no reason to
+    /// introduce fetched text into a field the URL already answers.
+    static func linkTitle(for url: String) -> String {
+        guard let components = URLComponents(string: url), let host = components.host else {
+            return ResearchContext.shorten(url, to: 120)
+        }
+        let name = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        let path = components.path
+        return ResearchContext.shorten(path.isEmpty || path == "/" ? name : name + path, to: 120)
+    }
+
+    /// Reads the pages the question linked to, and turns the ones that answered into
+    /// this turn's first sources.
+    ///
+    /// A link that could not be read does **not** become a source. A numbered entry with
+    /// no text is a citation target the model cannot use and a line in the source list
+    /// that claims the answer rests on a page nobody read; the honest report is a notice
+    /// saying the link was not read, which is what this does. Same posture as the rest of
+    /// page reading: never throws, because a page that will not load is not a failure of
+    /// the research turn.
+    private func readLinkedPages(in question: String, settings: ProviderSettings) async -> [Source] {
+        let links = SourceHarvester.links(inQuestion: question, limit: Self.maxLinks)
+        guard !links.isEmpty else { return [] }
+        // The privacy setting decides, even here. Reading is the one thing Vervellum does
+        // that reaches a host the user did not configure, and a link in a question is
+        // still that — so a user who turned it off is told their link was left rather
+        // than having it fetched on their behalf.
+        //
+        // Asked before the count below, not after: with reading off, no link is read at
+        // all, and adding "some links were past the limit" on top of that would offer a
+        // reason that is not the reason.
+        guard settings.pageReading != .off else {
+            trace.log("Question carries \(links.count) link(s), but page reading is off")
+            update { $0.addNotice(.linkReadingOff) }
+            return []
+        }
+        if SourceHarvester.linkCount(inQuestion: question) > links.count {
+            trace.log("Question carries more than \(Self.maxLinks) links; "
+                      + "reading the first \(links.count)")
+            update { $0.addNotice(.linkNotRead) }
+        }
+
+        let reader: PageReading?
+        do {
+            reader = try PageReaderFactory.make(settings: settings, readerKey: environment.readerKey,
+                                                trace: trace, transport: transport)
+            try await reader?.connect()
+        } catch {
+            trace.warn("Link reading unavailable: \(ResearchError.safeLabel(for: error))")
+            update { $0.addNotice(.linkNotRead) }
+            return []
+        }
+        guard let reader else {
+            update { $0.addNotice(.linkNotRead) }
+            return []
+        }
+
+        // Numbered from one only to key the reader's result; the survivors are numbered
+        // again below, so a link that did not answer leaves no hole.
+        let asked = links.enumerated().map { offset, url in
+            Source(number: offset + 1, url: url, title: Self.linkTitle(for: url), snippet: "")
+        }
+        update { $0.pagesAttempted = asked.count }
+        let started = trace.elapsed
+        let pages = await reader.read(asked)
+        trace.log("Read \(links.count) linked page(s) via \(reader.readerName) in "
+                  + String(format: "%.1fs", trace.elapsed - started))
+
+        var sources: [Source] = []
+        for source in asked {
+            guard let text = pages[source.number], !text.isEmpty else { continue }
+            var read = source
+            read.number = sources.count + 1
+            read.snippet = ResearchContext.shorten(text, to: Self.linkedSnippetCharacters)
+            read.fullText = text
+            sources.append(read)
+        }
+        update { $0.pagesRead = sources.count }
+        trace.log("Linked pages read: \(sources.count) of \(asked.count)")
+        if sources.count < asked.count { update { $0.addNotice(.linkNotRead) } }
+        return sources
+    }
+
+    /// Reads the pages behind the highest-ranked search results, when page reading is on.
     ///
     /// Best-effort throughout, and deliberately so. A reader that cannot be built (a
     /// missing key, an unusable endpoint), a handshake that fails, a page behind a
     /// consent wall — none of those fails the turn. They leave every source with its
     /// snippet, which is exactly the behaviour of the mode that is off, and the notice
     /// says so rather than the run collapsing over an enrichment.
-    private func readPages(_ sources: [Source], settings: ProviderSettings) async -> [Source] {
-        guard settings.pageReading != .off, !sources.isEmpty else { return sources }
+    ///
+    /// `budget` is what is left of the turn's page allowance after the question's own
+    /// links; `alreadyRead` is how many of those answered, and is what keeps the
+    /// `noPagesRead` notice honest — "no page could be read" must not be said over a
+    /// turn that read the page the user pasted.
+    private func readPages(_ sources: [Source],
+                           settings: ProviderSettings,
+                           budget: Int,
+                           alreadyRead: Int) async -> [Source] {
+        guard settings.pageReading != .off, !sources.isEmpty, budget > 0 else { return sources }
 
         let reader: PageReading?
         do {
@@ -738,8 +923,11 @@ final class ResearchRunner: ResearchRunning {
         }
         guard let reader else { return sources }
 
-        let targets = Array(sources.prefix(PageReaderFactory.maxPages))
-        update { $0.pagesAttempted = targets.count }
+        // Skipping what is already read is what stops a linked page being fetched twice:
+        // the linked sources sit at the front of this list and arrive carrying their text.
+        let targets = Array(sources.filter { !$0.wasRead }.prefix(budget))
+        guard !targets.isEmpty else { return sources }
+        update { $0.pagesAttempted += targets.count }
         // Not `trace.stage`, which is for throwing work: reading never throws, because
         // a page that cannot be read is a source that keeps its snippet.
         let started = trace.elapsed
@@ -755,9 +943,9 @@ final class ResearchRunner: ResearchRunning {
             enriched[index].fullText = text
         }
         let read = pages.values.filter { !$0.isEmpty }.count
-        update { $0.pagesRead = read }
+        update { $0.pagesRead += read }
         trace.log("Pages read: \(read) of \(targets.count)")
-        if read == 0 { update { $0.addNotice(.noPagesRead) } }
+        if read == 0, alreadyRead == 0 { update { $0.addNotice(.noPagesRead) } }
         return enriched
     }
 

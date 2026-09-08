@@ -1,0 +1,175 @@
+import XCTest
+#if canImport(VervellumKit)
+// Linux: the portable code is its own SwiftPM module.
+@testable import VervellumKit
+#else
+// macOS: it is compiled straight into the app target, so there is no separate module.
+@testable import Vervellum
+#endif
+
+/// Links the user pastes into a question: finding them, naming them, and merging the
+/// pages behind them with what the searches found.
+///
+/// The runner itself still needs a live model and a live search server to drive, so
+/// what is pinned here is every decision the runner makes *about* those links that can
+/// be made without one — which is all of the numbering, and numbering is what citations
+/// rest on.
+final class QuestionLinkTests: XCTestCase {
+
+    // MARK: Finding the links
+
+    func testReadsLinksInTheOrderTheyWereTyped() {
+        let question = "Compare https://b.example.com/two with https://a.example.com/one please"
+        XCTAssertEqual(SourceHarvester.links(inQuestion: question, limit: 3),
+                       ["https://b.example.com/two", "https://a.example.com/one"])
+    }
+
+    /// The same address twice is one page. Reading it twice would spend two requests to
+    /// put one page's text under two numbers, which reads as two sources agreeing.
+    func testCollapsesARepeatedLink() {
+        let question = "https://example.com/a — and again https://example.com/a"
+        XCTAssertEqual(SourceHarvester.links(inQuestion: question, limit: 3),
+                       ["https://example.com/a"])
+    }
+
+    /// The limit counts pages, not occurrences: the duplicate must not use up a slot
+    /// that the second distinct link needs.
+    func testTheLimitCountsDistinctPages() {
+        let question = "https://a.example.com/1 https://a.example.com/1 https://b.example.com/2"
+        XCTAssertEqual(SourceHarvester.links(inQuestion: question, limit: 2),
+                       ["https://a.example.com/1", "https://b.example.com/2"])
+    }
+
+    func testKeepsOnlyTheFirstLinksPastTheLimit() {
+        let question = "https://a.example.com https://b.example.com https://c.example.com"
+        XCTAssertEqual(SourceHarvester.links(inQuestion: question, limit: 2),
+                       ["https://a.example.com", "https://b.example.com"])
+        XCTAssertEqual(SourceHarvester.linkCount(inQuestion: question), 3)
+    }
+
+    /// A question is prose, so a link at the end of a sentence carries a full stop that
+    /// is punctuation and not path. Fetching "…/a." is a 404 for a page that exists.
+    func testTrimsSentencePunctuationFromALink() {
+        XCTAssertEqual(SourceHarvester.links(inQuestion: "See https://example.com/a.", limit: 3),
+                       ["https://example.com/a"])
+    }
+
+    /// Nothing but http(s) is a link Vervellum will fetch. A question that mentions a
+    /// file path or an ftp address has not asked for a page to be read.
+    func testIgnoresWhatIsNotAnHTTPLink() {
+        let question = "Check file:///etc/passwd and ftp://example.com/x and just example.com"
+        XCTAssertTrue(SourceHarvester.links(inQuestion: question, limit: 3).isEmpty)
+        XCTAssertEqual(SourceHarvester.linkCount(inQuestion: question), 0)
+    }
+
+    func testAQuestionWithNoLinksAsksForNothing() {
+        XCTAssertTrue(SourceHarvester.links(inQuestion: "How tall is Ben Nevis?", limit: 3).isEmpty)
+    }
+
+    /// A zero budget is asked for whenever the caller has already spent the turn's
+    /// allowance, and must not be read as "no limit".
+    func testAZeroLimitReadsNothing() {
+        XCTAssertTrue(SourceHarvester.links(inQuestion: "https://example.com/a", limit: 0).isEmpty)
+    }
+
+    // MARK: Naming them
+
+    func testNamesALinkedSourceAfterTheAddressTheUserTyped() {
+        XCTAssertEqual(ResearchRunner.linkTitle(for: "https://www.example.com/docs/spec"),
+                       "example.com/docs/spec")
+        XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/"), "example.com")
+        XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com"), "example.com")
+    }
+
+    // MARK: Merging them with the search results
+
+    /// The links are the turn's first sources. `ResearchContext.evidence` keeps a
+    /// prefix, so this ordering is also what decides that a full evidence block drops a
+    /// search hit before it drops the page the question pointed at.
+    func testLinkedPagesAreNumberedFirstAndSearchHitsFollow() {
+        let linked = [Source(number: 1, url: "https://linked.example.com/a",
+                             title: "linked.example.com/a", snippet: "Pasted.")]
+        let payload: [String: Any] = ["results": [
+            ["title": "First hit", "url": "https://a.example.com/1", "snippet": "One."],
+            ["title": "Second hit", "url": "https://b.example.com/2", "snippet": "Two."],
+        ]]
+        let combined = ResearchRunner.combined(linked: linked, results: [payload])
+        XCTAssertEqual(combined.map(\.number), [1, 2, 3])
+        XCTAssertEqual(combined.map(\.url), ["https://linked.example.com/a",
+                                             "https://a.example.com/1",
+                                             "https://b.example.com/2"])
+    }
+
+    /// A search that surfaces the page the user already linked must not give it a second
+    /// number: two entries for one page is a source list claiming evidence it does not
+    /// have. `EvidenceExtractor` cannot catch this itself — it never sees the linked
+    /// sources, which did not come from a search result.
+    func testASearchHitForALinkedPageIsNotNumberedTwice() {
+        let shared = "https://example.com/paper"
+        let linked = [Source(number: 1, url: shared, title: "example.com/paper", snippet: "Pasted.")]
+        let payload: [String: Any] = ["results": [
+            ["title": "The paper", "url": shared, "snippet": "Found by searching."],
+            ["title": "Something else", "url": "https://other.example.com/x", "snippet": "Else."],
+        ]]
+        let combined = ResearchRunner.combined(linked: linked, results: [payload])
+        XCTAssertEqual(combined.map(\.url), [shared, "https://other.example.com/x"])
+        // Renumbered after the duplicate was dropped. A list numbered 1, 3 shows the
+        // model a gap, and a gap is an invitation to cite the number that is missing.
+        XCTAssertEqual(combined.map(\.number), [1, 2])
+    }
+
+    /// The linked page keeps the text that was read for it; merging must not rebuild it
+    /// from the search hit that happens to point at the same URL.
+    func testAMergedLinkedPageKeepsItsPageText() {
+        let shared = "https://example.com/paper"
+        var link = Source(number: 1, url: shared, title: "example.com/paper", snippet: "Excerpt.")
+        link.fullText = "The whole page."
+        let payload: [String: Any] = ["results": [["title": "The paper", "url": shared]]]
+        let combined = ResearchRunner.combined(linked: [link], results: [payload])
+        XCTAssertEqual(combined.count, 1)
+        XCTAssertTrue(combined[0].wasRead)
+        XCTAssertEqual(combined[0].fullText, "The whole page.")
+    }
+
+    /// With no links the turn must number its sources exactly as it did before this
+    /// feature existed — every thread already on disk was written that way.
+    func testWithoutLinksTheNumberingIsUnchanged() {
+        let payload: [String: Any] = ["results": [
+            ["title": "First", "url": "https://a.example.com/1", "snippet": "One."],
+            ["title": "Second", "url": "https://b.example.com/2", "snippet": "Two."],
+        ]]
+        // Compared field by field: `Source` is Equatable over its `id` too, and these are
+        // two independently built lists, so each entry carries a fresh UUID.
+        let combined = ResearchRunner.combined(linked: [], results: [payload])
+        let direct = EvidenceExtractor.sources(from: [payload])
+        XCTAssertEqual(combined.map(\.number), direct.map(\.number))
+        XCTAssertEqual(combined.map(\.url), direct.map(\.url))
+        XCTAssertEqual(combined.map(\.title), direct.map(\.title))
+    }
+
+    func testLinkedPagesAloneAreTheWholeSourceList() {
+        let linked = [Source(number: 1, url: "https://example.com/a",
+                             title: "example.com/a", snippet: "Pasted.")]
+        XCTAssertEqual(ResearchRunner.combined(linked: linked, results: []), linked)
+    }
+
+    // MARK: The planner is told, and only when there is something to tell
+
+    func testThePlanPromptDescribesLinkedPagesOnlyWhenThereAreSome() {
+        let without = ResearchPrompts.plan(maxSearches: 4, today: "2026-09-08")
+        XCTAssertFalse(without.contains("linked_pages"),
+                       "a prompt naming a key the payload does not carry invites the model "
+                       + "to explain its absence")
+
+        let with = ResearchPrompts.plan(maxSearches: 4, today: "2026-09-08", hasLinkedPages: true)
+        XCTAssertTrue(with.contains("linked_pages"))
+        // The whole point of reading first: plan for what is still missing, not for the
+        // page that is already on the table.
+        XCTAssertTrue(with.contains("already been read"))
+        // The empty-plan escape has to admit the "just read this for me" case, or a
+        // question answered entirely by its link still burns a search — and it must not
+        // offer that escape to a question that linked nothing.
+        XCTAssertTrue(with.contains("the linked pages settle on their own"))
+        XCTAssertFalse(without.contains("linked pages settle"))
+    }
+}

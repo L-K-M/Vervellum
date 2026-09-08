@@ -135,6 +135,29 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertEqual(turn.runningProgressLabel, "Searching the web · 3 of 3")
     }
 
+    /// Pages the question linked to are read before the plan exists, so `pagesAttempted`
+    /// is no longer zero until the searching is over. The searches still have to be what
+    /// the label reports while any of them are outstanding, or a turn that started from
+    /// a pasted link would read "Reading 2 pages" for the whole search stage.
+    func testSearchProgressOutranksPagesAlreadyReadForALink() {
+        var turn = ResearchTurn(question: "Summarise https://example.com/a")
+        turn.stage = .searching
+        turn.pagesAttempted = 2
+        turn.searches = [PlannedSearch(purpose: "a", argumentsJSON: "{\"q\":\"a\"}"),
+                         PlannedSearch(purpose: "b", argumentsJSON: "{\"q\":\"b\"}")]
+
+        turn.searchesCompleted = 1
+        XCTAssertEqual(turn.runningProgressLabel, "Searching the web · 1 of 2")
+
+        // Every search is in: reading the pages behind them is what happens next, and
+        // is now the honest thing to report.
+        turn.searchesCompleted = 2
+        XCTAssertEqual(turn.runningProgressLabel, "Reading 2 pages")
+
+        turn.pagesAttempted = 1
+        XCTAssertEqual(turn.runningProgressLabel, "Reading 1 page")
+    }
+
     func testRunningProgressFallsBackToTheStageLabel() {
         var turn = ResearchTurn(question: "Q")
         turn.stage = .planning
