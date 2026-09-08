@@ -148,6 +148,12 @@ final class ThreadArchive {
 
     // MARK: Mutation
 
+    /// The write that makes a launch-time trim permanent, if one happened: the trimmed
+    /// list is what gets encoded, and the reader's gesture was "ask a question" rather
+    /// than "delete two thousand threads". What stands between them and that is the
+    /// backup `writePending` rotates before every write — the untrimmed file survives as
+    /// `.bak` until the *second* save of the session. That is thin, and it is the reason
+    /// the load-time trim is memory-only rather than one more thing that also writes.
     func save(_ thread: ResearchThread) {
         guard isHistoryEnabled, !forgottenThreadIDs.contains(thread.id) else { return }
         library.upsert(thread, keeping: keptThreads)
