@@ -168,6 +168,13 @@ final class PreferencesTests: XCTestCase {
         XCTAssertEqual(store.library.threads.count, 25,
                        "the forwarded limit must prune, and the store's own view of the "
                        + "library must show it")
+        // Which twenty-five, not just how many. A prune that kept the *oldest* would
+        // satisfy the count above while throwing away the threads the setting exists to
+        // keep. Deterministic without timestamps: `upsert` puts the newest first and
+        // `prune` removes from the end, so position is the policy.
+        XCTAssertEqual(store.library.threads.first?.title, "q39", "the newest is kept")
+        XCTAssertFalse(store.library.threads.contains { $0.title == "q0" },
+                       "the oldest is what goes")
     }
 
     private func thread(_ question: String) -> ResearchThread {

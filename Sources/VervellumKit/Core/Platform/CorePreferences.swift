@@ -211,9 +211,15 @@ final class CorePreferences {
     /// Which is why a non-positive value falls back to the default rather than being
     /// clamped. Clamping honoured the letter of that promise and broke its spirit: zero
     /// became ten, and ten of two thousand kept threads is not meaningfully better than
-    /// none. Nothing the picker can produce is below the floor, so a number that is
+    /// none. A zero or a negative is not a setting anything can have produced, so it
     /// says the file is damaged, and the answer to damage is the default rather than the
     /// smallest legal setting.
+    ///
+    /// Only those. A positive number under the floor — a `7` from an older build or a
+    /// hand edit that meant it — is still clamped up to ten, because it reads as a
+    /// setting rather than as damage. This paragraph used to say "below the floor" and
+    /// describe the `7` case as damage too, which is not what the code does and not
+    /// what `testAStoredLimitOutsideTheRangeIsClamped` pins.
     var keptThreads: Int {
         get {
             let range = ThreadLibrary.keptThreadsRange

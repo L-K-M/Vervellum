@@ -46,7 +46,10 @@ runs the searches and answers based on current sources.
   earlier claims were left unsettled. Threads are searchable, and it's up to you
   whether they're kept at all, and how many are kept — older ones past the limit are
   deleted, and lowering it takes effect immediately rather than at the next question
-  (on screen at once; on disk the next time anything is saved). Active turns are
+  (on screen at once, and on disk with the save that follows). A limit lowered behind
+  the app's back — a hand edit, a sync tool — is different: that one trims in memory at
+  the next launch and leaves the file alone until something else is saved, so raising it
+  again brings the threads back. Active turns are
   checkpointed; interrupted work
   reopens as incomplete, with its partial answer retained.
 - **Keyboard-first.** `Return` asks, `Esc` clears then closes, `↑`/`↓` walk back

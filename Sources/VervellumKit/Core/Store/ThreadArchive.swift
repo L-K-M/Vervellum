@@ -99,6 +99,13 @@ final class ThreadArchive {
         // assignment, and the setter reads `isReadOnly`, which is not assigned until
         // further down. Without it the property reports what it was handed while
         // `prune(to:)` quietly enforces the floor — a value that is honest about nothing.
+        //
+        // Clamped, not replaced. `CorePreferences.keptThreads` reads a non-positive
+        // number as a damaged file and answers with the default; this layer has no idea
+        // where its argument came from, so it treats one as a number out of range. The
+        // production callers hand it the already-normalised preference, so the two rules
+        // never disagree in practice — a caller that builds an archive from raw input
+        // has to normalise first if it wants the damage rule.
         self.keptThreads = min(max(keptThreads, ThreadLibrary.keptThreadsRange.lowerBound),
                                ThreadLibrary.keptThreadsRange.upperBound)
 

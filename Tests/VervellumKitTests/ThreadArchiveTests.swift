@@ -69,12 +69,20 @@ final class ThreadLibraryTests: XCTestCase {
     /// history, and must not be able to ask for a million and get a different answer
     /// than the ceiling gives.
     func testPruningClampsSoZeroCannotEraseAndTheCeilingHolds() {
+        let floor = ThreadLibrary.keptThreadsRange.lowerBound
+        let ceiling = ThreadLibrary.keptThreadsRange.upperBound
         var library = ThreadLibrary()
-        library.threads = (0..<15).map { thread("q\($0)") }
-        XCTAssertEqual(library.prune(to: 0), 5, "the floor of ten applies, not the zero")
-        XCTAssertEqual(library.threads.count, 10)
-        XCTAssertEqual(library.prune(to: 50_000), 0, "above the ceiling there is nothing to drop")
-        XCTAssertEqual(library.threads.count, 10)
+        library.threads = (0..<(floor + 5)).map { thread("q\($0)") }
+        XCTAssertEqual(library.prune(to: 0), 5, "the floor applies, not the zero")
+        XCTAssertEqual(library.threads.count, floor)
+
+        // Above the ceiling with a library that is *over* it. The earlier version asked
+        // for fifty thousand while holding ten threads, where a clamped request and an
+        // unclamped one both drop nothing — so the half of this test the name is about
+        // could not fail whether `prune` clamped or not.
+        library.threads = (0..<(ceiling + 1)).map { thread("q\($0)") }
+        XCTAssertEqual(library.prune(to: 50_000), 1, "a request above the ceiling is clamped to it")
+        XCTAssertEqual(library.threads.count, ceiling)
     }
 }
 
@@ -503,6 +511,12 @@ final class ThreadArchiveTests: XCTestCase {
         archive.keptThreads = 15
         XCTAssertEqual(archive.library.threads.count, 15)
         XCTAssertEqual(archive.library.threads.first?.title, "q39")
+
+        // And on disk, which is the half that makes it a deletion rather than a filter.
+        // The pane says the drop is permanent; a prune that only shrank the list in
+        // memory would put all forty back at the next launch.
+        archive.flush()
+        XCTAssertEqual(ThreadArchive(fileURL: fileURL, debounce: 0).library.threads.count, 15)
     }
 
     /// The path production uses most: an archive built with a low limit, whose `save`
@@ -522,6 +536,12 @@ final class ThreadArchiveTests: XCTestCase {
         for index in 0..<40 { archive.save(thread("q\(index)")) }
         archive.isHistoryEnabled = false
         XCTAssertTrue(archive.library.threads.isEmpty)
+        // On disk too — the claim this test's name and comment are actually about, and
+        // the one it used not to check. No `flush` first: `eraseEverything` runs
+        // `queue.sync` and cancels whatever was pending, so the bytes are gone by the
+        // time the setter returns.
+        XCTAssertTrue(ThreadArchive(fileURL: fileURL, debounce: 0).library.threads.isEmpty,
+                      "history off must erase the file, not only clear memory")
         archive.isHistoryEnabled = true
         XCTAssertTrue(archive.library.threads.isEmpty)
     }
