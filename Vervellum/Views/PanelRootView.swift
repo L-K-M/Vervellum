@@ -191,6 +191,16 @@ struct PanelRootView: View {
                 // end of the shorter list, or at a command the user has just filtered out.
                 completionIndex = nil
             }
+            .onChange(of: completionIndex) { _, index in
+                // `.isSelected` only speaks while a VoiceOver cursor sits on the row, and
+                // during ↑/↓ the focus never leaves the text field — so the trait flips
+                // in silence and Return quietly changes meaning. Say the name instead.
+                guard let completions = visibleCompletions, let index,
+                      completions.indices.contains(index) else { return }
+                NSAccessibility.post(element: NSApp as Any,
+                                     notification: .announcementRequested,
+                                     userInfo: [.announcement: completions[index].name])
+            }
             .onChange(of: engine.thread.turns.count) { _, _ in
                 scrollToBottom(proxy)
             }
@@ -675,6 +685,11 @@ struct PanelRootView: View {
             accept(completion: completions[index].name)
             return
         }
+        // Nothing highlighted, but a half-typed command on screen: `/h` under `history`
+        // and `help` is a command being chosen, and `parse` would otherwise send it to
+        // the model as a question. Declining keeps the text so the next keystroke
+        // finishes the word — the same thing `/direct` with no argument already does.
+        guard !ComposerCommand.isUnfinishedCommand(draft) else { return }
         submit(draft)
     }
 

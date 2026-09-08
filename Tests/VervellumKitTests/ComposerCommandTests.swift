@@ -184,6 +184,43 @@ final class ComposerCommandTests: XCTestCase {
                        "clamped to the last row, then stepped up from there")
     }
 
+    // MARK: What Return does with a list on screen
+
+    /// A slash word still being typed is not a question. `parse` would send `/h` to the
+    /// model — it treats an unknown slash word as prose — and with `history` and `help`
+    /// listed under it that spends a real request on a typo.
+    func testAHalfTypedCommandIsNotAQuestion() {
+        XCTAssertTrue(ComposerCommand.isUnfinishedCommand("/h"))
+        XCTAssertTrue(ComposerCommand.isUnfinishedCommand("/c"))
+        XCTAssertTrue(ComposerCommand.isUnfinishedCommand("/"))
+    }
+
+    /// An exact command still submits, or the list would break every command it lists.
+    func testACompleteCommandIsNotWithheld() {
+        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/new"))
+        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/history"))
+        // Trailing space and case are how a command arrives after `accept` fills it in.
+        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/model "))
+        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/NEW"))
+        // An alias `parse` knows but the catalogue does not list: no list is on screen,
+        // so there is nothing to be in the middle of.
+        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/clear"))
+        // `/direct` alone is already withheld by `parse` returning nil, and must not be
+        // withheld twice — the composer's own note explains what it wants.
+        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/direct"))
+    }
+
+    /// Ordinary questions must reach the engine untouched, slashes and all.
+    func testAQuestionIsNeverWithheld() {
+        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("what is swift"))
+        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("and/or, in logic"))
+        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/direct why is the sky blue"))
+        // No list is on screen for a slash word that prefixes nothing, so it stays a
+        // question — the pre-existing behaviour this rule deliberately does not touch.
+        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/zzz"))
+        XCTAssertFalse(ComposerCommand.isUnfinishedCommand(""))
+    }
+
     /// The arrow keys hand themselves to the command list whenever one is on screen, so
     /// what stops ↑/↓ from hijacking `/model gpt-4o` — and Return from replacing it with
     /// `/model ` — is the list disappearing the moment an argument exists.

@@ -117,9 +117,9 @@ enum ComposerCommand: Equatable {
         // Both ends are clamped on both paths, because an index that is out of range is
         // the same hazard whichever way it points: it highlights nothing, and the view's
         // own `indices.contains` guard then falls through to submitting the draft — with
-        // a half-typed slash command in the field. `-1` is the only negative the down
-        // path survives unclamped (`min(-1 + 1, last)` lands on `0` by luck); `-2` and
-        // below return a negative.
+        // a half-typed slash command in the field. Before the clamping, `-1` was the one
+        // negative the down path survived, `min(-1 + 1, last)` having landed on `0` by
+        // luck, and `-2` and below came back negative.
         case (false, let index?): return min(max(index + 1, 0), last)
         case (true, let index?):
             // An index left over from a longer list must step up from the last row that
@@ -128,6 +128,32 @@ enum ComposerCommand: Equatable {
             let clamped = min(max(index, 0), last)
             return clamped == 0 ? nil : clamped - 1
         }
+    }
+
+    /// Whether `input` is a slash word Vervellum does not recognise — a command still
+    /// being typed, rather than a question.
+    ///
+    /// `parse` sends an unknown slash word to `.ask`, on the reasoning that a stray
+    /// slash mid-sentence is part of the question. That reasoning does not survive the
+    /// completion list: while `/h` is on screen under `history` and `help`, the user is
+    /// visibly picking a command, and Return sending `/h` to the model as a question
+    /// spends a real request on a typo.
+    ///
+    /// So Return declines instead, which is what `/direct` with no argument already
+    /// does — a command that is not finished is not a question, and the composer keeps
+    /// the text so the next keystroke continues it. An exact command still submits:
+    /// `parse` recognises `/new`, so this is false for it, and Return starts a thread.
+    ///
+    /// Pure and here rather than in the view for the same reason as `moveSelection` —
+    /// the rule is the interesting part, and it should be testable on both platforms.
+    static func isUnfinishedCommand(_ input: String) -> Bool {
+        guard completions(for: input) != nil else { return false }
+        // `parse` already returns nil for a command that is complete but wants an
+        // argument (`/direct`), and the composer handles that by keeping the text.
+        // Withholding it a second time here would be the same answer twice.
+        guard let command = parse(input) else { return false }
+        if case .ask = command { return true }
+        return false
     }
 
     /// The configured model providers as markdown, for a bare `/model`.
