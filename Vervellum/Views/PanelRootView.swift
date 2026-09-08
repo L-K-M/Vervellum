@@ -546,18 +546,21 @@ struct PanelRootView: View {
                         .background(index == selected
                             ? PanelTheme.Palette.accent.opacity(0.18)
                             : Color.clear)
-                        // The highlight was colour only, so VoiceOver had no way to say
-                        // which command Return would take — the whole point of the list
-                        // being keyboard-navigable.
-                        .accessibilityAddTraits(index == selected ? .isSelected : [])
-                        // Says what activation actually does. Several of these commands
-                        // take an argument, so a row fills the field rather than running
-                        // it — which is not what "button named /new" would lead you to
-                        // expect if you could not see the trailing space appear.
-                        .accessibilityHint("Fills the composer with this command")
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    // On the button, not on the label inside it. A `Button` folds its
+                    // label's children into one element, and a trait applied in there is
+                    // carried up only as an implementation detail — `.isSelected` is the
+                    // one this list cannot afford to lose, since it is the whole reason
+                    // the highlight means anything to VoiceOver. The highlight was colour
+                    // alone before, which said nothing about which command Return takes.
+                    .accessibilityAddTraits(index == selected ? .isSelected : [])
+                    // Says what activation actually does. Several of these commands take
+                    // an argument, so a row fills the field rather than running it —
+                    // which is not what "button named /new" would lead you to expect if
+                    // you could not see the trailing space appear.
+                    .accessibilityHint("Fills the composer with this command")
                     // Claims only. A row that clears on exit can wipe the highlight the
                     // pointer has just moved onto, because the leaving row's exit and the
                     // entering row's enter are separate tracking events with no
@@ -594,8 +597,11 @@ struct PanelRootView: View {
         // added later. The send button knows the rule too, but only so it can grey itself
         // out — a button can show the state, and this is where the state is enforced.
         guard !ComposerCommand.isHalfTypedCommand(text) else {
-            // A dead key is indistinguishable from a broken one. The greyed-out send
-            // button says this to anyone who can see it; this says it to everyone else.
+            // A dead key is indistinguishable from a broken one, and the greyed-out send
+            // button is not where a reader's eyes are when they press Return. Both, then:
+            // the notice for anyone looking at the panel, the announcement for anyone
+            // who is not. Cleared by Escape like every other notice.
+            notice = Self.unfinishedCommandCopy
             announce(Self.unfinishedCommandCopy)
             return
         }
@@ -879,6 +885,11 @@ struct PanelRootView: View {
     /// Only ever from a key the reader pressed. Every announcement here exists because
     /// a keystroke changed what Return will do without moving the focus, and a mouse
     /// gesture that did the same would be talking over them for nothing.
+    ///
+    /// The withheld-send announcement in `submit` is the one to watch: `submit` is the
+    /// chokepoint rather than a key handler, so it holds today only because the send
+    /// button greys itself out on the same predicate and cannot reach the guard. A
+    /// caller added later that is not a keystroke would need to say so.
     private func announce(_ message: String) {
         NSAccessibility.post(element: NSApp as Any,
                              notification: .announcementRequested,

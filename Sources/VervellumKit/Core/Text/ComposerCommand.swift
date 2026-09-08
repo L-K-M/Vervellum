@@ -90,9 +90,7 @@ enum ComposerCommand: Equatable {
     /// when it is one that matches nothing. A caller holding a list is holding rows, so
     /// nothing has to decide what an empty completion card would look like.
     static func completions(for input: String) -> [Entry]? {
-        guard isBareCommandWord(input) else { return nil }
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        let prefix = String(trimmed.dropFirst()).lowercased()
+        guard let prefix = commandWord(of: input) else { return nil }
         // Both sides lowered. Every catalogue name is lowercase today, so this is a
         // no-op — but `parse` matches case-insensitively, and a name that arrived
         // capitalised would otherwise submit fine while never appearing in the list.
@@ -109,7 +107,16 @@ enum ComposerCommand: Equatable {
     /// keeps it shut — and `isHalfTypedCommand` only withholds Return inside them, not for
     /// every one. So this is the ceiling on both, not their definition. Widening it widens
     /// both, which is the right coupling: it is what "still typing the command word" means.
-    static func isBareCommandWord(_ input: String) -> Bool {
+    static func isBareCommandWord(_ input: String) -> Bool { commandWord(of: input) != nil }
+
+    /// The lowercased word after the slash, or nil when `input` is not a bare command
+    /// word at all.
+    ///
+    /// One home for the trim and the interior scan. `completions(for:)` asked
+    /// `isBareCommandWord` and then re-derived the same trimmed word for itself, so the
+    /// character set was named twice a few lines apart — which is the shape of the bug
+    /// this predicate was extracted to fix in the first place, at one remove.
+    private static func commandWord(of input: String) -> String? {
         // One set for the edges and the interior alike, so the two cannot disagree about
         // a character. They did once: trimming `CharacterSet.whitespaces` while testing
         // `Character.isWhitespace` left `/h\n` failing the interior test where `/h `
@@ -121,11 +128,17 @@ enum ComposerCommand: Equatable {
         // question rather than answering it again for the next character somebody pastes.
         let whitespace = CharacterSet.whitespacesAndNewlines
         let trimmed = input.trimmingCharacters(in: whitespace)
-        return trimmed.hasPrefix("/")
-            && !trimmed.dropFirst().unicodeScalars.contains { whitespace.contains($0) }
+        guard trimmed.hasPrefix("/"),
+              !trimmed.dropFirst().unicodeScalars.contains(where: { whitespace.contains($0) })
+        else { return nil }
+        return String(trimmed.dropFirst()).lowercased()
     }
 
     /// Where ↑/↓ moves the highlight in a completion list of `count` rows.
+    ///
+    /// `count <= 0` answers nil whatever `current` holds. An empty list cannot hold a
+    /// highlight, and an index left over from the list it replaced is no exception — the
+    /// view relies on that to keep a collapsed list safe.
     ///
     /// Pure and here rather than in the view so the edges are testable on both platforms,
     /// because the edges are the whole design:

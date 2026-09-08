@@ -54,7 +54,10 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertEqual(matches?.map(\.name), ["history", "help"])
     }
 
+    /// A slash and nothing else offers everything — the list the arrow keys are most
+    /// often used on, since it is the one a reader opens to see what there is.
     func testCompletionsListEverythingForABareSlash() {
+        XCTAssertNotNil(ComposerCommand.completions(for: "/"), "not nothing")
         XCTAssertEqual(ComposerCommand.completions(for: "/")?.count, ComposerCommand.catalogue.count)
     }
 
@@ -266,11 +269,14 @@ final class ComposerCommandTests: XCTestCase {
     func testEveryOfferedCommandCanBeSubmitted() {
         XCTAssertFalse(ComposerCommand.catalogue.isEmpty)
         for entry in ComposerCommand.catalogue {
-            // Both forms. The spaced one is what `accept` leaves in the field, so if a
+            // Three forms. The spaced one is what `accept` leaves in the field, so if a
             // command were withheld in that shape, picking it from the list would brick
             // Return for it — the trailing space trims back to the same word, the list
-            // comes straight back, and nothing ever sends.
-            for candidate in ["/\(entry.name)", "/\(entry.name) "] {
+            // comes straight back, and nothing ever sends. The newline is the same shape
+            // arrived at by habit: Shift-Return after a command that is already complete.
+            // It only stays sendable while `parse` trims the set `isBareCommandWord`
+            // trims, and neither says so out loud, so this is what holds them together.
+            for candidate in ["/\(entry.name)", "/\(entry.name) ", "/\(entry.name)\n"] {
                 XCTAssertFalse(ComposerCommand.isHalfTypedCommand(candidate),
                                "\(candidate) is offered in the list, but Return withholds it")
             }
@@ -313,11 +319,4 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertNil(ComposerCommand.completions(for: "/direct what is the time"))
     }
 
-    /// Typing a slash and nothing else offers everything, which is the list the arrow
-    /// keys are most often used on.
-    func testABareSlashOffersTheWholeCatalogue() {
-        let everything = ComposerCommand.completions(for: "/")
-        XCTAssertNotNil(everything, "a bare slash offers the whole catalogue, not nothing")
-        XCTAssertEqual(everything?.count, ComposerCommand.catalogue.count)
-    }
 }
