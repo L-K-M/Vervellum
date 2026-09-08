@@ -20,6 +20,32 @@ import AppKit
 ///   render pass per layer.
 enum PanelTheme {
 
+    // MARK: The active theme
+
+    /// The palette every token below reads.
+    ///
+    /// A stored value rather than an environment key, and deliberately, because the
+    /// palette is needed in places an environment cannot reach: `CitationText` builds an
+    /// `AttributedString` whose citation chips carry the accent colour, and that is not a
+    /// `View` body. One assignment point keeps those in step with the panel.
+    ///
+    /// Written by the composition root when the preference changes, and read on the main
+    /// thread during layout. It is set *before* SwiftUI re-renders — `Preferences` posts
+    /// `objectWillChange` and then calls its `onChanged` hook, and the re-render happens
+    /// on a later turn of the run loop — so a body never reads a stale palette.
+    static var palette: PanelPalette = .ember {
+        // A debug-runtime trap, not a compile-time or a shipping check — `assert` is
+        // compiled out with `-O`, and that is the intended severity. A palette import or
+        // an async settings load is exactly the kind of future writer that would race a
+        // value SwiftUI reads during layout, and this catches it in the build that writer
+        // is running. `dispatchPrecondition` would carry into release, but the harm being
+        // guarded against is a frame drawn in the wrong colours, and killing a running
+        // app over that trades a cosmetic bug for a worse one.
+        willSet {
+            assert(Thread.isMainThread, "PanelTheme.palette must only be set on the main thread")
+        }
+    }
+
     // MARK: Spacing
 
     enum Space {
@@ -35,25 +61,41 @@ enum PanelTheme {
 
     // MARK: Shape
 
+    /// Corner radii, multiplied by the theme's roundness. Zero is square, which is the
+    /// whole point of shipping a Terminal preset.
     enum Radius {
-        static let chip: CGFloat = 5
-        static let card: CGFloat = 9
-        static let panel: CGFloat = 14
+        static var chip: CGFloat { 5 * scale }
+        static var card: CGFloat { 9 * scale }
+        static var panel: CGFloat { 14 * scale }
+
+        private static var scale: CGFloat { CGFloat(PanelTheme.palette.cornerScale) }
     }
 
     // MARK: Type
 
     enum Font {
+        /// The theme's family for prose. Code and citations do not use it: they are
+        /// monospaced because alignment carries meaning there, not because of taste.
+        static var design: SwiftUI.Font.Design {
+            switch PanelTheme.palette.fontDesign {
+            case .system: return .default
+            case .serif: return .serif
+            case .rounded: return .rounded
+            case .monospaced: return .monospaced
+            }
+        }
 
         /// The one place a point size becomes a font.
         ///
         /// Every size in the panel goes through here so the text-size preference cannot
         /// be forgotten at a call site — which is exactly how the setting came to move
-        /// the answer prose and nothing else around it.
+        /// the answer prose and nothing else around it. The theme's family defaults in
+        /// here for the same reason: prose picks it up without every call site naming
+        /// it, and the two that must stay monospaced say so out loud.
         static func at(_ size: CGFloat,
                        _ scale: Double,
                        weight: SwiftUI.Font.Weight = .regular,
-                       design: SwiftUI.Font.Design = .default) -> SwiftUI.Font {
+                       design: SwiftUI.Font.Design = PanelTheme.Font.design) -> SwiftUI.Font {
             .system(size: size * scale, weight: weight, design: design)
         }
 
@@ -79,30 +121,54 @@ enum PanelTheme {
     // MARK: Colour
 
     enum Palette {
-        static let accent = Color(red: 1.0, green: 0.541, blue: 0.298)
+        private static var theme: PanelPalette { PanelTheme.palette }
 
-        static let primaryText = Color.primary
-        static let secondaryText = Color.secondary
-        static let tertiaryText = Color.secondary.opacity(0.62)
+        static var accent: Color { Color(theme.accent) }
+
+        /// Text tiers. A theme that names no text colour keeps the *semantic* one, which
+        /// is what lets a palette follow Dark Mode, Increase Contrast and Reduce
+        /// Transparency without stating a light and a dark variant of itself.
+        static var primaryText: Color { theme.primaryText.map { Color($0) } ?? Color.primary }
+        static var secondaryText: Color { theme.secondaryText.map { Color($0) } ?? Color.secondary }
+        static var tertiaryText: Color {
+            theme.secondaryText.map { Color($0.withAlpha($0.alpha * 0.62)) }
+                ?? Color.secondary.opacity(0.62)
+        }
 
         /// Flat fills for cards and chips. Deliberately not materials: see the note
         /// about nesting glass in this type's documentation.
-        static let cardFill = Color.primary.opacity(0.05)
-        static let chipFill = Color.primary.opacity(0.075)
-        static let hairline = Color.primary.opacity(0.11)
+        static var cardFill: Color { Color(theme.cardFill) }
+        static var chipFill: Color { Color(theme.chipFill) }
+        static var hairline: Color { Color(theme.hairline) }
 
         /// A legibility scrim behind the content column. Liquid Glass over an
         /// arbitrary desktop — a photo, a bright IDE, a video — cannot be relied on to
-        /// keep 13pt text readable, and the system does not add one for you.
-        static let scrim = Color.black.opacity(0.16)
+        /// keep 13pt text readable, and the system does not add one for you. A theme with
+        /// its own surface does *not* clear this: `PanelBackground` paints one or the
+        /// other, never both, so the scrim costs nothing while a surface is set and is
+        /// what stands in the moment the reader hands `surface` back to Automatic.
+        static var scrim: Color { Color(theme.scrim) }
+
+        /// The panel's own surface, or nil to use the system material behind it.
+        ///
+        /// An alpha near zero reads as absent. `PanelBackground` paints the surface *or*
+        /// the scrim, so without this floor a surface dragged to 0.01 paints nothing
+        /// while still cancelling the 0.16 scrim — the least legible arrangement the
+        /// theme pane can produce, reached by a slider on its way to a state (Automatic)
+        /// that is fine. The legibility floor has to be continuous across that drag, not
+        /// fall away at one end and reappear at the other.
+        static var surface: Color? {
+            guard let surface = theme.surface, surface.alpha > 0.05 else { return nil }
+            return Color(surface)
+        }
 
         static func verdict(_ verdict: Verdict) -> Color {
             switch verdict {
-            case .supported: return Color(red: 0.20, green: 0.68, blue: 0.42)
-            case .contradicted: return Color(red: 0.88, green: 0.30, blue: 0.30)
-            case .mixed: return Color(red: 0.92, green: 0.66, blue: 0.20)
-            case .insufficient: return Color(red: 0.47, green: 0.55, blue: 0.68)
-            case .opinion: return Color(red: 0.60, green: 0.50, blue: 0.85)
+            case .supported: return Color(theme.supported)
+            case .contradicted: return Color(theme.contradicted)
+            case .mixed: return Color(theme.mixed)
+            case .insufficient: return Color(theme.insufficient)
+            case .opinion: return Color(theme.opinion)
             }
         }
     }
@@ -118,8 +184,8 @@ enum PanelTheme {
     }
 }
 
-/// The panel's background: Liquid Glass on macOS 26, a blurred `NSVisualEffectView`
-/// below it, and in both cases a legibility scrim.
+/// The panel's background: the theme's backdrop, then its surface or, failing that, a
+/// legibility scrim.
 ///
 /// The scrim is not optional. Glass takes its colour from whatever is behind the
 /// window, and "whatever is behind the window" is the user's entire desktop — so
@@ -131,19 +197,81 @@ struct PanelBackground: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         ZStack {
+            backdrop(in: shape)
+            // The scrim is what stands in for a surface, not a wash over one. Painting
+            // both meant a theme with an opaque surface had to remember to clear its
+            // scrim or get an unasked-for tint, and it put the legibility rule in the
+            // theme data rather than in the code that depends on it. Compositing is
+            // associative, so a surface that wants a scrim's darkening can carry it in
+            // its own alpha; nothing is lost by choosing.
+            if let surface = PanelTheme.Palette.surface {
+                shape.fill(surface)
+            } else {
+                shape.fill(PanelTheme.Palette.scrim)
+            }
+            shape.strokeBorder(PanelTheme.Palette.hairline, lineWidth: 0.5)
+        }
+    }
+
+    /// What sits behind the surface.
+    ///
+    /// A theme with an opaque surface still gets one, even though that surface fills the
+    /// same rounded rectangle and hides it completely. `surface` is an optional the
+    /// reader toggles and an alpha they drag, so making the view tree depend on either
+    /// would build and tear down an `NSVisualEffectView` in the middle of that drag —
+    /// a stutter, traded for a blur nothing is looking at. `Reduce Transparency` still
+    /// wins over the theme, because that setting is an accessibility request rather than
+    /// a preference.
+    ///
+    /// Three cases, three renderings. That is the whole contract: the picker offers three
+    /// names, so two of them drawing the same pixels would read as a broken setting rather
+    /// than as a taste nobody shares.
+    @ViewBuilder
+    private func backdrop(in shape: RoundedRectangle) -> some View {
+        switch PanelTheme.palette.backdrop {
+        case .glass:
             if #available(macOS 26.0, *), !reduceTransparency {
                 Color.clear.glassEffect(.regular, in: shape)
             } else {
                 VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
                     .clipShape(shape)
             }
-            shape.fill(PanelTheme.Palette.scrim)
-            shape.strokeBorder(PanelTheme.Palette.hairline, lineWidth: 0.5)
+        case .frosted:
+            // No `reduceTransparency` check, unlike `.glass` above: `VisualEffectBlur`
+            // wraps `NSVisualEffectView`, which answers the setting itself by turning
+            // its material opaque. The guarantee is kept here, just not by this code.
+            VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
+                .clipShape(shape)
+        case .solid:
+            // Opaque here, rather than by leaning on the theme's surface to cover a blur.
+            // `surface` is one of the colours the reader can hand back to Automatic, and
+            // this is the backdrop that promises legibility over literally anything — so
+            // sharing the `.frosted` branch made that promise depend on a checkbox two
+            // rows above it in the same pane, and made two of the three menu items draw
+            // the same thing. The semantic window colour rather than a fixed grey, so an
+            // opaque panel still follows Dark Mode and Increase Contrast; a theme with a
+            // surface of its own paints straight over this.
+            shape.fill(Color(nsColor: .windowBackgroundColor))
         }
     }
 
     private var reduceTransparency: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+    }
+}
+
+extension Color {
+    /// A `ThemeColor` as SwiftUI sees it.
+    ///
+    /// sRGB explicitly, not `.displayP3`: the components came from a hex string a person
+    /// typed or pasted, and a hex string means sRGB everywhere else they will have used
+    /// one.
+    init(_ themeColor: ThemeColor) {
+        self.init(.sRGB,
+                  red: themeColor.red,
+                  green: themeColor.green,
+                  blue: themeColor.blue,
+                  opacity: themeColor.alpha)
     }
 }
 

@@ -233,4 +233,68 @@ final class CorePreferencesTests: XCTestCase {
         XCTAssertEqual(CorePreferences(store: JSONFileSettingsStore(url: file)).textScale,
                        1.0, accuracy: 0.001)
     }
+
+    // MARK: The theme
+
+    /// The setter used to hand `encode`'s optional straight to the store, and a nil there
+    /// clears the key — so a palette that would not encode replaced the stored theme with
+    /// the default. Nothing can be made to fail encoding any more, which is the fix; what
+    /// is left to check here is that the ordinary path writes something the next launch
+    /// reads back as the same theme.
+    func testAThemeSurvivesBeingStoredAndReadBack() {
+        // Every preset, not one: Solarized states neither `fontDesign` nor `cornerScale`,
+        // so it was the round trip least able to notice a field that stopped encoding.
+        // Terminal carries `.monospaced` and a zero scale, Paper `.serif`, Bubblegum 1.8.
+        for preset in PanelPalette.presets {
+            let store = MemorySettingsStore()
+            CorePreferences(store: store).panelPalette = preset
+            XCTAssertEqual(CorePreferences(store: store).panelPalette, preset,
+                           "\(preset.name) did not survive a round trip through the store")
+            // `matchingPreset` answers with the first preset holding these values, so a
+            // preset that duplicated an earlier one's colours would be shadowed by it and
+            // the picker would tick the wrong card for a theme the reader chose.
+            XCTAssertEqual(preset.matchingPreset, preset,
+                           "\(preset.name) is shadowed by an earlier preset with the same values")
+        }
+
+        // Every preset is also a preset: each one omits some field and takes its default,
+        // and a field whose *encoding* disappeared would still read back as that default
+        // — passing precisely in the case it was meant to catch. Only a palette that
+        // states all of them can notice, so here is one, with nothing at a default.
+        let everything = PanelPalette(
+            name: "Everything",
+            accent: ThemeColor(0.9, 0.8, 0.7),
+            primaryText: ThemeColor(0.1, 0.2, 0.3),
+            secondaryText: ThemeColor(0.4, 0.5, 0.6),
+            surface: ThemeColor(0.2, 0.3, 0.4),
+            cardFill: ThemeColor(0.5, 0.6, 0.7, 0.2),
+            chipFill: ThemeColor(0.5, 0.6, 0.7, 0.3),
+            hairline: ThemeColor(0.5, 0.6, 0.7, 0.4),
+            scrim: ThemeColor(0, 0, 0, 0.5),
+            supported: ThemeColor(0.1, 0.9, 0.2),
+            contradicted: ThemeColor(0.9, 0.1, 0.2),
+            mixed: ThemeColor(0.9, 0.6, 0.1),
+            insufficient: ThemeColor(0.2, 0.4, 0.9),
+            opinion: ThemeColor(0.6, 0.2, 0.9),
+            fontDesign: .rounded,
+            cornerScale: 1.25,
+            backdrop: .solid)
+        let fullStore = MemorySettingsStore()
+        CorePreferences(store: fullStore).panelPalette = everything
+        XCTAssertEqual(CorePreferences(store: fullStore).panelPalette, everything,
+                       "a palette that states every field did not survive the round trip")
+    }
+
+    /// Losing a theme is a bad afternoon; refusing to launch is worse.
+    func testAStoredThemeThatWillNotParseReadsAsEmber() {
+        // The key by name rather than by literal: a rename would otherwise leave this
+        // test seeding a key nothing reads, and it would still pass.
+        XCTAssertEqual(preferences([CorePreferences.Key.panelPalette: "{ not json"]).panelPalette,
+                       .ember)
+        // The other layer: this parses as JSON and is still not a palette, so it fails
+        // one step further in — inside `decode` rather than at the parse — and has to
+        // reach the same fallback. Only the first was pinned.
+        XCTAssertEqual(preferences([CorePreferences.Key.panelPalette: "[]"]).panelPalette,
+                       .ember)
+    }
 }

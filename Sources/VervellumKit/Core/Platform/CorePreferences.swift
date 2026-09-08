@@ -13,6 +13,12 @@ import Foundation
 /// Numeric values are clamped **on read as well as on write**, so a settings file
 /// corrupted by a crash, an interrupted sync, or a hand edit cannot produce a state the
 /// user can neither see nor fix.
+///
+/// Not thread-safe, and not meant to be: this is read and written from the UI thread on
+/// both platforms. Three properties below keep mutable state across calls — the provider
+/// memo, the theme memo, and the warned-about theme text — and none is synchronized,
+/// because a settings object touched from two threads would have worse problems than
+/// those three.
 final class CorePreferences {
 
     /// Invoked after any change, so a platform can republish it — `objectWillChange` on
@@ -82,6 +88,8 @@ final class CorePreferences {
         /// How much of each source is read, and where a reader service lives.
         static let pageReading = "pageReading"
         static let readerEndpoint = "readerEndpoint"
+        /// The panel's theme, JSON-encoded. See `PanelPalette`.
+        static let panelPalette = "panelPalette"
         static let historyEnabled = "historyEnabled"
         static let showProcessTrail = "showProcessTrail"
         static let submitOnReturn = "submitOnReturn"
@@ -197,6 +205,89 @@ final class CorePreferences {
         get { store.bool(for: Key.redactSecrets) ?? Default.redactSecrets }
         set { store.setBool(newValue, for: Key.redactSecrets); onChange?() }
     }
+
+    /// How the panel looks.
+    ///
+    /// Stored as one JSON blob rather than a key per colour: a theme is a set that has
+    /// to be applied or replaced whole, and twenty loose keys would let a half-written
+    /// file produce a palette that is half Terminal and half Paper. Unreadable text
+    /// falls back to the default for the same reason `modelProviders` does — losing a
+    /// theme is a bad afternoon, refusing to launch is worse.
+    var panelPalette: PanelPalette {
+        get {
+            guard let text = store.string(for: Key.panelPalette) else { return .ember }
+            // Memoised on the stored text, for the reason `cachedProviderSettings` is:
+            // the comment below already says the theme pane reads this for every control
+            // on it, on every keystroke of a colour well, and each of those reads was a
+            // full `JSONDecoder` pass over the same bytes. Keyed on the text rather than
+            // invalidated by hand, so a store written from anywhere still decodes once.
+            if let memo = paletteMemo, memo.text == text { return memo.palette }
+            guard let decoded = PanelPalette.decode(text) else {
+                // Falling back is right; falling back in silence is not. "My theme keeps
+                // resetting itself" is unanswerable without knowing a stored value was
+                // there and would not parse.
+                //
+                // Once per bad value, not once per read: the theme pane reads this
+                // property for every control on it, on every keystroke of a colour well,
+                // so an unconditional write here turns one corrupt file into a stream
+                // that buries whatever else stderr was carrying.
+                if complainedAboutTheme != text {
+                    complainedAboutTheme = text
+                    // Built as one string first, like `ThreadArchive`'s warning and for
+                    // the reason its comment gives: `.utf8` binds tighter than `+`, so
+                    // applying it to the last literal of a concatenation is a type error
+                    // rather than a byte view of the whole thing.
+                    let warning = "vervellum warning: the stored theme could not be read "
+                        + "and the default was used. It began: \(text.prefix(100))\n"
+                    FileHandle.standardError.write(Data(warning.utf8))
+                }
+                paletteMemo = (text, .ember)
+                return .ember
+            }
+            paletteMemo = (text, decoded)
+            return decoded
+        }
+        set {
+            // `setString(nil)` clears the key, and a cleared key reads back as Ember — so
+            // forwarding the optional straight through turned "this palette would not
+            // encode" into "your theme is gone", in silence, which is the failure the
+            // getter's own comment refuses to ship. Nothing can reach it today: every
+            // `ThemeColor` component and now `cornerScale` too are finite by
+            // construction, which is what `JSONEncoder` was refusing. It is here so a
+            // field added later that forgets that rule costs a save rather than a theme.
+            guard let encoded = PanelPalette.encode(newValue) else {
+                let warning = "vervellum warning: the theme could not be saved, so the "
+                    + "stored one was kept.\n"
+                FileHandle.standardError.write(Data(warning.utf8))
+                return
+            }
+            store.setString(encoded, for: Key.panelPalette)
+            // Seeded with the value rather than left for the next read to decode. Sound
+            // only because encode and decode round trip exactly, which
+            // `testAThemeSurvivesBeingStoredAndReadBack` pins for every preset and for a
+            // palette that states every field — if that ever stops being true, that test
+            // fails before this memo can hand anybody the wrong theme.
+            paletteMemo = (encoded, newValue)
+            // A good value clears the complaint, so a file that is corrupted *again*
+            // later warns again. Recording it forever would have made the second
+            // occurrence the silent one, which is the case the warning exists for.
+            complainedAboutTheme = nil
+            onChange?()
+        }
+    }
+
+    /// The stored theme text already complained about, so the warning above fires once
+    /// per bad value rather than once per read.
+    private var complainedAboutTheme: String?
+
+    /// The last decoded theme, with the text it came from.
+    ///
+    /// Two fields rather than one, because the text is what makes the memo safe: a stored
+    /// value written by anything at all is noticed by the comparison, so there is no
+    /// invalidation to remember. The corrupt path is memoised too — the warning is
+    /// already once-per-value, so a second read of the same bad text has nothing to say
+    /// and nothing to decode.
+    private var paletteMemo: (text: String, palette: PanelPalette)?
 
     var textScale: Double {
         get { Self.clamped(store.double(for: Key.textScale), Default.textScale, Self.textScaleRange) }
