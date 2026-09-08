@@ -55,10 +55,20 @@ final class ResearchRunner: ResearchRunning {
         /// Which secrets are present, never what they are. Profile ids are safe to name
         /// — they are what the trace already uses to talk about providers — and they are
         /// what makes this description useful enough that nobody wants the real one.
+        ///
+        /// Fields named one by one rather than interpolating `settings`, which is the
+        /// whole point and was the hole in the first version of this. `ProviderSettings`
+        /// has no description of its own, so reflection would have printed every stored
+        /// property — the endpoints included, and an endpoint is a URL somebody pasted.
+        /// Nothing stops one carrying `?api-key=…`: the validator refuses credentials in
+        /// a URL's *userinfo*, which is a different part of the address. Listing what may
+        /// be shown, rather than removing what may not, also means a field added to
+        /// `ProviderSettings` later cannot leak through here by default.
         var description: String {
             let ids = modelKeys.keys.map(\.uuidString).sorted().joined(separator: ", ")
             func held(_ secret: String?) -> String { secret == nil ? "absent" : "present" }
-            return "Environment(settings: \(settings), modelKeys: [\(ids)], "
+            return "Environment(model: \(settings.modelName), "
+                + "providers: \(settings.modelChain.count), modelKeys: [\(ids)], "
                 + "modelKey: \(held(modelKey)), searchKey: \(held(searchKey)), "
                 + "readerKey: \(held(readerKey)))"
         }

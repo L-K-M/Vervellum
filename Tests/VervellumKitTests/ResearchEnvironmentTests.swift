@@ -13,8 +13,12 @@ import XCTest
 final class ResearchEnvironmentTests: XCTestCase {
 
     private func environment() -> (ResearchRunner.Environment, ModelProfile) {
+        // A key in the endpoint's *query*, which is where gateways that take one put it
+        // and where a person pastes one. The URL validator refuses credentials in a URL's
+        // userinfo, which is a different part of the address — so nothing upstream stops
+        // this, and printing `settings` whole would have carried it into the log.
         let profile = ModelProfile.new(name: "Alpha",
-                                       endpoint: "https://alpha.example.com/v1",
+                                       endpoint: "https://alpha.example.com/v1?api-key=sk-in-url-0000",
                                        model: "alpha")
         let spare = ModelProfile.new(name: "Beta",
                                      endpoint: "https://beta.example.com/v1",
@@ -40,6 +44,10 @@ final class ResearchEnvironmentTests: XCTestCase {
             XCTAssertFalse(rendering.contains("sk-beta-0000000000000"), rendering)
             XCTAssertFalse(rendering.contains("sk-search-00000000000"), rendering)
             XCTAssertFalse(rendering.contains("sk-reader-00000000000"), rendering)
+            // The catch-all, which the four above are not: a rendering that showed the
+            // first eight characters of a key, or the endpoint the key was pasted into,
+            // would satisfy every one of them. Nothing legitimate here contains "sk-".
+            XCTAssertFalse(rendering.contains("sk-"), rendering)
         }
     }
 
@@ -50,7 +58,12 @@ final class ResearchEnvironmentTests: XCTestCase {
         let (subject, profile) = environment()
         let rendering = "\(subject)"
         XCTAssertTrue(rendering.contains(profile.id.uuidString), rendering)
+        // All three, not just the one: a rendering that hard-coded "present" for the
+        // search key and dropped the others would have passed on `searchKey` alone.
+        XCTAssertTrue(rendering.contains("modelKey: present"), rendering)
         XCTAssertTrue(rendering.contains("searchKey: present"), rendering)
+        XCTAssertTrue(rendering.contains("readerKey: present"), rendering)
+        XCTAssertTrue(rendering.contains("model: alpha"), rendering)
     }
 
     /// The absent case has to be distinguishable from the present one, or the rendering
@@ -61,7 +74,9 @@ final class ResearchEnvironmentTests: XCTestCase {
                                                  modelKey: nil,
                                                  searchKey: nil,
                                                  readerKey: nil)
+        XCTAssertTrue("\(subject)".contains("modelKey: absent"), "\(subject)")
         XCTAssertTrue("\(subject)".contains("searchKey: absent"), "\(subject)")
+        XCTAssertTrue("\(subject)".contains("readerKey: absent"), "\(subject)")
         XCTAssertTrue("\(subject)".contains("modelKeys: []"), "\(subject)")
     }
 }

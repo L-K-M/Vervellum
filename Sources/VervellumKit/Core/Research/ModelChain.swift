@@ -27,6 +27,10 @@ import Foundation
 /// Clients are built lazily rather than up front. Constructing one is cheap, but
 /// *validating* an endpoint is where a half-configured second profile would otherwise
 /// throw during setup and take down a turn the first provider could have served alone.
+///
+/// One task at a time. `index`, `built` and `announcedID` are plain mutable state, and
+/// what makes that safe is that a turn's stages call `perform` one after another rather
+/// than at once. Two concurrent stages would race the cursor and announce twice.
 final class ModelChain {
 
     private let profiles: [ModelProfile]
@@ -97,6 +101,12 @@ final class ModelChain {
         var attempted = 0
 
         while index < profiles.count {
+            // Sampled before every attempt, not only where a failure is caught. Stop
+            // landing in the window between the catch and the next call — during
+            // `beforeRetry`, or as the request is being built — would otherwise put one
+            // more question on the wire, and `PRIVACY.md` says a cancelled question is
+            // never re-sent. Narrow, but it is the one promise this app makes about Stop.
+            guard !Task.isCancelled else { throw ResearchError.cancelled }
             let profile = profiles[index]
             guard let client = client(for: profile) else {
                 // An unusable endpoint or an empty model name. Not an error to report on

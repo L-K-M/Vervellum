@@ -59,11 +59,16 @@ final class ModelChainTests: XCTestCase {
     /// state a second provider exists to cover.
     func testARejectedKeyIsWorthAnotherProvider() async throws {
         let profiles = [profile("alpha"), profile("beta")]
+        var asked: [String] = []
         let result = try await chain(profiles).perform("Plan") { client in
+            asked.append(client.model)
             if client.model == "alpha" { throw ResearchError.rejectedCredential(401) }
             return client.model
         }
         XCTAssertEqual(result, "beta")
+        // Who was contacted, not only who answered: returning "beta" is also what a chain
+        // that retried the rejected key first, or skipped a spare, would return.
+        XCTAssertEqual(asked, ["alpha", "beta"], "left exactly once, for the next one")
     }
 
     /// The switch is announced, so the runner can rename the turn's model and post the
@@ -83,16 +88,19 @@ final class ModelChainTests: XCTestCase {
     /// A provider that died mid-sentence has already streamed text into the turn. The
     /// next one starts from the beginning, so the fragment has to go first.
     func testRunsTheResetBeforeEachRetryAndNotBeforeTheFirstTry() async throws {
-        let profiles = [profile("alpha"), profile("beta")]
+        // Three, because with two there is exactly one retry and "before each retry" is
+        // indistinguishable from "once, ever" — a one-shot flag would have passed.
+        let profiles = [profile("alpha"), profile("beta"), profile("gamma")]
         var resets = 0
         var seenAtEntry: [Int] = []
         _ = try await chain(profiles).perform("Answer", beforeRetry: { resets += 1 }) { client in
             seenAtEntry.append(resets)
-            if client.model == "alpha" { throw ResearchError.streamInterrupted }
+            if client.model != "gamma" { throw ResearchError.streamInterrupted }
             return client.model
         }
-        XCTAssertEqual(seenAtEntry, [0, 1], "no reset before the first provider, one before the second")
-        XCTAssertEqual(resets, 1)
+        XCTAssertEqual(seenAtEntry, [0, 1, 2],
+                       "no reset before the first provider, one before each later one")
+        XCTAssertEqual(resets, 2)
     }
 
     // MARK: Not falling back
@@ -136,8 +144,10 @@ final class ModelChainTests: XCTestCase {
         XCTAssertEqual(resets, 0, "nothing was retried, so nothing was reset")
     }
 
-    /// The payload is measured before a byte leaves the machine, so every provider in
-    /// the chain would fail on it identically.
+    /// An unencodable payload would fail identically at every provider, so the chain has
+    /// to treat it as terminal rather than as this provider's bad day. What is pinned
+    /// here is that classification: the measurement itself happens where the payload is
+    /// built, and the error arrives from the body like any other.
     func testAnUnencodableContextIsNeverRetriedOnAnotherProvider() async {
         let profiles = [profile("alpha"), profile("beta")]
         var asked: [String] = []
