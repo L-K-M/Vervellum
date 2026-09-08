@@ -200,11 +200,13 @@ final class ResearchRunner: ResearchRunning {
         // that actually produced the words.
         let chain = ModelChain(profiles: settings.modelChain, keys: environment.modelKeys,
                                trace: trace, transport: transport)
-        chain.onSwitch = { [weak self] profile in
-            self?.update { turn in
-                turn.model = profile.model
-                turn.addNotice(.modelFellBack)
-            }
+        // The notice only. Which provider *answered* is settled after the stage that
+        // produced the words, not at the moment the chain moved on: a turn whose answer
+        // streamed from one provider can still fall through to another for the
+        // assessment, and recording the switch would put the second name on the first
+        // one's paragraphs — the exact substitution this app claims not to make.
+        chain.onSwitch = { [weak self] _ in
+            self?.update { $0.addNotice(.modelFellBack) }
         }
         let today = ResearchContext.todayString()
 
@@ -383,6 +385,7 @@ final class ResearchRunner: ResearchRunning {
                 self?.update { $0.answer += chunk }
             }
         }
+        recordAnsweringModel(from: chain)
         update { $0.applyCitationValidation(sourceCount: sources.count) }
         try Task.checkCancellation()
 
@@ -485,6 +488,7 @@ final class ResearchRunner: ResearchRunning {
                 self?.update { $0.answer += chunk }
             }
         }
+        recordAnsweringModel(from: chain)
         // The same check the research path makes after its answer. A Stop pressed
         // mid-stream ends the stream rather than failing it, and without this the
         // fragment would be completed, persisted and sent as history to every later
@@ -493,5 +497,17 @@ final class ResearchRunner: ResearchRunning {
         // Citations are meaningless here, but a model that emitted a URL anyway is
         // exactly the failure the badge needs to warn about.
         update { $0.applyCitationValidation(sourceCount: 0) }
+    }
+
+    /// Records which provider produced the answer, on every turn.
+    ///
+    /// Called straight after the answering stage, before the assessment can move the
+    /// chain on. Until now this was written only when a fallback happened, so the badge
+    /// in `TurnView` appeared exactly when something had gone wrong and stayed blank the
+    /// rest of the time — which is close to the opposite of what a field documented as
+    /// "the model that produced the answer" is for.
+    private func recordAnsweringModel(from chain: ModelChain) {
+        guard let profile = chain.lastAnswered else { return }
+        update { $0.model = profile.model }
     }
 }

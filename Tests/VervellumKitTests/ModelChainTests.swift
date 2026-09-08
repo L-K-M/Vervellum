@@ -243,6 +243,54 @@ final class ModelChainTests: XCTestCase {
         XCTAssertTrue(switched.isEmpty, "the selection answering is not a substitution")
     }
 
+    // MARK: Which provider answered
+
+    /// The head answering is the ordinary case, and it has to be recorded too — the
+    /// badge that names the model was blank on every turn that went right.
+    func testTheHeadIsRecordedWhenItAnswers() async throws {
+        let subject = chain([profile("alpha"), profile("beta")])
+        _ = try await subject.perform("Answer") { $0.model }
+        XCTAssertEqual(subject.lastAnswered?.model, "alpha")
+    }
+
+    /// This follows the last *successful* stage, not the last announcement — and it does
+    /// keep moving, which is the whole reason the runner reads it immediately after the
+    /// answering stage rather than at the end of the turn. Pinned here so nobody
+    /// mistakes it for a value that freezes itself.
+    func testTheRecordFollowsEachStageThatSucceeds() async throws {
+        let subject = chain([profile("alpha"), profile("beta")])
+        _ = try await subject.perform("Answer") { $0.model }
+        XCTAssertEqual(subject.lastAnswered?.model, "alpha")
+
+        // The assess stage falls through to beta, as it may.
+        _ = try await subject.perform("Assess") { client in
+            if client.model == "alpha" { throw ResearchError.connectionFailed }
+            return client.model
+        }
+        XCTAssertEqual(subject.lastAnswered?.model, "beta",
+                       "beta answered the assess stage, so it is what that stage recorded")
+    }
+
+    /// A provider reached by falling through is the one that answered.
+    func testTheSpareIsRecordedWhenTheHeadFails() async throws {
+        let subject = chain([profile("alpha"), profile("beta")])
+        _ = try await subject.perform("Answer") { client in
+            if client.model == "alpha" { throw ResearchError.connectionFailed }
+            return client.model
+        }
+        XCTAssertEqual(subject.lastAnswered?.model, "beta")
+    }
+
+    /// Nothing answered, so there is nothing to attribute — a turn that failed must not
+    /// name a provider as having produced words it never produced.
+    func testNothingIsRecordedWhenEveryProviderFails() async {
+        let subject = chain([profile("alpha"), profile("beta")])
+        _ = try? await subject.perform("Answer") { _ in
+            throw ResearchError.connectionFailed
+        }
+        XCTAssertNil(subject.lastAnswered)
+    }
+
     // MARK: Exhaustion
 
     /// The first error is the selected provider's, and that is the one the user will act

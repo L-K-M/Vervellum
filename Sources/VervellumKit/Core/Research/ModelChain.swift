@@ -56,6 +56,15 @@ final class ModelChain {
     /// search and again for the answer.
     private var announcedID: UUID?
 
+    /// The provider whose attempt last returned without throwing.
+    ///
+    /// A turn runs several stages through one chain, and a stage that fell through to a
+    /// spare says nothing about which provider produced the *answer* — the assess stage
+    /// can move on after the answer has already streamed. So the runner asks this
+    /// immediately after the stage whose words the reader keeps, rather than recording
+    /// whichever provider was last announced.
+    private(set) var lastAnswered: ModelProfile?
+
     init(profiles: [ModelProfile],
          keys: [UUID: String],
          trace: ResearchTrace,
@@ -109,7 +118,9 @@ final class ModelChain {
             announce(profile)
             attempted += 1
             do {
-                return try await body(client)
+                let value = try await body(client)
+                lastAnswered = profile
+                return value
             } catch let error as ResearchError
                         where error.isWorthAnotherProvider && !Task.isCancelled {
                 if firstError == nil { firstError = error }
