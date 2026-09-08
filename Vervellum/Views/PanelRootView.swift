@@ -141,7 +141,11 @@ struct PanelRootView: View {
                   let command = PanelCommand(rawValue: raw) else { return }
             switch command {
             case .escape: backOut()
-            case .submit: submit(draft)
+            // Through the composer's own submit, not straight to `submit`: this is a key
+            // that sends a question, and the rule beside `onSubmit` is that whatever key
+            // sends a question is the key that takes the highlighted command. With
+            // nothing highlighted it falls through to exactly what it used to do.
+            case .submit: submitFromComposer()
             case .newThread: newThread()
             case .toggleHistory: showsHistory.toggle()
             case .openSettings:
@@ -346,7 +350,7 @@ struct PanelRootView: View {
     /// whether the user reached for the mouse. Disabled rather than silently ignored,
     /// because a button can show the state and a key press cannot.
     private var isAskable: Bool {
-        !isDraftBlank && !ComposerCommand.isUnfinishedCommand(draft)
+        !isDraftBlank && !ComposerCommand.isHalfTypedCommand(draft)
     }
 
     /// Why the send button is dim, when it is dim for something the reader can fix.
@@ -355,7 +359,7 @@ struct PanelRootView: View {
     /// what would turn it on, and a reader who cannot hear the announcement is exactly
     /// the one left looking at it.
     private var unfinishedCommandHelp: String? {
-        guard !isDraftBlank, ComposerCommand.isUnfinishedCommand(draft) else { return nil }
+        guard !isDraftBlank, ComposerCommand.isHalfTypedCommand(draft) else { return nil }
         return Self.unfinishedCommandCopy
     }
 
@@ -561,7 +565,7 @@ struct PanelRootView: View {
         // the panel's own submit shortcut calls this directly, and so would anything
         // added later. The send button knows the rule too, but only so it can grey itself
         // out — a button can show the state, and this is where the state is enforced.
-        guard !ComposerCommand.isUnfinishedCommand(text) else {
+        guard !ComposerCommand.isHalfTypedCommand(text) else {
             // A dead key is indistinguishable from a broken one. The greyed-out send
             // button says this to anyone who can see it; this says it to everyone else.
             announce(Self.unfinishedCommandCopy)

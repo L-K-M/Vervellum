@@ -58,6 +58,20 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertEqual(ComposerCommand.completions(for: "/")?.count, ComposerCommand.catalogue.count)
     }
 
+    /// The rule two things now share: the list is open for exactly these inputs, and
+    /// Return is withheld for exactly these inputs. Pinned directly so the shape cannot
+    /// be loosened by accident on its way to either caller.
+    func testWhatCountsAsACommandWordStillBeingTyped() {
+        XCTAssertTrue(ComposerCommand.isBareCommandWord("/"))
+        XCTAssertTrue(ComposerCommand.isBareCommandWord("/h"))
+        XCTAssertTrue(ComposerCommand.isBareCommandWord("  /model  "),
+                      "outer space is trimmed, so a trailing space is still a bare word")
+        XCTAssertFalse(ComposerCommand.isBareCommandWord("/model g"), "an argument ends it")
+        XCTAssertFalse(ComposerCommand.isBareCommandWord("what is swift"))
+        XCTAssertFalse(ComposerCommand.isBareCommandWord("and/or, in logic"))
+        XCTAssertFalse(ComposerCommand.isBareCommandWord(""))
+    }
+
     func testNoCompletionsOnceAWordFollows() {
         XCTAssertNil(ComposerCommand.completions(for: "/direct what"))
         XCTAssertNil(ComposerCommand.completions(for: "plain question"))
@@ -205,24 +219,24 @@ final class ComposerCommandTests: XCTestCase {
     /// model — it treats an unknown slash word as prose — and with `history` and `help`
     /// listed under it that spends a real request on a typo.
     func testAHalfTypedCommandIsNotAQuestion() {
-        XCTAssertTrue(ComposerCommand.isUnfinishedCommand("/h"))
-        XCTAssertTrue(ComposerCommand.isUnfinishedCommand("/c"))
-        XCTAssertTrue(ComposerCommand.isUnfinishedCommand("/"))
+        XCTAssertTrue(ComposerCommand.isHalfTypedCommand("/h"))
+        XCTAssertTrue(ComposerCommand.isHalfTypedCommand("/c"))
+        XCTAssertTrue(ComposerCommand.isHalfTypedCommand("/"))
     }
 
     /// An exact command still submits, or the list would break every command it lists.
     func testACompleteCommandIsNotWithheld() {
-        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/new"))
-        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/history"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/new"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/history"))
         // Trailing space and case are how a command arrives after `accept` fills it in.
-        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/model "))
-        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/NEW"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/model "))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/NEW"))
         // An alias `parse` knows but the catalogue does not list: no list is on screen,
         // so there is nothing to be in the middle of.
-        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/clear"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/clear"))
         // `/direct` alone is already withheld by `parse` returning nil, and must not be
         // withheld twice — the composer's own note explains what it wants.
-        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/direct"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/direct"))
     }
 
     /// Every word the list offers has to submit on its own, or Return withholds a
@@ -236,26 +250,26 @@ final class ComposerCommandTests: XCTestCase {
     func testEveryOfferedCommandCanBeSubmitted() {
         XCTAssertFalse(ComposerCommand.catalogue.isEmpty)
         for entry in ComposerCommand.catalogue {
-            XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/\(entry.name)"),
+            XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/\(entry.name)"),
                            "/\(entry.name) is offered in the list, but Return would withhold it")
         }
     }
 
     /// Ordinary questions must reach the engine untouched, slashes and all.
     func testAQuestionIsNeverWithheld() {
-        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("what is swift"))
-        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("and/or, in logic"))
-        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/direct why is the sky blue"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("what is swift"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("and/or, in logic"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/direct why is the sky blue"))
         // The in-between case, and the one the guard's own comment is about: an unknown
         // slash word that has gained an argument. The list closed at the space, so this
         // is prose again — and if `completions(for:)` ever widened to match past the
         // command word, this is the assertion that would catch a question being eaten.
-        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/h why is the sky blue"),
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/h why is the sky blue"),
                        "an argument closes the list, so an unknown prefix plus prose asks")
         // No list is on screen for a slash word that prefixes nothing, so it stays a
         // question — the pre-existing behaviour this rule deliberately does not touch.
-        XCTAssertFalse(ComposerCommand.isUnfinishedCommand("/zzz"))
-        XCTAssertFalse(ComposerCommand.isUnfinishedCommand(""))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/zzz"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand(""))
     }
 
     /// The arrow keys hand themselves to the command list whenever one is on screen, so

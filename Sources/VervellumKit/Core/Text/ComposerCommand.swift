@@ -87,12 +87,24 @@ enum ComposerCommand: Equatable {
     /// Command names matching a partially typed `/prefix`, for the completion list.
     /// Returns nil when the input is not a bare command word being typed.
     static func completions(for input: String) -> [Entry]? {
+        guard isBareCommandWord(input) else { return nil }
         let trimmed = input.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("/"), !trimmed.dropFirst().contains(where: { $0.isWhitespace })
-        else { return nil }
         let prefix = String(trimmed.dropFirst()).lowercased()
         let matches = catalogue.filter { $0.name.hasPrefix(prefix) }
         return matches.isEmpty ? nil : matches
+    }
+
+    /// A slash and one unbroken word: `/`, `/h`, `/model`. Not `/model gpt-4o`, and not
+    /// prose that happens to contain a slash.
+    ///
+    /// One function because two things depend on it and they must not drift: the
+    /// completion list is open for exactly these inputs, and `isHalfTypedCommand`
+    /// withholds Return for exactly these inputs. Widening this widens both, which is
+    /// the right coupling — it is what "still typing the command word" means.
+    static func isBareCommandWord(_ input: String) -> Bool {
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        return trimmed.hasPrefix("/")
+            && !trimmed.dropFirst().contains(where: { $0.isWhitespace })
     }
 
     /// Where ↑/↓ moves the highlight in a completion list of `count` rows.
@@ -132,7 +144,9 @@ enum ComposerCommand: Equatable {
         case (true, let index?):
             // An index left over from a longer list must step up from the last row that
             // exists, not from where it used to be: stepping up from 9 in a two-row list
-            // would return 8.
+            // would return 8. A negative clamps to 0 and then deselects, on purpose: it
+            // is a row that no longer exists rather than "nothing highlighted" the way
+            // `nil` is, so ↑ hands typing back instead of entering at the bottom.
             let clamped = min(max(index, 0), last)
             return clamped == 0 ? nil : clamped - 1
         }
@@ -161,13 +175,15 @@ enum ComposerCommand: Equatable {
     ///
     /// Pure and here rather than in the view for the same reason as `moveSelection` —
     /// the rule is the interesting part, and it should be testable on both platforms.
-    static func isUnfinishedCommand(_ input: String) -> Bool {
-        // Correct only while `completions(for:)` answers non-nil exclusively for a bare
-        // command word still being typed — which is what makes an unknown slash word like
-        // `/asdf hello` fall straight through to `parse` and be asked as a question. If
-        // that matching ever widens (arguments, substrings, fuzzy), a real question can
-        // land below this line and be withheld instead of sent. Widen it, revisit this.
-        guard completions(for: input) != nil else { return false }
+    static func isHalfTypedCommand(_ input: String) -> Bool {
+        // The shape is asked for directly rather than inferred from a non-nil list. It is
+        // what makes an unknown slash word like `/asdf hello` fall through to `parse` and
+        // be asked as a question — and asking for it here means widening how names are
+        // *matched* (substrings, fuzzy, an argument-aware list) cannot widen what Return
+        // withholds. Only widening `isBareCommandWord` does that, and that is the one
+        // change that should. The direction being refused is a real question silently
+        // never sent.
+        guard isBareCommandWord(input), completions(for: input) != nil else { return false }
         // `parse` already returns nil for a command that is complete but wants an
         // argument (`/direct`), and the composer handles that by keeping the text.
         // Withholding it a second time here would be the same answer twice.
