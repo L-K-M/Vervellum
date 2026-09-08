@@ -248,6 +248,10 @@ final class CorePreferences {
                 return
             }
             store.setString(encoded, for: Key.panelPalette)
+            // A good value clears the complaint, so a file that is corrupted *again*
+            // later warns again. Recording it forever would have made the second
+            // occurrence the silent one, which is the case the warning exists for.
+            complainedAboutTheme = nil
             onChange?()
         }
     }

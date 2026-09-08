@@ -25,10 +25,13 @@ final class PanelPaletteTests: XCTestCase {
         XCTAssertEqual(ThemeColor(hex: "#f84")?.hexString, "#FF8844")
     }
 
-    func testReadsAndWritesAlpha() {
-        let colour = ThemeColor(hex: "#00000029")
-        XCTAssertEqual(colour?.alpha ?? 1, 0.161, accuracy: 0.01)
-        XCTAssertEqual(colour?.hexString, "#00000029")
+    func testReadsAndWritesAlpha() throws {
+        // Unwrapped rather than coalesced: `colour?.alpha ?? 1` reported a parse that
+        // returned nil as "1.0 is not within 0.01 of 0.161", which reads like a rounding
+        // problem rather than the string not parsing at all.
+        let colour = try XCTUnwrap(ThemeColor(hex: "#00000029"))
+        XCTAssertEqual(colour.alpha, 0.161, accuracy: 0.01)
+        XCTAssertEqual(colour.hexString, "#00000029")
         XCTAssertEqual(ThemeColor(0, 0, 0, 1).hexString, "#000000", "opaque needs no alpha pair")
     }
 
@@ -121,6 +124,20 @@ final class PanelPaletteTests: XCTestCase {
         XCTAssertEqual(palette(.infinity).cornerScale, PanelPalette.cornerScaleRange.upperBound,
                        "an infinity has an end of the range to clamp to")
         XCTAssertEqual(palette(-.infinity).cornerScale, PanelPalette.cornerScaleRange.lowerBound)
+    }
+
+    /// The clamp lived in the two initializers, and the property between them was a plain
+    /// `var` — so `palette.cornerScale = a * b` could still land a NaN, and a NaN is
+    /// exactly what makes `JSONEncoder` refuse the palette and cost the reader a theme.
+    func testACornerScaleAssignedAfterConstructionIsClampedToo() {
+        var palette = PanelPalette(name: "Odd", accent: ThemeColor(0.5, 0.5, 0.5))
+        palette.cornerScale = .nan
+        XCTAssertEqual(palette.cornerScale, 1)
+        palette.cornerScale = 5
+        XCTAssertEqual(palette.cornerScale, PanelPalette.cornerScaleRange.upperBound)
+        palette.cornerScale = -1
+        XCTAssertEqual(palette.cornerScale, PanelPalette.cornerScaleRange.lowerBound)
+        XCTAssertNotNil(PanelPalette.encode(palette), "and the palette still encodes")
     }
 
     /// The cost of getting the line above wrong, and why it is not a cosmetic bug:
@@ -226,10 +243,10 @@ final class PanelPaletteTests: XCTestCase {
     }
 
     /// CSS Color 4's four-digit short form, which the parser used to reject.
-    func testFourDigitHexCarriesItsAlpha() {
-        let colour = ThemeColor(hex: "#FEDC")
+    func testFourDigitHexCarriesItsAlpha() throws {
+        let colour = try XCTUnwrap(ThemeColor(hex: "#FEDC"))
         XCTAssertEqual(colour, ThemeColor(hex: "#FFEEDDCC"))
-        XCTAssertEqual(colour?.alpha ?? 0, 0.8, accuracy: 0.01)
+        XCTAssertEqual(colour.alpha, 0.8, accuracy: 0.01)
         // Still nothing that is not a short or a long form.
         XCTAssertNil(ThemeColor(hex: "#FEDCB"))
         XCTAssertNil(ThemeColor(hex: "#FE"))

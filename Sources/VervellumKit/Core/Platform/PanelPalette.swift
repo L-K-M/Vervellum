@@ -8,10 +8,15 @@ import Foundation
 /// than any richer representation.
 struct ThemeColor: Codable, Equatable, Hashable {
 
-    var red: Double
-    var green: Double
-    var blue: Double
-    var alpha: Double
+    /// Read-only from outside this file, so the clamp below is not advice. They were
+    /// plain `var`s, and `hexString` multiplies by 255 without checking — so one
+    /// `colour.red = 5` produced `#4FB0000`, a string `init(hex:)` refuses, which the
+    /// lenient decoder then drops back to the default at the next launch. Nothing in the
+    /// app assigned a component; the point is that nothing can.
+    private(set) var red: Double
+    private(set) var green: Double
+    private(set) var blue: Double
+    private(set) var alpha: Double
 
     init(_ red: Double, _ green: Double, _ blue: Double, _ alpha: Double = 1) {
         self.red = red.clampedToUnit
@@ -196,7 +201,14 @@ struct PanelPalette: Codable, Equatable {
 
     var fontDesign: ThemeFontDesign
     /// Multiplies every corner radius. 0 is square, 1 is as designed, 2 is very round.
-    var cornerScale: Double
+    var cornerScale: Double {
+        // The two initializers clamp, and the property was a plain `var` between them —
+        // so `palette.cornerScale = a * b` could still land a NaN, which makes
+        // `JSONEncoder` refuse the whole palette and costs the reader their theme.
+        // Observers do not run during initialization, and an assignment inside `didSet`
+        // does not re-enter it, so both existing paths behave exactly as before.
+        didSet { cornerScale = Self.clampedCornerScale(cornerScale) }
+    }
     var backdrop: ThemeBackdrop
 
     static let cornerScaleRange = 0.0...2.0
@@ -283,7 +295,11 @@ struct PanelPalette: Codable, Equatable {
         // and `name` is a stored property — so it would round-trip back out through
         // `encode` and stay blank for good.
         let named = ((try? container.decodeIfPresent(String.self, forKey: .name)) ?? nil) ?? ""
-        name = named.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Custom" : named
+        // The trimmed form is what gets stored, not just what gets measured. `name` round
+        // trips through `encode`, so `"  Ocean  "` kept its padding for good and compared
+        // unequal to the `"Ocean"` beside it in a list.
+        let trimmed = named.trimmingCharacters(in: .whitespacesAndNewlines)
+        name = trimmed.isEmpty ? "Custom" : trimmed
         accent = colour(.accent, fallback.accent)
         primaryText = optionalColour(.primaryText)
         secondaryText = optionalColour(.secondaryText)

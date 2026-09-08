@@ -118,6 +118,12 @@ struct AppearanceView: View {
                          alignment: .leading, spacing: 10) {
             ForEach(PanelPalette.presets, id: \.name) { preset in
                 Button {
+                    // Same reason Reset clears it: `setAside` is an undo for unticking a
+                    // checkbox, and picking a preset is not that. Left standing, ticking
+                    // Text back on after switching themes returned the *previous*
+                    // theme's colour — and, since it matches no preset, relabelled the
+                    // palette "Custom" one click after the reader asked for Ember.
+                    setAside = [:]
                     preferences.panelPalette = preset
                 } label: {
                     presetSwatch(preset, selected: current == preset.name)
@@ -182,7 +188,7 @@ struct AppearanceView: View {
     private var cornerLabel: String {
         let scale = preferences.panelPalette.cornerScale
         if scale <= 0.01 { return "Square" }
-        return String(format: "%.0f%%", scale * 100)
+        return scale.formatted(.percent.precision(.fractionLength(0)))
     }
 
     // MARK: Bindings
@@ -193,12 +199,16 @@ struct AppearanceView: View {
     /// the value moves, and judging a theme any other way is guesswork. Each write is one
     /// small settings write, which is what every other control in this window already
     /// does per keystroke.
-    private func binding<Value>(_ keyPath: WritableKeyPath<PanelPalette, Value>)
+    private func binding<Value: Equatable>(_ keyPath: WritableKeyPath<PanelPalette, Value>)
         -> Binding<Value> {
         Binding(
             get: { preferences.panelPalette[keyPath: keyPath] },
             set: { newValue in
                 var palette = preferences.panelPalette
+                // A no-op write still copied the palette, walked all ten presets and
+                // persisted. SwiftUI controls emit those, and the corner slider emits
+                // far more events per drag than a colour well does.
+                guard palette[keyPath: keyPath] != newValue else { return }
                 palette[keyPath: keyPath] = newValue
                 // Editing anything makes it no longer that preset, and the name is what
                 // the pane says out loud — so it stops claiming to be Terminal the moment

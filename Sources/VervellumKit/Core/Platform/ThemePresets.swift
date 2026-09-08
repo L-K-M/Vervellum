@@ -79,6 +79,9 @@ extension PanelPalette {
     /// Green on black, monospaced, square. Yes, really.
     static let terminal = PanelPalette(
         name: "Terminal",
+        // Deliberately the same green as `supported`: a terminal has one colour, and
+        // that is the preset. Verdicts stay distinguishable from *each other*, which is
+        // what the contract at the top of this file asks for.
         accent: ThemeColor(0.20, 1.0, 0.45),
         primaryText: ThemeColor(0.78, 1.0, 0.82),
         secondaryText: ThemeColor(0.42, 0.74, 0.50),
@@ -131,7 +134,8 @@ extension PanelPalette {
         insufficient: ThemeColor(0.45, 0.52, 0.75),
         opinion: ThemeColor(0.66, 0.36, 0.94),
         fontDesign: .rounded,
-        cornerScale: 1.8)
+        cornerScale: 1.8,
+        backdrop: .solid)
 
     /// Magenta and cyan over black.
     static let vapor = PanelPalette(
@@ -155,6 +159,8 @@ extension PanelPalette {
     /// Black, white and a red pencil. Serif, sharp, almost no fill.
     static let newsprint = PanelPalette(
         name: "Newsprint",
+        // Deliberately the same red as `contradicted`, for the reason Terminal's accent
+        // doubles its green: one ink.
         accent: ThemeColor(0.72, 0.11, 0.11),
         primaryText: ThemeColor(0.07, 0.07, 0.07),
         secondaryText: ThemeColor(0.36, 0.36, 0.36),
@@ -185,7 +191,10 @@ extension PanelPalette {
         scrim: ThemeColor(0, 0, 0, 0.40),
         supported: ThemeColor(0.20, 1.0, 0.40),
         contradicted: ThemeColor(1.0, 0.35, 0.35),
-        mixed: ThemeColor(1.0, 0.80, 0.0),
+        // Orange, not the accent's yellow. At (1.0, 0.80, 0.0) it was one twentieth of a
+        // channel away from `accent`, so a link and a "mixed" verdict were the same
+        // colour — in the preset whose whole argument is separation.
+        mixed: ThemeColor(1.0, 0.62, 0.0),
         insufficient: ThemeColor(0.50, 0.80, 1.0),
         opinion: ThemeColor(0.85, 0.60, 1.0),
         cornerScale: 0.4,

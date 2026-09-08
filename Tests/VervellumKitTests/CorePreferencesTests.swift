@@ -242,10 +242,15 @@ final class CorePreferencesTests: XCTestCase {
     /// is left to check here is that the ordinary path writes something the next launch
     /// reads back as the same theme.
     func testAThemeSurvivesBeingStoredAndReadBack() {
-        let store = MemorySettingsStore()
-        let settings = CorePreferences(store: store)
-        settings.panelPalette = .solarized
-        XCTAssertEqual(CorePreferences(store: store).panelPalette, .solarized)
+        // Every preset, not one: Solarized states neither `fontDesign` nor `cornerScale`,
+        // so it was the round trip least able to notice a field that stopped encoding.
+        // Terminal carries `.monospaced` and a zero scale, Paper `.serif`, Bubblegum 1.8.
+        for preset in PanelPalette.presets {
+            let store = MemorySettingsStore()
+            CorePreferences(store: store).panelPalette = preset
+            XCTAssertEqual(CorePreferences(store: store).panelPalette, preset,
+                           "\(preset.name) did not survive a round trip through the store")
+        }
     }
 
     /// Losing a theme is a bad afternoon; refusing to launch is worse.
