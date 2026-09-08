@@ -170,6 +170,34 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertEqual(turn.runningProgressLabel, "Reading 3 pages")
     }
 
+    /// The gap between the two branches: every search is in, and no page was attempted.
+    /// The count is still the honest report there — nothing is being read — so it stays
+    /// rather than falling through to the bare stage label.
+    func testCompletedSearchesWithNoPagesStillReportTheCount() {
+        var turn = ResearchTurn(question: "Q")
+        turn.stage = .searching
+        turn.searches = [PlannedSearch(purpose: "a", argumentsJSON: "{\"q\":\"a\"}")]
+        turn.searchesCompleted = 1
+        turn.pagesAttempted = 0
+        XCTAssertEqual(turn.runningProgressLabel, "Searching the web · 1 of 1")
+    }
+
+    /// A partial search count must not resurface once the turn has moved past searching.
+    /// The label is gated on the stage, not on the counters, and a turn that began with a
+    /// pasted link spends most of its life past that stage.
+    func testSearchCountsDoNotResurfaceOnceTheTurnMovesOn() {
+        var turn = ResearchTurn(question: "Summarise https://example.com/a")
+        turn.searches = [PlannedSearch(purpose: "a", argumentsJSON: "{\"q\":\"a\"}"),
+                         PlannedSearch(purpose: "b", argumentsJSON: "{\"q\":\"b\"}")]
+        turn.searchesCompleted = 1
+        turn.pagesAttempted = 2
+
+        turn.stage = .answering
+        XCTAssertEqual(turn.runningProgressLabel, ResearchStage.answering.label)
+        turn.stage = .assessing
+        XCTAssertEqual(turn.runningProgressLabel, ResearchStage.assessing.label)
+    }
+
     func testRunningProgressFallsBackToTheStageLabel() {
         var turn = ResearchTurn(question: "Q")
         turn.stage = .planning

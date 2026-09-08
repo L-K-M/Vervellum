@@ -53,6 +53,11 @@ final class StubTransport: HTTPTransporting, @unchecked Sendable {
         /// The request's own idle timeout, so a caller that must pass a shorter one than
         /// the transport's generation-sized default can be held to it.
         let timeout: TimeInterval
+        /// The wall clock on reading the body, for a `sendJSON`. A caller that means "not
+        /// longer than this" has to set both — they are different clocks — so a test that
+        /// checked only `timeout` would pin half the promise. Nil for a stream or a fetch,
+        /// neither of which takes one.
+        let deadline: TimeInterval?
         /// The decoded JSON body, for a POST that carried one.
         let body: [String: Any]?
 
@@ -112,13 +117,21 @@ final class StubTransport: HTTPTransporting, @unchecked Sendable {
                   expectedID: Int?,
                   isNotification: Bool,
                   deadline: TimeInterval) async throws -> (headers: [String: String], body: [String: Any]) {
-        switch try answer(to: request, kind: .json) {
+        switch try answer(to: request, kind: .json, deadline: deadline) {
         case .json(let object):
             return ([:], object)
         case .events(let frames):
             // The MCP transport genuinely may answer a JSON-RPC call with a single SSE
             // frame, and `HTTPTransport.sendJSON` returns that frame as the body.
-            return ([:], frames.first ?? [:])
+            //
+            // An empty script is a routing mistake, not an empty answer: a `[:]` body
+            // here reaches the runner as a provider that said nothing useful, and the
+            // test then fails several stages later naming the wrong thing.
+            guard let frame = frames.first else {
+                throw ResearchError("StubTransport: sendJSON was answered with an empty "
+                                    + "stream script.")
+            }
+            return ([:], frame)
         case .page, .failure, .unrouted:
             throw ResearchError("StubTransport: sendJSON was answered with a non-JSON reply.")
         }
@@ -152,14 +165,15 @@ final class StubTransport: HTTPTransporting, @unchecked Sendable {
 
     // MARK: Routing
 
-    private func answer(to request: URLRequest, kind: Call.Kind) throws -> Reply {
+    private func answer(to request: URLRequest, kind: Call.Kind,
+                        deadline: TimeInterval? = nil) throws -> Reply {
         let url = request.url ?? URL(string: "https://example.invalid/")!
         var body: [String: Any]?
         if let data = request.httpBody {
             body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         }
         let call = Call(kind: kind, url: url, method: request.httpMethod ?? "GET",
-                        timeout: request.timeoutInterval, body: body)
+                        timeout: request.timeoutInterval, deadline: deadline, body: body)
         lock.lock()
         recorded.append(call)
         lock.unlock()
@@ -192,9 +206,17 @@ extension StubTransport.Reply {
     }
 
     /// The same, for a call whose reply is parsed as JSON.
+    ///
+    /// A fixture `JSONSerialization` cannot encode — a `Date`, a `UUID`, anything that is
+    /// not a JSON value — stops the run naming itself. Falling back to "{}" would hand
+    /// the runner a model that answered with an empty object, and the test would then
+    /// fail a stage later complaining about the model rather than about the fixture.
     static func completion(json object: [String: Any]) -> StubTransport.Reply {
-        let data = try? JSONSerialization.data(withJSONObject: object)
-        return .completion(data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}")
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let text = String(data: data, encoding: .utf8) else {
+            preconditionFailure("StubTransport: this fixture is not encodable as JSON: \(object)")
+        }
+        return .completion(text)
     }
 
     /// A streamed answer, one delta per chunk, as an OpenAI-shaped SSE stream.

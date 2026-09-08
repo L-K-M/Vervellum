@@ -100,35 +100,60 @@ enum SourceHarvester {
     /// ending in a dot. That is the opposite of what a search hit's `url` field wants,
     /// and it is why `normalized` takes the choice as a parameter.
     ///
-    /// **Known limitation.** A closing parenthesis is not part of a match at all —
-    /// `bareURLs`'s pattern excludes it — so a pasted `/wiki/Mercury_(planet)` is cut to
-    /// `/wiki/Mercury_(planet` and fetched as an address that does not exist. That
-    /// exclusion is deliberate and load-bearing elsewhere: `CitationValidator` uses the
-    /// same walk, and a model writing "(see https://example.com/a)" must not have the
-    /// paren swallowed into the URL it is being flagged for. Balancing parentheses for a
-    /// question's links only — where the string is prose the user typed rather than one
-    /// the model produced — would fix it without touching that rule, and is the shape of
-    /// the fix if this is worth doing.
+    /// A closing parenthesis that belongs to the address is put back; see
+    /// `reclosingParentheses`.
     static func links(inQuestion question: String, limit: Int) -> [String] {
         guard limit > 0 else { return [] }
-        var seen: Set<String> = []
-        var ordered: [String] = []
-        for url in bareURLs(in: question) {
-            guard seen.insert(canonicalKey(for: url)).inserted else { continue }
-            ordered.append(url)
-        }
-        return Array(ordered.prefix(limit))
+        return Array(distinctLinks(inQuestion: question).prefix(limit))
     }
 
     /// How many distinct links the question carries, so a caller that reads only the
     /// first few can say that the rest were left rather than silently dropping them.
     ///
-    /// Counted the same way `links` deduplicates — distinct *pages*, not occurrences —
-    /// because the two numbers are compared against each other to decide whether
-    /// anything was left behind. Two counts of different things would report a link
-    /// dropped every time a question mentioned one page twice.
+    /// The same list `links` returns before the limit, rather than a second count of its
+    /// own. The two numbers are compared against each other to decide whether anything
+    /// was left behind, and two counts of different things would report a link dropped
+    /// every time a question mentioned one page twice. Sharing the walk makes that
+    /// structural rather than a rule two functions have to keep agreeing on.
     static func linkCount(inQuestion question: String) -> Int {
-        Set(bareURLs(in: question).map { canonicalKey(for: $0) }).count
+        distinctLinks(inQuestion: question).count
+    }
+
+    /// Every distinct page the question links to, in the order it was typed.
+    private static func distinctLinks(inQuestion question: String) -> [String] {
+        var seen: Set<String> = []
+        var ordered: [String] = []
+        for match in bareURLs(in: question) {
+            let url = reclosingParentheses(match, in: question)
+            guard seen.insert(canonicalKey(for: url)).inserted else { continue }
+            ordered.append(url)
+        }
+        return ordered
+    }
+
+    /// Puts back a closing parenthesis that belongs to the address.
+    ///
+    /// `bareURLs`'s pattern excludes `)` entirely, so a match can never contain one and
+    /// every `(` inside one is unclosed. That is right for the walk `CitationValidator`
+    /// shares — a model writing "(see https://example.com/a)" must not have the closing
+    /// paren pulled into the URL it is being flagged for — and wrong here, where the
+    /// string is prose a person typed and `/wiki/Mercury_(planet)` is an address they
+    /// meant. Without this, the most-pasted URL shape after a news link is cut to
+    /// `/wiki/Mercury_(planet` and fetched as a page that cannot exist.
+    ///
+    /// Repaired against the question rather than by counting alone: a closer is added
+    /// only where the text really does carry one straight after the match. So a URL that
+    /// genuinely ends mid-parenthesis is left as it is rather than having an ending
+    /// invented for it, and "(see https://example.com/a)" is untouched because its match
+    /// opened nothing. Nested parentheses close one at a time, and the loop is bounded by
+    /// the question's own length.
+    static func reclosingParentheses(_ url: String, in question: String) -> String {
+        var candidate = url
+        while candidate.filter({ $0 == "(" }).count > candidate.filter({ $0 == ")" }).count,
+              question.contains(candidate + ")") {
+            candidate += ")"
+        }
+        return candidate
     }
 
     /// The key two addresses are compared by when deciding whether they are one page.
@@ -164,23 +189,44 @@ enum SourceHarvester {
         if let host = components.host?.lowercased() {
             components.host = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
         }
-        var path = components.path
+        // The `percentEncoded` accessors throughout, because the plain ones decode on
+        // read and re-encode on write — and that round trip is not lossless where it
+        // matters. `%2F` in a path decodes to "/" and re-encodes as "/", turning one
+        // path segment into two; `%2B` in a query decodes to "+" and stays "+", which is
+        // a different value. Either would fold two genuinely different documents onto one
+        // key, which is the mistake this function's own rule calls the worse one. Read as
+        // written, the comparison is purely structural.
+        var path = components.percentEncodedPath
         if path.hasSuffix("/") { path.removeLast() }
-        components.path = path
-        if let items = components.queryItems {
-            let kept = items.filter { !attributionParameters.contains($0.name.lowercased()) }
-            // Emptied rather than left empty: an empty `queryItems` array still renders
-            // a trailing "?", so a URL whose only parameter was a tracking tag would not
-            // match the same URL without one — the case this exists for.
-            components.queryItems = kept.isEmpty ? nil : kept
+        components.percentEncodedPath = path
+        if let query = components.percentEncodedQuery {
+            // Split by hand rather than through `queryItems` for the same reason. An
+            // item's name is everything before the first "="; a bare flag has no "=" at
+            // all and is its own name.
+            let kept = query.split(separator: "&").filter { item in
+                let name = item.split(separator: "=", maxSplits: 1).first.map { String($0) } ?? ""
+                return !attributionParameters.contains(name.lowercased())
+            }
+            // Emptied rather than left empty: an empty query still renders a trailing
+            // "?", so a URL whose only parameter was a tracking tag would not match the
+            // same URL without one — the case this exists for.
+            components.percentEncodedQuery = kept.isEmpty ? nil : kept.joined(separator: "&")
         }
         return components.url?.absoluteString ?? url
     }
 
     /// Query items that say how a reader arrived, never what they arrived at.
+    ///
+    /// Every entry is a click identifier whose removal provably cannot change which
+    /// document is served — the page's own identity always lives in another parameter or
+    /// in the path. `si` and `ref` are deliberately absent despite being share-link
+    /// parameters on large sites: both are also used as ordinary, meaningful parameters
+    /// elsewhere, and dropping one that mattered would merge two real pages, which this
+    /// file treats as the worse of the two mistakes.
     private static let attributionParameters: Set<String> = [
         "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
-        "fbclid", "gclid", "msclkid", "mc_cid", "mc_eid", "ref_src",
+        "fbclid", "gclid", "msclkid", "twclid", "yclid", "igshid", "li_fat_id",
+        "mc_cid", "mc_eid", "ref_src",
     ]
 
     /// Rejects anything that isn't an absolute http(s) URL with a host and, for a URL

@@ -275,10 +275,19 @@ final class ModelCatalogTests: XCTestCase {
 
         let models = try await client.fetch()
         XCTAssertEqual(models, ["gpt-4o"])
+        // One call, to the address the client was built with: the stub answers anything,
+        // so a `fetch` that started pointing somewhere else would otherwise stay green.
+        XCTAssertEqual(transport.calls.count, 1)
         let call = try XCTUnwrap(transport.calls.first)
+        XCTAssertEqual(call.url.absoluteString, url.absoluteString)
         XCTAssertEqual(call.method, "GET")
+        // Both clocks, because they are different ones and a caller that means "not
+        // longer than this" has to set each. Checking only the idle timeout would pin
+        // half the promise.
         XCTAssertEqual(call.timeout, ModelCatalogClient.listTimeout,
                        "the list request must not inherit the transport's ten-minute deadline")
+        XCTAssertEqual(call.deadline, ModelCatalogClient.listTimeout,
+                       "nor read the body against it")
     }
 
     // MARK: The reply

@@ -249,8 +249,13 @@ enum TurnNotice: String, Codable, Equatable {
             return "A page was read but did not fit the model's context, so the answer saw that "
                 + "source's summary only. It is listed as a summary."
         case .linkReadingOff:
+            // Not "the answer rests on search results instead", which this cannot know.
+            // A question that carries a link and needs no searches — a definition, a
+            // calculation — produces a plan with none, and the answer then rests on the
+            // model alone. Saying what did *not* happen is true in every case, and is
+            // the part the reader needs.
             return "This question contains a link, but page reading is off in Settings, so its "
-                + "contents were not read. The answer rests on search results instead."
+                + "contents were not read. The answer does not rest on that page."
         case .linkNotRead:
             return "A link in this question was not read, so nothing below rests on it. Either "
                 + "it was past the number of links one question is read from, or the page could "

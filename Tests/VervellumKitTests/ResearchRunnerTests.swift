@@ -277,6 +277,12 @@ final class ResearchRunnerTests: XCTestCase {
                         "https://other.example/review"],
                        "a fragment, a www. and a trailing slash are not a second page")
         XCTAssertEqual(turn.sources.map(\.number), [1, 2])
+        // The fold has to hold at read time as well as at numbering time. Canonicalising
+        // only for the numbering would still spend a second request and let source 1's
+        // text disagree with the copy that came back under the other address.
+        XCTAssertEqual(transport.calls.filter {
+            $0.kind == .fetch && $0.url.absoluteString == "https://www.linked.example/paper/"
+        }.count, 0, "the search hit reuses the linked page's read")
     }
 
     func testPageReadingOffLeavesALinkUnreadAndSaysSo() async throws {
@@ -337,6 +343,16 @@ final class ResearchRunnerTests: XCTestCase {
         // line claiming the answer rests on a page nobody read.
         XCTAssertFalse(turn.sources.contains { $0.url == "https://linked.example/paper" })
         XCTAssertEqual(turn.sources.map(\.url), ["https://other.example/review"])
+        // And the planner is not promised a key the payload does not carry. The prompt
+        // says linked pages "have already been read for you"; over a turn where every
+        // read failed that is a false premise, and a model asked to plan against pages
+        // that are not there will explain their absence or invent them.
+        let plan = try XCTUnwrap(transport.calls.first { Self.stage(of: $0) == .plan })
+        let planPayload = try XCTUnwrap(plan.userContent)
+        let planPrompt = try XCTUnwrap(plan.systemPrompt)
+        XCTAssertFalse(planPayload.contains("linked_pages"), planPayload)
+        XCTAssertFalse(planPrompt.contains("already been read"), "the prompt promised a "
+                       + "key the payload does not carry")
     }
 
     // MARK: Deep research
@@ -358,7 +374,11 @@ final class ResearchRunnerTests: XCTestCase {
                 case .deepPlan:
                     // Round two asks for the gap the first round could not have known
                     // about; round three finds nothing left and stops by returning none.
-                    guard call.systemPrompt?.contains("round 2 of") == true else {
+                    // Anchored on the template `stage(of:)` already keys off — "TASK:
+                    // this is round <n>" — rather than on the "of" that happens to follow
+                    // the number. A cosmetic rewording would otherwise hand round two the
+                    // stop reply and fail two assertions away from the cause.
+                    guard call.systemPrompt?.contains("this is round 2") == true else {
                         let nothingLeft: [String: Any] = ["reading": "Nothing is missing.",
                                                           "searches": [Any]()]
                         return .completion(json: nothingLeft)
@@ -387,5 +407,12 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(searches.count, 2)
         let plans = transport.calls.filter { Self.stage(of: $0) == .deepPlan }
         XCTAssertEqual(plans.count, 2, "round two plans, round three asks and is told to stop")
+        // A later round can only plan against the gap if it is shown what the earlier
+        // ones found. Without this the whole feature could stop forwarding the digest and
+        // every assertion above would still pass.
+        // Titles and snippets, which is what `digest` puts under "found" — deliberately
+        // not the URLs, because this call chooses queries and cites nothing.
+        let roundTwo = try XCTUnwrap(plans.first?.userContent)
+        XCTAssertTrue(roundTwo.contains("Hit for first"), roundTwo)
     }
 }

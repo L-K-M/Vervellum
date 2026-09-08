@@ -851,6 +851,14 @@ final class ResearchRunner: ResearchRunning {
     ///   spent a request and still reached a host, so counting only the successes would
     ///   let a question full of dead links push the turn past a ceiling documented as
     ///   being about requests as well as context.
+    ///
+    /// A link-bearing turn deliberately pays two reader handshakes: this one before the
+    /// plan, and `readPages`'s afterwards for the pages behind the search results. They
+    /// are separated by the planning call, so holding a session open across it would mean
+    /// keeping an MCP connection alive through the slowest stage of the turn to save one
+    /// handshake — and `PageReaderFactory` hands back a reader, not a live session to
+    /// pass around. The cost is one extra round trip on a turn that is already fetching
+    /// pages.
     private func readLinkedPages(in question: String, settings: ProviderSettings)
         async -> (read: [Source], attempted: Int) {
         let links = SourceHarvester.links(inQuestion: question, limit: Self.maxLinks)
@@ -931,6 +939,15 @@ final class ResearchRunner: ResearchRunning {
                            settings: ProviderSettings,
                            budget: Int,
                            alreadyRead: Int) async -> [Source] {
+        // Said out loud, because the alternative is a turn whose sources all kept their
+        // snippets with nothing anywhere to explain it. The links spending the whole
+        // allowance is the one way that happens with reading switched on, and the notice
+        // the reader does get is about the *links* — it says nothing about the pages
+        // behind the search results also being left.
+        if settings.pageReading != .off, budget <= 0, sources.contains(where: { !$0.wasRead }) {
+            trace.log("Page budget already spent by the question's links; "
+                      + "search-result pages left unread")
+        }
         guard settings.pageReading != .off, !sources.isEmpty, budget > 0 else { return sources }
         // Decided before the reader is built, not after. A turn whose links filled the
         // budget — or a link-only turn, which an empty plan now produces — has nothing

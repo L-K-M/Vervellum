@@ -59,6 +59,55 @@ final class QuestionLinkTests: XCTestCase {
         let question = "https://example.com/a https://example.com/A"
             + " https://example.com/a?page=2 https://example.com/a/b"
         XCTAssertEqual(SourceHarvester.linkCount(inQuestion: question), 4)
+        // The name promises the addresses are kept, so assert the addresses. A bug that
+        // dropped or reordered one while keeping the count consistent would otherwise
+        // pass.
+        XCTAssertEqual(SourceHarvester.links(inQuestion: question, limit: 4),
+                       ["https://example.com/a", "https://example.com/A",
+                        "https://example.com/a?page=2", "https://example.com/a/b"])
+    }
+
+    /// A path's parentheses are part of the address, and the pattern cannot include them.
+    ///
+    /// This is the single most-pasted URL shape after a news link, and without the repair
+    /// it is cut mid-path and fetched as a page that does not exist.
+    func testPutsBackAParenthesisThatBelongsToThePath() {
+        XCTAssertEqual(
+            SourceHarvester.links(inQuestion: "See https://en.wikipedia.org/wiki/Mercury_(planet).",
+                                  limit: 3),
+            ["https://en.wikipedia.org/wiki/Mercury_(planet)"])
+        // Nested, closed one at a time.
+        XCTAssertEqual(
+            SourceHarvester.links(inQuestion: "https://example.com/a_(b_(c))", limit: 3),
+            ["https://example.com/a_(b_(c))"])
+    }
+
+    /// The other side of that rule, and the reason it is scoped to a question rather than
+    /// applied inside `bareURLs`: a parenthesis that closes prose is punctuation, and the
+    /// match never opened one.
+    func testDoesNotSwallowAParenthesisThatClosesTheSentence() {
+        XCTAssertEqual(SourceHarvester.links(inQuestion: "(see https://example.com/a)", limit: 3),
+                       ["https://example.com/a"])
+        // Nor invents an ending the question does not carry.
+        XCTAssertEqual(SourceHarvester.links(inQuestion: "https://example.com/a_(b and more",
+                                             limit: 3),
+                       ["https://example.com/a_(b"])
+    }
+
+    /// `http` is half of "http(s)" and every other scheme test is a negative one.
+    func testPlainHTTPLinksAreHarvested() {
+        XCTAssertEqual(SourceHarvester.links(inQuestion: "Read http://example.com/page", limit: 3),
+                       ["http://example.com/page"])
+    }
+
+    /// The key is built from the address as written. `%2F` decoded to "/" would turn one
+    /// path segment into two, and `%2B` decoded to "+" is a different value — either
+    /// folds two real documents onto one key, which loses evidence.
+    func testTheKeyDoesNotDecodeWhatWouldChangeTheAddress() {
+        XCTAssertNotEqual(SourceHarvester.canonicalKey(for: "https://example.com/a%2Fb"),
+                          SourceHarvester.canonicalKey(for: "https://example.com/a/b"))
+        XCTAssertNotEqual(SourceHarvester.canonicalKey(for: "https://example.com/q?a=%2B"),
+                          SourceHarvester.canonicalKey(for: "https://example.com/q?a=+"))
     }
 
     /// The limit counts pages, not occurrences: the duplicate must not use up a slot
@@ -119,6 +168,17 @@ final class QuestionLinkTests: XCTestCase {
                        "example.com/docs/spec")
         XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/"), "example.com")
         XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com"), "example.com")
+        // Host and path only, on purpose. A title is what the reader scans to recognise
+        // where a claim came from, and a tracking parameter or a scroll position is noise
+        // in that job — the source list still carries the address itself. The port goes
+        // with them: two ports on one host is a case worth nothing against the noise the
+        // rule removes on every other turn. Pinned so it stays a decision.
+        XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/a?utm_source=news"),
+                       "example.com/a")
+        XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/a#results"),
+                       "example.com/a")
+        XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com:8443/a"),
+                       "example.com/a")
     }
 
     // MARK: Merging them with the search results
@@ -190,6 +250,9 @@ final class QuestionLinkTests: XCTestCase {
     func testLinkedPagesAloneAreTheWholeSourceList() {
         let linked = [Source(number: 1, url: "https://example.com/a",
                              title: "example.com/a", snippet: "Pasted.")]
+        // Whole-value equality, which includes `Source.id`. Safe only because `combined`
+        // hands the linked sources straight back when nothing was found; a version that
+        // rebuilt them would carry fresh UUIDs and fail here despite being correct.
         XCTAssertEqual(ResearchRunner.combined(linked: linked, results: []), linked)
     }
 
