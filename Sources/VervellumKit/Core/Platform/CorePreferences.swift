@@ -214,22 +214,47 @@ final class CorePreferences {
                 // Falling back is right; falling back in silence is not. "My theme keeps
                 // resetting itself" is unanswerable without knowing a stored value was
                 // there and would not parse.
-                // Built as one string first, like `ThreadArchive`'s warning and for the
-                // reason its comment gives: `.utf8` binds tighter than `+`, so applying
-                // it to the last literal of a concatenation is a type error rather than
-                // a byte view of the whole thing.
-                let warning = "vervellum warning: the stored theme could not be read and "
-                    + "the default was used. It began: \(text.prefix(100))\n"
-                FileHandle.standardError.write(Data(warning.utf8))
+                //
+                // Once per bad value, not once per read: the theme pane reads this
+                // property for every control on it, on every keystroke of a colour well,
+                // so an unconditional write here turns one corrupt file into a stream
+                // that buries whatever else stderr was carrying.
+                if complainedAboutTheme != text {
+                    complainedAboutTheme = text
+                    // Built as one string first, like `ThreadArchive`'s warning and for
+                    // the reason its comment gives: `.utf8` binds tighter than `+`, so
+                    // applying it to the last literal of a concatenation is a type error
+                    // rather than a byte view of the whole thing.
+                    let warning = "vervellum warning: the stored theme could not be read "
+                        + "and the default was used. It began: \(text.prefix(100))\n"
+                    FileHandle.standardError.write(Data(warning.utf8))
+                }
                 return .ember
             }
             return decoded
         }
         set {
-            store.setString(PanelPalette.encode(newValue), for: Key.panelPalette)
+            // `setString(nil)` clears the key, and a cleared key reads back as Ember — so
+            // forwarding the optional straight through turned "this palette would not
+            // encode" into "your theme is gone", in silence, which is the failure the
+            // getter's own comment refuses to ship. Nothing can reach it today: every
+            // `ThemeColor` component and now `cornerScale` too are finite by
+            // construction, which is what `JSONEncoder` was refusing. It is here so a
+            // field added later that forgets that rule costs a save rather than a theme.
+            guard let encoded = PanelPalette.encode(newValue) else {
+                let warning = "vervellum warning: the theme could not be saved, so the "
+                    + "stored one was kept.\n"
+                FileHandle.standardError.write(Data(warning.utf8))
+                return
+            }
+            store.setString(encoded, for: Key.panelPalette)
             onChange?()
         }
     }
+
+    /// The stored theme text already complained about, so the warning above fires once
+    /// per bad value rather than once per read.
+    private var complainedAboutTheme: String?
 
     var textScale: Double {
         get { Self.clamped(store.double(for: Key.textScale), Default.textScale, Self.textScaleRange) }

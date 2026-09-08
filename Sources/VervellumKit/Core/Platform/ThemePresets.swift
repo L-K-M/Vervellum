@@ -204,10 +204,15 @@ extension PanelPalette {
     /// what a preset says is recognised as that preset again — and one that merely
     /// borrowed the name is not.
     var matchingPreset: PanelPalette? {
-        Self.presets.first { $0.differsOnlyByName(from: self) }
+        Self.presets.first { $0.hasTheSameValues(as: self) }
     }
 
-    private func differsOnlyByName(from other: PanelPalette) -> Bool {
+    /// Equal on every field except `name`, which matching deliberately ignores.
+    ///
+    /// Named for what it answers rather than for how it is used: the old name asserted a
+    /// difference, and this is true of two palettes that do not differ at all — which is
+    /// the common case, since picking a preset copies its name across too.
+    private func hasTheSameValues(as other: PanelPalette) -> Bool {
         var mine = self
         var theirs = other
         mine.name = ""

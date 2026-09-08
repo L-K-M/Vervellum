@@ -233,4 +233,23 @@ final class CorePreferencesTests: XCTestCase {
         XCTAssertEqual(CorePreferences(store: JSONFileSettingsStore(url: file)).textScale,
                        1.0, accuracy: 0.001)
     }
+
+    // MARK: The theme
+
+    /// The setter used to hand `encode`'s optional straight to the store, and a nil there
+    /// clears the key — so a palette that would not encode replaced the stored theme with
+    /// the default. Nothing can be made to fail encoding any more, which is the fix; what
+    /// is left to check here is that the ordinary path writes something the next launch
+    /// reads back as the same theme.
+    func testAThemeSurvivesBeingStoredAndReadBack() {
+        let store = MemorySettingsStore()
+        let settings = CorePreferences(store: store)
+        settings.panelPalette = .solarized
+        XCTAssertEqual(CorePreferences(store: store).panelPalette, .solarized)
+    }
+
+    /// Losing a theme is a bad afternoon; refusing to launch is worse.
+    func testAStoredThemeThatWillNotParseReadsAsEmber() {
+        XCTAssertEqual(preferences(["panelPalette": "{ not json"]).panelPalette, .ember)
+    }
 }

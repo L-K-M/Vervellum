@@ -59,6 +59,10 @@ struct AppearanceView: View {
                     Text("Corners")
                     Slider(value: binding(\.cornerScale),
                            in: PanelPalette.cornerScaleRange)
+                        // The `Text` beside it is a sibling, not a label: without these
+                        // VoiceOver reads "slider, 65%" and never says of what.
+                        .accessibilityLabel("Corners")
+                        .accessibilityValue(cornerLabel)
                     Text(cornerLabel)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -89,7 +93,13 @@ struct AppearanceView: View {
         }
         .confirmationDialog("Reset the theme?",
                             isPresented: $showsResetConfirmation) {
-            Button("Reset", role: .destructive) { preferences.panelPalette = .ember }
+            Button("Reset", role: .destructive) {
+                // The dialog promises everything goes back, and `setAside` is an undo for
+                // a click on a checkbox — not for a reset. Left standing, switching Text
+                // back on afterwards would return the colour that was just thrown away.
+                setAside = [:]
+                preferences.panelPalette = .ember
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Every colour, the typeface, the corners and the backdrop go back to the "
@@ -100,16 +110,23 @@ struct AppearanceView: View {
     // MARK: Presets
 
     private var presetGrid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 148), spacing: 10)],
-                  alignment: .leading, spacing: 10) {
+        // Resolved once for the whole grid rather than per swatch: `matchingPreset` walks
+        // every preset and copies two palettes for each, and ten rows asking it the same
+        // question is the sort of thing that makes a colour well feel sticky to drag.
+        let current = preferences.panelPalette.matchingPreset?.name
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 148), spacing: 10)],
+                         alignment: .leading, spacing: 10) {
             ForEach(PanelPalette.presets, id: \.name) { preset in
                 Button {
                     preferences.panelPalette = preset
                 } label: {
-                    presetSwatch(preset)
+                    presetSwatch(preset, selected: current == preset.name)
                 }
                 .buttonStyle(.plain)
                 .help("Use the \(preset.name) theme")
+                // The checkmark says which preset is on to the eye only — the image
+                // carries no label, and a plain button exposes no state of its own.
+                .accessibilityAddTraits(current == preset.name ? [.isSelected] : [])
             }
         }
     }
@@ -117,9 +134,8 @@ struct AppearanceView: View {
     /// A preset as a small picture of itself: its surface, its accent, and the five
     /// verdict colours in a row — which is what actually differs between two themes that
     /// both look "dark blue" in a list of names.
-    private func presetSwatch(_ preset: PanelPalette) -> some View {
-        let selected = preferences.panelPalette.matchingPreset?.name == preset.name
-        return VStack(alignment: .leading, spacing: 6) {
+    private func presetSwatch(_ preset: PanelPalette, selected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 4) {
                 Circle().fill(Color(preset.accent)).frame(width: 13, height: 13)
                 Text(preset.name)

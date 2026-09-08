@@ -39,6 +39,16 @@ final class PanelPaletteTests: XCTestCase {
         XCTAssertNil(ThemeColor(hex: "#ggghhh"))
     }
 
+    /// Absolute, like AppKit's `withAlphaComponent` and unlike SwiftUI's `opacity`, which
+    /// composes: going through here twice leaves the alpha where it was asked for rather
+    /// than at a quarter of it.
+    func testSettingAnAlphaReplacesWhateverWasThere() {
+        let faint = ThemeColor(0.2, 0.4, 0.6, 0.2)
+        XCTAssertEqual(faint.withAlpha(0.5).alpha, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(faint.withAlpha(0.5).withAlpha(0.5).alpha, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(faint.withAlpha(0.5).red, 0.2, accuracy: 0.0001, "only the alpha moves")
+    }
+
     /// Components arrive from a settings file a hand edit can leave holding anything.
     func testComponentsAreClamped() {
         let wild = ThemeColor(4, -2, .nan, 99)
@@ -98,6 +108,39 @@ final class PanelPaletteTests: XCTestCase {
                        "clamped rather than obeyed")
     }
 
+    /// Two answers, because the two bad values are not the same kind of bad. NaN has no
+    /// order, so the `min`/`max` pair hands it straight back and it has no end of the
+    /// range to be nearest to — it reads as "as designed". An infinity compares fine and
+    /// gets clamped like any other out-of-range number. The initializer and the decoder
+    /// used to reach that pair by different routes and could disagree about both.
+    func testAStrangeCornerScaleLandsSomewhereSensible() {
+        func palette(_ scale: Double) -> PanelPalette {
+            PanelPalette(name: "Odd", accent: ThemeColor(0.5, 0.5, 0.5), cornerScale: scale)
+        }
+        XCTAssertEqual(palette(.nan).cornerScale, 1)
+        XCTAssertEqual(palette(.infinity).cornerScale, PanelPalette.cornerScaleRange.upperBound,
+                       "an infinity has an end of the range to clamp to")
+        XCTAssertEqual(palette(-.infinity).cornerScale, PanelPalette.cornerScaleRange.lowerBound)
+    }
+
+    /// The cost of getting the line above wrong, and why it is not a cosmetic bug:
+    /// `JSONEncoder` refuses a non-finite `Double`, so a NaN that reached a stored field
+    /// did not draw a strange corner — it made the whole palette unencodable, and
+    /// `CorePreferences` then had nothing to write.
+    func testAPaletteBuiltWithANaNStillEncodes() throws {
+        let odd = PanelPalette(name: "Odd", accent: ThemeColor(0.5, 0.5, 0.5), cornerScale: .nan)
+        let encoded = try XCTUnwrap(PanelPalette.encode(odd))
+        XCTAssertEqual(PanelPalette.decode(encoded), odd)
+    }
+
+    /// A hand edit that empties the name leaves neither a preset's name nor one the reader
+    /// chose, and `name` is stored — so it would go back out through `encode` and stay.
+    func testANameThatIsBlankReadsAsCustom() throws {
+        XCTAssertEqual(try XCTUnwrap(PanelPalette.decode(#"{"name":""}"#)).name, "Custom")
+        XCTAssertEqual(try XCTUnwrap(PanelPalette.decode(#"{"name":"   "}"#)).name, "Custom")
+        XCTAssertEqual(try XCTUnwrap(PanelPalette.decode(#"{"name":"Mine"}"#)).name, "Mine")
+    }
+
     func testTextThatIsNotJSONIsNoPalette() {
         XCTAssertNil(PanelPalette.decode("{ not json"))
         XCTAssertNil(PanelPalette.decode(""))
@@ -138,6 +181,13 @@ final class PanelPaletteTests: XCTestCase {
         for preset in PanelPalette.presets {
             guard let surface = preset.surface, let text = preset.primaryText else { continue }
             checked += 1
+            // The 0.4 bar is calibrated to `luminance` as it is written — the plain
+            // weighted sum of sRGB components. Solarized is the only preset anywhere near
+            // it: base0 text on base03 comes to 0.437, where the next tightest (Bubblegum)
+            // is 0.811. Gamma-linearised WCAG relative luminance would put Solarized at
+            // roughly 0.26 and fail it, for a pairing that is canonical Solarized and
+            // reads fine — so if `luminance` ever changes formula, this number has to
+            // change with it rather than the preset.
             XCTAssertGreaterThan(abs(surface.luminance - text.luminance), 0.4,
                                  "\(preset.name) puts text too close to its own surface")
         }

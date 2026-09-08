@@ -34,9 +34,13 @@ enum PanelTheme {
     /// `objectWillChange` and then calls its `onChanged` hook, and the re-render happens
     /// on a later turn of the run loop — so a body never reads a stale palette.
     static var palette: PanelPalette = .ember {
-        // The contract above is documented for readers; this is the part a compiler can
-        // check. A palette import or an async settings load is exactly the kind of
-        // future writer that would race a value SwiftUI reads during layout.
+        // A debug-runtime trap, not a compile-time or a shipping check — `assert` is
+        // compiled out with `-O`, and that is the intended severity. A palette import or
+        // an async settings load is exactly the kind of future writer that would race a
+        // value SwiftUI reads during layout, and this catches it in the build that writer
+        // is running. `dispatchPrecondition` would carry into release, but the harm being
+        // guarded against is a frame drawn in the wrong colours, and killing a running
+        // app over that trades a cosmetic bug for a worse one.
         willSet {
             assert(Thread.isMainThread, "PanelTheme.palette must only be set on the main thread")
         }
@@ -127,7 +131,7 @@ enum PanelTheme {
         static var primaryText: Color { theme.primaryText.map { Color($0) } ?? Color.primary }
         static var secondaryText: Color { theme.secondaryText.map { Color($0) } ?? Color.secondary }
         static var tertiaryText: Color {
-            theme.secondaryText.map { Color($0.opacity($0.alpha * 0.62)) }
+            theme.secondaryText.map { Color($0.withAlpha($0.alpha * 0.62)) }
                 ?? Color.secondary.opacity(0.62)
         }
 
@@ -168,8 +172,8 @@ enum PanelTheme {
     }
 }
 
-/// The panel's background: Liquid Glass on macOS 26, a blurred `NSVisualEffectView`
-/// below it, and in both cases a legibility scrim.
+/// The panel's background: the theme's backdrop, then its surface or, failing that, a
+/// legibility scrim.
 ///
 /// The scrim is not optional. Glass takes its colour from whatever is behind the
 /// window, and "whatever is behind the window" is the user's entire desktop — so
@@ -203,6 +207,10 @@ struct PanelBackground: View {
     /// something has to be behind them, and the blur is cheaper than it looks once it is
     /// covered. `Reduce Transparency` still wins over the theme, because that setting is
     /// an accessibility request rather than a preference.
+    ///
+    /// Three cases, three renderings. That is the whole contract: the picker offers three
+    /// names, so two of them drawing the same pixels would read as a broken setting rather
+    /// than as a taste nobody shares.
     @ViewBuilder
     private func backdrop(in shape: RoundedRectangle) -> some View {
         switch PanelTheme.palette.backdrop {
@@ -213,12 +221,22 @@ struct PanelBackground: View {
                 VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
                     .clipShape(shape)
             }
-        case .frosted, .solid:
+        case .frosted:
             // No `reduceTransparency` check, unlike `.glass` above: `VisualEffectBlur`
             // wraps `NSVisualEffectView`, which answers the setting itself by turning
             // its material opaque. The guarantee is kept here, just not by this code.
             VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
                 .clipShape(shape)
+        case .solid:
+            // Opaque here, rather than by leaning on the theme's surface to cover a blur.
+            // `surface` is one of the colours the reader can hand back to Automatic, and
+            // this is the backdrop that promises legibility over literally anything — so
+            // sharing the `.frosted` branch made that promise depend on a checkbox two
+            // rows above it in the same pane, and made two of the three menu items draw
+            // the same thing. The semantic window colour rather than a fixed grey, so an
+            // opaque panel still follows Dark Mode and Increase Contrast; a theme with a
+            // surface of its own paints straight over this.
+            shape.fill(Color(nsColor: .windowBackgroundColor))
         }
     }
 

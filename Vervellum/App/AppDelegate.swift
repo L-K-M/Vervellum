@@ -59,6 +59,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Before the controller, not after: the panel's content reads the palette, so
         // assigning it later would leave the default theme one frame wide.
         PanelTheme.palette = preferences.panelPalette
+
+        // Every setting the panel reads is applied to the open panel as it changes,
+        // rather than at the next summon. Width and edge used to be sampled once per
+        // show, so the only way to see what the width slider did was to close the panel
+        // and open it again — with the previous width no longer on screen to compare to.
+        // The theme is read through a stored value rather than the environment — see
+        // `PanelTheme.palette` — so the composition root is what keeps it in step. It is
+        // seeded on the line above, before the panel exists; this keeps it there.
+        //
+        // Hooked before anything else in this method is built, so there is no stretch of
+        // setup during which a preference could change and leave the global holding the
+        // seeded value for the rest of the session. Nothing below writes a preference
+        // today; the ordering is what makes that not need checking again. The closure
+        // tolerates a `panelController` that does not exist yet, which is why it can
+        // come first.
+        preferences.onChanged = { [weak self] in
+            guard let self else { return }
+            PanelTheme.palette = self.preferences.panelPalette
+            self.panelController?.preferencesDidChange()
+        }
+
         let panelController = makePanelController()
         self.panelController = panelController
         self.settingsWindow = SettingsWindowController(
@@ -67,18 +88,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             updateChecker: updateChecker,
             onShortcutsChanged: { [weak self] in self?.registerHotkeys() })
 
-        // Every setting the panel reads is applied to the open panel as it changes,
-        // rather than at the next summon. Width and edge used to be sampled once per
-        // show, so the only way to see what the width slider did was to close the panel
-        // and open it again — with the previous width no longer on screen to compare to.
-        // The theme is read through a stored value rather than the environment — see
-        // `PanelTheme.palette` — so the composition root is what keeps it in step. It is
-        // seeded above, before the panel exists; this keeps it there.
-        preferences.onChanged = { [weak self] in
-            guard let self else { return }
-            PanelTheme.palette = self.preferences.panelPalette
-            self.panelController?.preferencesDidChange()
-        }
         observePanelPreview()
 
         installMainMenu()

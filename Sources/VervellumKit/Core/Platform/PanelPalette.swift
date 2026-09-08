@@ -55,8 +55,14 @@ struct ThemeColor: Codable, Equatable, Hashable {
         return alpha >= 1 ? base : base + String(format: "%02X", byte(alpha))
     }
 
-    /// The same colour at a different opacity.
-    func opacity(_ value: Double) -> ThemeColor {
+    /// The same colour with its alpha replaced by `value`.
+    ///
+    /// Named for AppKit's `withAlphaComponent`, not for SwiftUI's `opacity`, because it
+    /// behaves like the first: it *sets* alpha rather than scaling what is there.
+    /// `.opacity(0.5)` twice in SwiftUI leaves you at a quarter; this twice leaves you at
+    /// a half, and a caller who wants the SwiftUI reading has to write the multiply out —
+    /// which the one caller does.
+    func withAlpha(_ value: Double) -> ThemeColor {
         ThemeColor(red, green, blue, value)
     }
 
@@ -195,6 +201,23 @@ struct PanelPalette: Codable, Equatable {
 
     static let cornerScaleRange = 0.0...2.0
 
+    /// `value` inside `cornerScaleRange`.
+    ///
+    /// One function because the initializer and the decoder clamped separately and
+    /// disagreed. NaN is the whole reason either needs care: it has no order, so
+    /// `Swift.max(.nan, 0)` hands back the NaN — `0 >= .nan` is false — and `min` then
+    /// does the same, leaving a NaN corner radius for `RoundedRectangle` to draw and, far
+    /// worse, a palette `JSONEncoder` refuses outright. That is how one bad `Double`
+    /// erased a theme rather than rounding a corner oddly.
+    ///
+    /// Only NaN. An infinity compares fine and clamps to the end of the range it sits at,
+    /// which is the answer a file saying `1e999` was asking for.
+    private static func clampedCornerScale(_ value: Double) -> Double {
+        guard !value.isNaN else { return 1 }
+        return Swift.min(Swift.max(value, cornerScaleRange.lowerBound),
+                         cornerScaleRange.upperBound)
+    }
+
     init(name: String,
          accent: ThemeColor,
          primaryText: ThemeColor? = nil,
@@ -227,8 +250,7 @@ struct PanelPalette: Codable, Equatable {
         self.insufficient = insufficient
         self.opinion = opinion
         self.fontDesign = fontDesign
-        self.cornerScale = Swift.min(Swift.max(cornerScale, Self.cornerScaleRange.lowerBound),
-                                     Self.cornerScaleRange.upperBound)
+        self.cornerScale = Self.clampedCornerScale(cornerScale)
         self.backdrop = backdrop
     }
 
@@ -257,7 +279,11 @@ struct PanelPalette: Codable, Equatable {
         func optionalColour(_ key: CodingKeys) -> ThemeColor? {
             (try? container.decodeIfPresent(ThemeColor.self, forKey: key)) ?? nil
         }
-        name = ((try? container.decodeIfPresent(String.self, forKey: .name)) ?? nil) ?? "Custom"
+        // Blank counts as absent. A hand-edited `"name": ""` is not a name a reader chose,
+        // and `name` is a stored property — so it would round-trip back out through
+        // `encode` and stay blank for good.
+        let named = ((try? container.decodeIfPresent(String.self, forKey: .name)) ?? nil) ?? ""
+        name = named.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Custom" : named
         accent = colour(.accent, fallback.accent)
         primaryText = optionalColour(.primaryText)
         secondaryText = optionalColour(.secondaryText)
@@ -274,8 +300,7 @@ struct PanelPalette: Codable, Equatable {
         let design = (try? container.decodeIfPresent(String.self, forKey: .fontDesign)) ?? nil
         fontDesign = design.flatMap { ThemeFontDesign(rawValue: $0) } ?? .system
         let corner = ((try? container.decodeIfPresent(Double.self, forKey: .cornerScale)) ?? nil) ?? 1
-        cornerScale = Swift.min(Swift.max(corner.isFinite ? corner : 1, Self.cornerScaleRange.lowerBound),
-                                Self.cornerScaleRange.upperBound)
+        cornerScale = Self.clampedCornerScale(corner)
         let back = (try? container.decodeIfPresent(String.self, forKey: .backdrop)) ?? nil
         backdrop = back.flatMap { ThemeBackdrop(rawValue: $0) } ?? .glass
     }
