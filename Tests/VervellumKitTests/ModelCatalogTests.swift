@@ -31,6 +31,13 @@ final class ModelCatalogTests: XCTestCase {
             ProviderSettings.modelListURL(from: "https://api.example.com/v1/chat/completions")?
                 .absoluteString,
             "https://api.example.com/v1/models")
+        // The shape a provider's own documentation is usually copied in, and the one that
+        // exercises the strip-slashes / strip-suffix / strip-slashes ordering rather than
+        // either half of it alone.
+        XCTAssertEqual(
+            ProviderSettings.modelListURL(from: "https://api.example.com/v1/chat/completions/")?
+                .absoluteString,
+            "https://api.example.com/v1/models")
     }
 
     func testTrailingSlashesAndQueriesAreDropped() {

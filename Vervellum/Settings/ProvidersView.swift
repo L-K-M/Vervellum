@@ -286,14 +286,28 @@ struct ProvidersView: View {
         let client = ModelCatalogClient(url: url, apiKey: key,
                                         trace: ResearchTrace(sink: SilentLog()))
         do {
-            catalogues[profile.id] = .loaded(try await client.fetch())
+            let models = try await client.fetch()
+            guard stillCurrent(profile) else { return }
+            catalogues[profile.id] = .loaded(models)
         } catch {
+            guard stillCurrent(profile) else { return }
             // The provider's own text is never shown — only a `ResearchError` Vervellum
             // wrote, and a bare type name for anything else.
             catalogues[profile.id] = .failed(
                 (error as? ResearchError)?.message
                     ?? "Could not list models. Type the model name instead.")
         }
+    }
+
+    /// Whether the row still points where it did when the request went out.
+    ///
+    /// Editing an endpoint clears its list, but a request already in flight would resume
+    /// afterwards and write the *old* host's models under the new address — which is
+    /// exactly the "a picker still offering the old host's models" outcome that clearing
+    /// exists to prevent. It also settles two overlapping fetches: whichever finishes
+    /// last, only the one matching the address on screen is allowed to land.
+    private func stillCurrent(_ profile: ModelProfile) -> Bool {
+        profiles.first { $0.id == profile.id }?.endpoint == profile.endpoint
     }
 
     /// One search provider's fields. The protocol picker comes first, because it decides
