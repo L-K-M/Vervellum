@@ -6,7 +6,17 @@ struct GeneralView: View {
     /// The limits offered. A short list of round numbers rather than a slider: this is a
     /// number nobody wants to tune to the unit, and every value here is inside
     /// `ThreadLibrary.keptThreadsRange`.
-    static let threadLimits = [25, 50, 100, 200, 500, 1000]
+    ///
+    /// Asserted rather than asserted-by-comment. A row outside the range would clamp on
+    /// its way to the store and the picker would settle on a different row than the one
+    /// the reader clicked — which is the blank-selection confusion the note by the picker
+    /// warns about, arrived at from the other side.
+    static let threadLimits: [Int] = {
+        let limits = [25, 50, 100, 200, 500, 1000]
+        assert(limits.allSatisfy { ThreadLibrary.keptThreadsRange.contains($0) },
+               "a row outside the clamp range can never stay selected")
+        return limits
+    }()
 
     /// The round numbers, plus whatever the limit actually is right now.
     private var offeredThreadLimits: [Int] {

@@ -52,10 +52,15 @@ struct ThreadLibrary: Codable, Equatable {
     /// the handful of call sites and removes a whole class of quiet data loss from any
     /// future import, merge or migration path.
     mutating func upsert(_ thread: ResearchThread, keeping limit: Int) {
+        // Deferred, so the bound is enforced on the empty-thread exit too. That path
+        // removes an entry and returns, and an import or a merge whose last write happens
+        // to be an empty thread would otherwise leave a list over the limit — and persist
+        // it, since the file is written from whatever the list holds. The next launch
+        // trims it in memory, which is a recovery rather than the invariant.
+        defer { prune(to: limit) }
         threads.removeAll { $0.id == thread.id }
         guard !thread.isEmpty else { return }
         threads.insert(thread, at: 0)
-        prune(to: limit)
     }
 
     /// Drops the oldest threads past `limit`.

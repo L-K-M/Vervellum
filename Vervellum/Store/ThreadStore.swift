@@ -75,6 +75,11 @@ final class ThreadStore: ObservableObject {
             // thread list and its counter for a setting that never moved.
             guard archive.keptThreads != newValue else { return }
             objectWillChange.send()
+            // No re-read of `library` after this. The archive's own observer calls
+            // `onChange` when the prune drops something, and this type's handler is what
+            // assigns `library` — synchronously, because the assignment above happens on
+            // the main thread and the handler only hops when it is not. A defensive
+            // re-read here would be a second path doing the first one's job.
             archive.keptThreads = newValue
         }
     }

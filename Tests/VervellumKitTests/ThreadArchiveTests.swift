@@ -474,6 +474,9 @@ final class ThreadArchiveTests: XCTestCase {
     func testLoweringTheLimitPrunesWhatIsAlreadyThere() {
         var library = ThreadLibrary()
         let ceiling = ThreadLibrary.keptThreadsRange.upperBound
+        XCTAssertGreaterThanOrEqual(ceiling, 60,
+                                    "sixty threads have to fit under the ceiling, or this "
+                                    + "test fails about the range rather than about pruning")
         for index in 0..<60 { library.upsert(thread("q\(index)"), keeping: ceiling) }
         XCTAssertEqual(library.threads.count, 60)
         XCTAssertEqual(library.prune(to: 20), 40)
@@ -512,7 +515,12 @@ final class ThreadArchiveTests: XCTestCase {
     /// Setting it prunes at once: a reader who has just asked to keep twenty-five expects
     /// to see twenty-five.
     func testTheArchivePrunesWhenTheLimitIsLowered() throws {
-        let archive = ThreadArchive(fileURL: fileURL, debounce: 0)
+        // The ceiling rather than the default, so forty threads are guaranteed to fit
+        // whatever the shipped default becomes — a smaller default would prune inside
+        // the loop and fail this test about a constant it is not testing.
+        let archive = ThreadArchive(fileURL: fileURL,
+                                    keptThreads: ThreadLibrary.keptThreadsRange.upperBound,
+                                    debounce: 0)
         for index in 0..<40 { archive.save(thread("q\(index)")) }
         XCTAssertEqual(archive.library.threads.count, 40)
 
@@ -548,6 +556,13 @@ final class ThreadArchiveTests: XCTestCase {
         // the one it used not to check. No `flush` first: `eraseEverything` runs
         // `queue.sync` and cancels whatever was pending, so the bytes are gone by the
         // time the setter returns.
+        // The bytes directly, then the round trip. `ThreadArchive.init` takes
+        // `historyEnabled` as an argument and reads no settings of its own, so a fresh
+        // one really would adopt a surviving file and the round trip is not vacuous —
+        // but it proves "nothing was adopted", and what this test's name claims is
+        // "nothing is there". Only the first assertion says that.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path),
+                       "history off must delete the file, not merely stop reading it")
         XCTAssertTrue(ThreadArchive(fileURL: fileURL, debounce: 0).library.threads.isEmpty,
                       "history off must erase the file, not only clear memory")
         archive.isHistoryEnabled = true
@@ -557,7 +572,9 @@ final class ThreadArchiveTests: XCTestCase {
     /// A file written when the limit was higher — or by a build that had no setting — is
     /// trimmed on the way in, so the list already obeys what was asked for.
     func testAnExistingFileIsTrimmedOnLoad() throws {
-        let writer = ThreadArchive(fileURL: fileURL, debounce: 0)
+        let writer = ThreadArchive(fileURL: fileURL,
+                                   keptThreads: ThreadLibrary.keptThreadsRange.upperBound,
+                                   debounce: 0)
         for index in 0..<40 { writer.save(thread("q\(index)")) }
         writer.flush()
 
@@ -571,7 +588,9 @@ final class ThreadArchiveTests: XCTestCase {
     /// destroy history before the reader had taken a single action. Raising the limit
     /// and relaunching must bring it all back.
     func testTheLoadTimeTrimDoesNotTouchTheFile() throws {
-        let writer = ThreadArchive(fileURL: fileURL, debounce: 0)
+        let writer = ThreadArchive(fileURL: fileURL,
+                                   keptThreads: ThreadLibrary.keptThreadsRange.upperBound,
+                                   debounce: 0)
         for index in 0..<40 { writer.save(thread("q\(index)")) }
         writer.flush()
 
@@ -600,7 +619,9 @@ final class ThreadArchiveTests: XCTestCase {
     /// elsewhere, and this test is what would catch a refactor that made history-off
     /// retain its threads in memory.
     func testLoweringTheLimitWhileHistoryIsOffChangesNothing() throws {
-        let writer = ThreadArchive(fileURL: fileURL, debounce: 0)
+        let writer = ThreadArchive(fileURL: fileURL,
+                                   keptThreads: ThreadLibrary.keptThreadsRange.upperBound,
+                                   debounce: 0)
         for index in 0..<30 { writer.save(thread("q\(index)")) }
         writer.flush()
 
@@ -618,7 +639,12 @@ final class ThreadArchiveTests: XCTestCase {
     /// not applying, reported by the one thing a caller can ask. No thread was ever lost
     /// to it, which is why nothing noticed.
     func testALimitAssignedAfterConstructionIsClampedToo() {
-        let archive = ThreadArchive(fileURL: fileURL, debounce: 0)
+        // The ceiling rather than the default, so forty threads are guaranteed to fit
+        // whatever the shipped default becomes — a smaller default would prune inside
+        // the loop and fail this test about a constant it is not testing.
+        let archive = ThreadArchive(fileURL: fileURL,
+                                    keptThreads: ThreadLibrary.keptThreadsRange.upperBound,
+                                    debounce: 0)
         for index in 0..<40 { archive.save(thread("q\(index)")) }
 
         archive.keptThreads = 3

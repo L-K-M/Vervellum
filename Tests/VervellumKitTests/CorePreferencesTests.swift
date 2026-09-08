@@ -43,6 +43,12 @@ final class CorePreferencesTests: XCTestCase {
     /// makes the picker offer the current value alongside its round numbers.
     func testAStoredLimitOutsideTheRangeIsClamped() {
         XCTAssertEqual(preferences(["keptThreads": 7.0]).keptThreads, 10)
+        // The endpoints themselves, which the two out-of-range rows do not reach. A clamp
+        // is wrong at its edges more often than in its middle, and this one also crosses a
+        // Double-to-Int conversion on the way, so a reader who deliberately picked the
+        // ceiling should get the ceiling.
+        XCTAssertEqual(preferences(["keptThreads": 10.0]).keptThreads, 10)
+        XCTAssertEqual(preferences(["keptThreads": 2000.0]).keptThreads, 2000)
         XCTAssertEqual(preferences(["keptThreads": 99_999.0]).keptThreads, 2000)
     }
 

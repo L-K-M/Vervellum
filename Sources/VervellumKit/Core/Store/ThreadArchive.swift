@@ -152,7 +152,20 @@ final class ThreadArchive {
         // relaunching gets everything back. Every real write prunes anyway, so the file
         // still converges; it just does so behind an action somebody took.
         if historyEnabled, !isReadOnly {
-            _ = library.prune(to: keptThreads)
+            let dropped = library.prune(to: keptThreads)
+            if dropped > 0 {
+                // Said out loud, because this is the one trim nobody asked for. Every
+                // other one follows a picker the reader just moved; this one follows a
+                // number that changed in a file while the app was closed, and the threads
+                // are gone from the list before anything is on screen. "Where did my
+                // threads go" is unanswerable without it — and the answer matters while
+                // it is still recoverable, which is until the next save.
+                let warning = "vervellum warning: \(dropped) thread(s) are not shown, "
+                    + "because the stored limit is \(keptThreads). They are still in the "
+                    + "file until something is saved — raise the limit and relaunch to "
+                    + "get them back.\n"
+                FileHandle.standardError.write(Data(warning.utf8))
+            }
         }
     }
 
