@@ -114,12 +114,17 @@ enum ComposerCommand: Equatable {
         switch (up, current) {
         case (false, nil): return 0
         case (true, nil): return last
-        case (false, let index?): return min(index + 1, last)
+        // Both ends are clamped on both paths, because an index that is out of range is
+        // the same hazard whichever way it points: it highlights nothing, and the view's
+        // own `indices.contains` guard then falls through to submitting the draft — with
+        // a half-typed slash command in the field. `-1` is the only negative the down
+        // path survives unclamped (`min(-1 + 1, last)` lands on `0` by luck); `-2` and
+        // below return a negative.
+        case (false, let index?): return min(max(index + 1, 0), last)
         case (true, let index?):
-            // Clamped first, like the down path. An index left over from a longer list
-            // must step up from the last row that exists, not from where it used to be:
-            // returning 8 for a two-row list highlights nothing, and the view's own
-            // `indices.contains` guard then falls through to submitting the draft.
+            // An index left over from a longer list must step up from the last row that
+            // exists, not from where it used to be: stepping up from 9 in a two-row list
+            // would return 8.
             let clamped = min(max(index, 0), last)
             return clamped == 0 ? nil : clamped - 1
         }

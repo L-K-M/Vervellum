@@ -158,14 +158,22 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertNil(ComposerCommand.moveSelection(0, up: true, count: 1))
     }
 
-    /// An index below the list is as possible as one beyond it, and the up path used to
-    /// clamp only the top: `min(-1, last)` is `-1`, which is not `0`, so it returned -2.
-    /// A negative result highlights nothing and makes the view's `indices.contains` guard
-    /// turn an intended accept into a submit — with a slash command in the field.
+    /// An index below the list is as possible as one beyond it, and both paths used to
+    /// clamp only the top. Up returned -2 for -1 (`min(-1, last)` is `-1`, not `0`);
+    /// down survived -1 only by luck, since `min(-1 + 1, last)` lands on `0`, and
+    /// returned a negative for anything deeper. A negative result highlights nothing and
+    /// makes the view's `indices.contains` guard turn an intended accept into a submit —
+    /// with a slash command in the field.
     func testAnIndexBelowTheListIsClampedToo() {
         XCTAssertNil(ComposerCommand.moveSelection(-1, up: true, count: 2),
                      "clamped to the first row, and stepping up from there deselects")
         XCTAssertEqual(ComposerCommand.moveSelection(-1, up: false, count: 2), 0)
+        // Past the one value the down path got right by accident.
+        XCTAssertEqual(ComposerCommand.moveSelection(-2, up: false, count: 2), 0,
+                       "down from below the list enters at the top, as it does from nothing")
+        XCTAssertEqual(ComposerCommand.moveSelection(-5, up: false, count: 3), 0)
+        XCTAssertNil(ComposerCommand.moveSelection(-5, up: true, count: 3),
+                     "and up from below the list still deselects")
     }
 
     /// The list shrinks as the user types, and the view clears the highlight on every
