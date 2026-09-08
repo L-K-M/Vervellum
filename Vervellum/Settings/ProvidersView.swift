@@ -79,7 +79,8 @@ struct ProvidersView: View {
                     + "versioned base such as /v1 gets /chat/completions appended; a full path is "
                     + "used as typed. HTTPS is required, except for a model server on localhost. "
                     + "Each provider keeps its own key, so a local server and a hosted one can be "
-                    + "configured side by side.") {
+                    + "configured side by side. A key is optional — a local model server usually "
+                    + "needs none.") {
 
                 if profiles.count > 1 {
                     Picker("Ask with", selection: Binding(
@@ -229,7 +230,8 @@ struct ProvidersView: View {
                    entry: Binding(get: { keyEntries[id] ?? "" },
                                   set: { keyEntries[id] = $0 }),
                    hasStored: storedKeys.contains(id),
-                   note: "Optional — a local model server usually needs none.") {
+                   note: "Optional — a local model server usually needs none.",
+                   showsNote: false) {
                 try? keychain.delete(profile.wrappedValue.secretAccount)
                 storedKeys.remove(id)
                 statusIsProblem = false
@@ -288,35 +290,59 @@ struct ProvidersView: View {
                 .accessibilityLabel("List this provider's models")
                 .help("Ask this endpoint which models it serves")
                 .disabled(ProviderSettings.modelListURL(from: profile.wrappedValue.endpoint) == nil)
+                // A menu on the row rather than a second control under it. Both used to
+                // be bound to `model`, so a loaded list drew the name twice — once in the
+                // field, once in a pop-up below it — which is the same value asking to be
+                // read as two settings. A menu has no selection of its own: it writes into
+                // the field and leaves it the one place the model name lives. That also
+                // retires the tag bookkeeping a `Picker` needed, where every value the
+                // field could hold — empty, or typed and unlisted — had to be offered back
+                // as a row or the menu drew blank.
+                // `!models.isEmpty`, because a successful listing can be empty: a fresh
+                // Ollama before its first pull, or LM Studio with nothing loaded, answer
+                // `/models` with a well-formed empty list. Without this the row grows a
+                // chevron that opens onto nothing — an affordance that cannot do
+                // anything, offered exactly to the local-first setup this pane is for.
+                // The old pop-up never had the problem because a `Picker` had to carry
+                // the typed value as a row whatever the endpoint said.
+                if case .loaded(let models) = catalogues[id], !models.isEmpty {
+                    Menu {
+                        ForEach(models, id: \.self) { name in
+                            Button(name) { profile.model.wrappedValue = name }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                    }
+                    .fixedSize()
+                    // The label is already a chevron, and a `Menu` draws an indicator of
+                    // its own after whatever label it is given — so without this the row
+                    // grows two of them side by side. A doubled affordance reads as a
+                    // rendering fault, which is a poor thing to add to a change whose
+                    // whole purpose is that this pane stops looking like one.
+                    .menuIndicator(.hidden)
+                    .accessibilityLabel("Choose a listed model")
+                    // Pluralised, because one model is the ordinary case for a local
+                    // server with a single model loaded, and "1 models" is the tooltip
+                    // that setup would always see.
+                    .help("\(models.count) model\(models.count == 1 ? "" : "s") "
+                          + "listed by this endpoint")
+                }
             }
 
-            switch catalogues[id] {
-            case .loaded(let models):
-                Picker("", selection: profile.model) {
-                    // Every value the field can hold needs a row, or the menu draws
-                    // blank and SwiftUI complains that the selection matches no tag.
-                    if profile.wrappedValue.model.isEmpty {
-                        Text("Type or choose a model").tag("")
-                    } else if !models.contains(profile.wrappedValue.model) {
-                        // The typed value is offered back as a row of its own when the
-                        // endpoint did not list it, so choosing from the menu cannot
-                        // silently discard a name that works.
-                        Text(profile.wrappedValue.model).tag(profile.wrappedValue.model)
-                    }
-                    ForEach(models, id: \.self) { Text($0).tag($0) }
-                }
-                .labelsHidden()
-                // Hidden from the eye, not from VoiceOver — otherwise this is an
-                // anonymous pop-up button, and the "Model" label beside it belongs to a
-                // different view.
-                .accessibilityLabel("Model")
-                .help("\(models.count) models listed by this endpoint")
-            case .failed(let reason):
+            // Only sentences stay under the row: something to read, not a control to
+            // reach for.
+            if case .failed(let reason) = catalogues[id] {
                 Text(reason)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            case .loading, .none:
-                EmptyView()
+            }
+            // An empty list is a real answer and needs saying. The spinner stops, the
+            // menu does not appear, and without this the only difference between "asked
+            // and told nothing" and "never asked" is a chevron nobody was watching for.
+            if case .loaded(let models) = catalogues[id], models.isEmpty {
+                Text("This endpoint listed no models. Type the name instead.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         // A list belongs to the endpoint it came from. Editing the address makes it
@@ -446,10 +472,17 @@ struct ProvidersView: View {
     }
 
     @ViewBuilder
+    /// `showsNote` is off for the rows that repeat. The reader and search keys appear
+    /// once each, where a line under the field is guidance; the model cards appear once
+    /// per provider, where the same sentence four times over is furniture. What it says
+    /// is a fact about keys rather than about any one provider, so it belongs in the
+    /// section's own footnote — and "a key is stored" is already what the field's
+    /// placeholder says, one line above where this would print it again.
     private func keyRow(title: String,
                         entry: Binding<String>,
                         hasStored: Bool,
                         note: String,
+                        showsNote: Bool = true,
                         onClear: @escaping () -> Void) -> some View {
         LabeledContent(title) {
             VStack(alignment: .leading, spacing: 4) {
@@ -462,9 +495,11 @@ struct ProvidersView: View {
                             .help("Remove the stored key from the Keychain")
                     }
                 }
-                Text(hasStored ? "A key is stored. \(note)" : note)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+                if showsNote {
+                    Text(hasStored ? "A key is stored. \(note)" : note)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
     }
