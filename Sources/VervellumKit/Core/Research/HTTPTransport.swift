@@ -159,16 +159,32 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
         return request
     }
 
+    /// The wall-clock message, spelled in whatever unit the budget is actually in.
+    ///
+    /// Both readers used to divide by 60 and hard-code "minutes", which was right while
+    /// every budget was the ten-minute `deadline` and reads as "did not finish within 0
+    /// minutes" for anything shorter than one.
+    static func tookTooLong(_ budget: TimeInterval) -> ResearchError {
+        let spelled = budget < 60
+            ? "\(Int(budget.rounded())) seconds"
+            : "\(Int(budget / 60)) minutes"
+        return ResearchError("The provider's response did not finish within \(spelled).")
+    }
+
     /// Builds a GET expecting JSON back.
     ///
     /// Separate from the POST builder rather than a parameter on it: a GET has no body
     /// to encode and cannot be an SSE call, and every caller of the POST builder passes
-    /// a payload. The end-to-end budget applies, not the idle one — a search API is
-    /// silent until it has finished querying its own upstreams, which is not a stall.
-    /// `timeout` defaults to the ten-minute `deadline`, which is sized for a local model
-    /// working through an evidence block. A GET that fetches a small JSON document has
-    /// nothing to think about and should say so much sooner: a caller that knows its
-    /// request is cheap passes its own.
+    /// a payload. `timeout` defaults to the ten-minute `deadline`, which is sized for a
+    /// local model working through an evidence block; a GET that fetches a small JSON
+    /// document has nothing to think about and a caller that knows its request is cheap
+    /// passes its own.
+    ///
+    /// It buys less than it looks like, and this used to claim otherwise. Whatever goes
+    /// into `URLRequest.timeoutInterval` is an *idle* timeout — URLSession restarts it
+    /// on every byte — so it bounds the silences, not the exchange. A caller that means
+    /// "not longer than this" passes the same number to `sendJSON`'s `deadline`, which
+    /// is the wall clock.
     static func getRequest(url: URL,
                            headers: [String: String] = [:],
                            timeout: TimeInterval = deadline) -> URLRequest {
@@ -186,9 +202,17 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     /// stream whose frames are scanned for the one bearing `expectedID`. A notification
     /// (a JSON-RPC message with no `id`) legitimately gets an empty `202`/`204`, which
     /// is reported as an empty object rather than an error.
+    ///
+    /// `deadline` is the wall clock on reading the body, and it is separate from the
+    /// request's own `timeoutInterval` because that one is an *idle* timeout: it is
+    /// rebuilt every time a byte arrives, so a server trickling one byte every 29
+    /// seconds satisfies a 30-second `timeoutInterval` forever. A caller that means "do
+    /// not make someone wait longer than this" has to say both, and only this one is a
+    /// bound on the whole exchange.
     func sendJSON(_ request: URLRequest,
                   expectedID: Int? = nil,
-                  isNotification: Bool = false) async throws -> (headers: [String: String], body: [String: Any]) {
+                  isNotification: Bool = false,
+                  deadline: TimeInterval = HTTPTransport.deadline) async throws -> (headers: [String: String], body: [String: Any]) {
         let (http, body) = try await open(request, limit: Self.maxResponseBytes)
         let headers = Self.headerDictionary(http)
 
@@ -206,13 +230,14 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
             // is no `expectedID`, mistake an unrelated progress frame for the
             // acknowledgement. Abandon the stream and report the empty ack.
             if isNotification { return (headers, [:]) }
-            guard let event = try await firstMatchingEvent(in: body, expectedID: expectedID) else {
+            guard let event = try await firstMatchingEvent(in: body, expectedID: expectedID,
+                                                          deadline: deadline) else {
                 throw ResearchError("The search stream ended before returning a result.")
             }
             return (headers, event)
         }
 
-        let data = try await collect(body, limit: Self.maxResponseBytes)
+        let data = try await collect(body, limit: Self.maxResponseBytes, deadline: deadline)
         if isNotification && data.isEmpty { return (headers, [:]) }
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ResearchError.invalidResponse
@@ -396,7 +421,9 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     // MARK: Reading
 
     /// Accumulates a whole body, refusing to grow past `limit`.
-    private func collect(_ body: AsyncThrowingStream<Data, Error>, limit: Int) async throws -> Data {
+    private func collect(_ body: AsyncThrowingStream<Data, Error>,
+                         limit: Int,
+                         deadline: TimeInterval = HTTPTransport.deadline) async throws -> Data {
         var data = Data()
         data.reserveCapacity(min(limit, 64 * 1024))
         let started = Date()
@@ -405,9 +432,8 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
                 // The session's timeout is an idle timeout on Linux, so a server
                 // trickling one byte at a time would never trip it. This one is wall
                 // clock.
-                guard Date().timeIntervalSince(started) <= Self.deadline else {
-                    throw ResearchError("The provider's response did not finish within "
-                                        + "\(Int(Self.deadline / 60)) minutes.")
+                guard Date().timeIntervalSince(started) <= deadline else {
+                    throw Self.tookTooLong(deadline)
                 }
                 data.append(chunk)
                 if data.count > limit { throw ResearchError.responseTooLarge }
@@ -425,11 +451,13 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     /// Scans an SSE stream for the frame whose `id` matches the JSON-RPC request. Any
     /// other frame belongs to a different in-flight call and is skipped.
     private func firstMatchingEvent(in body: AsyncThrowingStream<Data, Error>,
-                                    expectedID: Int?) async throws -> [String: Any]? {
+                                    expectedID: Int?,
+                                    deadline: TimeInterval = HTTPTransport.deadline) async throws -> [String: Any]? {
         var assembler = SSEFrameAssembler()
         var found: [String: Any]?
         do {
-            try await Self.readLines(from: body, limit: Self.maxResponseBytes) { line in
+            try await Self.readLines(from: body, limit: Self.maxResponseBytes,
+                                     deadline: deadline) { line in
                 let step = try assembler.consume(line)
                 if let object = step.frame, Self.matches(object, expectedID: expectedID) {
                     found = object
@@ -468,6 +496,7 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     /// deliver its whole body as a single "line" at close, which decodes as nothing.
     static func readLines(from body: AsyncThrowingStream<Data, Error>,
                           limit: Int,
+                          deadline: TimeInterval = HTTPTransport.deadline,
                           handle: (String) throws -> Bool) async throws {
         var buffer: [UInt8] = []
         buffer.reserveCapacity(4096)
@@ -491,9 +520,8 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
             // *idle* timeout on Linux, rebuilt on every chunk, so a server emitting a
             // keep-alive comment every few seconds would hold the read open indefinitely
             // without ever tripping it.
-            guard Date().timeIntervalSince(started) <= HTTPTransport.deadline else {
-                throw ResearchError("The provider's response did not finish within "
-                                    + "\(Int(HTTPTransport.deadline / 60)) minutes.")
+            guard Date().timeIntervalSince(started) <= deadline else {
+                throw HTTPTransport.tookTooLong(deadline)
             }
             consumed += chunk.count
             guard consumed <= limit else { throw ResearchError.responseTooLarge }

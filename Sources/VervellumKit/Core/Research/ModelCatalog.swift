@@ -92,6 +92,13 @@ final class ModelCatalogClient {
     /// chewing through an evidence block; this is a small JSON document a server either
     /// has or does not. Someone sitting in Settings watching a spinner is the wrong
     /// person to make wait on a generation deadline.
+    ///
+    /// Passed twice, because one of them is not a bound. `getRequest`'s `timeout` sets
+    /// `URLRequest.timeoutInterval`, which URLSession treats as an *idle* timeout — it
+    /// restarts on every byte, so a host trickling one byte every 29 seconds would have
+    /// satisfied it and left the spinner turning until the transport's ten-minute wall
+    /// clock. `sendJSON`'s `deadline` is the wall clock, and it is what makes the number
+    /// above true.
     static let listTimeout: TimeInterval = 30
 
     init(url: URL, apiKey: String?, trace: ResearchTrace, transport: HTTPTransport = .shared) {
@@ -116,7 +123,7 @@ final class ModelCatalogClient {
         let request = HTTPTransport.getRequest(url: url, headers: headers, timeout: Self.listTimeout)
 
         let (_, body) = try await trace.stage("List models") {
-            try await self.transport.sendJSON(request)
+            try await self.transport.sendJSON(request, deadline: Self.listTimeout)
         }
         let models = ModelCatalog.parse(body)
         // Only a 2xx reply reaches here: `sendJSON` calls `checkStatus` before it

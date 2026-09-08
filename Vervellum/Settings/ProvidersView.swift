@@ -244,6 +244,9 @@ struct ProvidersView: View {
 
                 if case .loading = catalogues[id] {
                     ProgressView().controlSize(.small)
+                        // A bare indeterminate spinner reads as "busy" and nothing else,
+                        // and there is one of these per provider card.
+                        .accessibilityLabel("Listing models")
                 } else {
                     Button {
                         modelFetches[id]?.cancel()

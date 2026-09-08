@@ -55,6 +55,38 @@ final class HTTPLineReaderTests: XCTestCase {
         XCTAssertEqual(lines, ["first"])
     }
 
+    /// The wall clock is the caller's budget now, not the transport's ten-minute
+    /// default. `URLRequest.timeoutInterval` cannot express "no longer than this": it
+    /// restarts on every byte, so a host trickling one byte just under the limit
+    /// satisfies it forever — which is why a caller that means a bound has to say this
+    /// one too. Checked before the chunk is consumed, so a spent budget delivers
+    /// nothing rather than one more line.
+    func testAReadWithNoBudgetLeftStopsBeforeDeliveringALine() async {
+        var lines: [String] = []
+        do {
+            try await HTTPTransport.readLines(from: stream([Data("first\n".utf8)]),
+                                              limit: HTTPTransport.maxStreamBytes,
+                                              deadline: -1) { line in
+                lines.append(line)
+                return true
+            }
+            XCTFail("Expected the spent budget to stop the read")
+        } catch {
+            XCTAssertTrue(error is ResearchError, "got \(error)")
+        }
+        XCTAssertTrue(lines.isEmpty, "the guard runs before the chunk does")
+    }
+
+    /// Both readers used to divide the budget by 60 and write "minutes", which reads as
+    /// "did not finish within 0 minutes" for every budget shorter than one — and the
+    /// model list's is thirty seconds.
+    func testTheOverdueMessageIsSpelledInTheUnitTheBudgetIsIn() {
+        XCTAssertTrue(HTTPTransport.tookTooLong(30).message.contains("30 seconds"),
+                      HTTPTransport.tookTooLong(30).message)
+        XCTAssertTrue(HTTPTransport.tookTooLong(HTTPTransport.deadline).message
+            .contains("10 minutes"), HTTPTransport.tookTooLong(HTTPTransport.deadline).message)
+    }
+
     func testPropagatesHandlerErrors() async {
         do {
             try await HTTPTransport.readLines(from: stream([Data("line\n".utf8)]),
