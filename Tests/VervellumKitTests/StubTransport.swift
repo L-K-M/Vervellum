@@ -36,7 +36,15 @@ import FoundationNetworking
 final class StubTransport: HTTPTransporting, @unchecked Sendable {
 
     /// One request the runner made.
-    struct Call {
+    ///
+    /// `@unchecked Sendable` because it crosses the `@Sendable` routing closure while
+    /// carrying an `Any`-typed dictionary the compiler cannot prove sendable. The claim
+    /// is honest rather than a silencer: every property is a `let`, the value is built
+    /// under the lock and never mutated afterwards, and the dictionary holds only what
+    /// `JSONSerialization` produces. The package pins Swift 5 language mode on both
+    /// platforms deliberately (see `Package.swift`), so this is a trap disarmed early
+    /// rather than an error today.
+    struct Call: @unchecked Sendable {
         enum Kind: String { case json, stream, fetch }
 
         let kind: Kind
@@ -61,8 +69,8 @@ final class StubTransport: HTTPTransporting, @unchecked Sendable {
         }
     }
 
-    /// What a request is answered with.
-    enum Reply {
+    /// What a request is answered with. `@unchecked Sendable` for the reason `Call` is.
+    enum Reply: @unchecked Sendable {
         /// A decoded JSON object, as `sendJSON` returns it.
         case json([String: Any])
         /// SSE frames, in order, as `streamJSONEvents` yields them.
@@ -209,9 +217,19 @@ extension StubTransport.Reply {
     /// one-sentence fixture would quietly exercise the *unreadable* page path while
     /// looking like it tested a successful read.
     static func html(_ body: String) -> StubTransport.Reply {
-        let filler = "<p>This second paragraph is here only so the extracted text clears "
-            + "the reader's minimum useful length, which one short sentence does not.</p>"
+        let filler = "<p>This paragraph is here only so the extracted text clears the "
+            + "reader's minimum useful length, which one short sentence does not.</p>"
+        // Padded against the constant rather than by a filler sentence sized to today's
+        // value of it. A fixed pad clears the bar by luck: raise
+        // `minimumUsefulCharacters`, or pass a shorter `body`, and the fixture silently
+        // becomes an *unreadable* page while the test that depends on a successful read
+        // goes on passing. Twice the minimum absorbs the tags, which count here and do
+        // not survive extraction.
+        var padded = body
+        while padded.count < HTMLTextExtractor.minimumUsefulCharacters * 2 {
+            padded += filler
+        }
         return .page(status: 200, headers: ["Content-Type": "text/html; charset=utf-8"],
-                     text: "<html><body>\(body)\(filler)</body></html>")
+                     text: "<html><body>\(padded)</body></html>")
     }
 }

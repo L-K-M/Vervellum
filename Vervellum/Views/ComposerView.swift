@@ -194,7 +194,10 @@ struct ComposerView: NSViewRepresentable {
                 return true
 
             // A Return that carries a modifier. With submit-on-Return these add a
-            // newline; with the inverse preference they submit.
+            // newline; with the inverse preference they submit — and nothing is lost by
+            // that, because under the inverse preference *plain* Return is the line
+            // break. Each mode has one key that breaks a line and one that sends; which
+            // key plays which part is the whole of what the preference switches.
             //
             // Both selectors, because AppKit's standard key bindings send *different*
             // ones for the two keys: Option-Return is

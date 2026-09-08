@@ -30,6 +30,35 @@ final class QuestionLinkTests: XCTestCase {
         let question = "https://example.com/a — and again https://example.com/a"
         XCTAssertEqual(SourceHarvester.links(inQuestion: question, limit: 3),
                        ["https://example.com/a"])
+        // Pinned, because the two numbers are compared against each other to decide
+        // whether any link was left behind: a count of occurrences against a list of
+        // pages would report a link dropped every time a question named one page twice.
+        XCTAssertEqual(SourceHarvester.linkCount(inQuestion: question), 1,
+                       "linkCount counts distinct pages, not occurrences")
+    }
+
+    /// The same page addressed two ways is still one page.
+    ///
+    /// This is what a real paste looks like: a browser hands over the fragment it was
+    /// scrolled to, the trailing slash it displays, and the `utm_` tag by which the
+    /// reader arrived. Compared byte for byte those are three pages, and the turn would
+    /// read one document three times and number it three ways.
+    func testCollapsesAddressesThatDifferOnlyInWhatABrowserAdded() {
+        let question = "https://example.com/paper#results and https://example.com/paper/"
+            + " and https://WWW.Example.com/paper?utm_source=news"
+        XCTAssertEqual(SourceHarvester.links(inQuestion: question, limit: 3),
+                       ["https://example.com/paper#results"],
+                       "the first spelling is kept, because it is the one the user wrote")
+        XCTAssertEqual(SourceHarvester.linkCount(inQuestion: question), 1)
+    }
+
+    /// The other half of that rule: only what cannot change which document is served is
+    /// folded away. A different path — or a query item that is not attribution — is a
+    /// different page, and collapsing two real pages loses evidence.
+    func testKeepsAddressesThatCouldSelectADifferentDocument() {
+        let question = "https://example.com/a https://example.com/A"
+            + " https://example.com/a?page=2 https://example.com/a/b"
+        XCTAssertEqual(SourceHarvester.linkCount(inQuestion: question), 4)
     }
 
     /// The limit counts pages, not occurrences: the duplicate must not use up a slot
@@ -52,6 +81,17 @@ final class QuestionLinkTests: XCTestCase {
     func testTrimsSentencePunctuationFromALink() {
         XCTAssertEqual(SourceHarvester.links(inQuestion: "See https://example.com/a.", limit: 3),
                        ["https://example.com/a"])
+        // The two other ways a sentence ends around a link. "What is …/a?" is the most
+        // natural phrasing there is, and a kept "?" 404s exactly as a kept "." would.
+        XCTAssertEqual(SourceHarvester.links(inQuestion: "See https://example.com/a,", limit: 3),
+                       ["https://example.com/a"])
+        XCTAssertEqual(SourceHarvester.links(inQuestion: "What is https://example.com/a?",
+                                             limit: 3),
+                       ["https://example.com/a"])
+        // And a real query is not punctuation: the "?" that opens one has to survive.
+        XCTAssertEqual(SourceHarvester.links(inQuestion: "See https://example.com/s?q=x.",
+                                             limit: 3),
+                       ["https://example.com/s?q=x"])
     }
 
     /// Nothing but http(s) is a link Vervellum will fetch. A question that mentions a
@@ -171,5 +211,13 @@ final class QuestionLinkTests: XCTestCase {
         // offer that escape to a question that linked nothing.
         XCTAssertTrue(with.contains("the linked pages settle on their own"))
         XCTAssertFalse(without.contains("linked pages settle"))
+        // One list, one "or", in both spellings. Appending the linked case to a list
+        // that already ended in "or …" put two in the same sentence, which reads as two
+        // separate decisions rather than one list of cases.
+        XCTAssertTrue(with.contains("pure preference, a request to transform text the "
+                                    + "user supplied, or a question the linked pages "
+                                    + "settle on their own"), with)
+        XCTAssertTrue(without.contains("pure preference, or a request to transform text "
+                                       + "the user supplied"), without)
     }
 }

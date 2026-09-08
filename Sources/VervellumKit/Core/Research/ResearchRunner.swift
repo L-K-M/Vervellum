@@ -418,7 +418,7 @@ final class ResearchRunner: ResearchRunning {
         // cannot be planned until the benchmark has been read. Reading it afterwards
         // would spend the whole search budget on the guesses a planner makes when it
         // has only the URL to go on.
-        let linked = await readLinkedPages(in: question, settings: settings)
+        let (linked, linkedAttempts) = await readLinkedPages(in: question, settings: settings)
         // Reading three pages can take most of a minute at the per-page timeout, and
         // `PageReading.read` does not throw — so a Stop pressed during it is noticed
         // here rather than after a planning call the user has already cancelled.
@@ -652,9 +652,16 @@ final class ResearchRunner: ResearchRunning {
         // being added to it: `PageReaderFactory.maxPages` is a statement about one
         // turn's requests and context, and it does not stop being true because the
         // pages were chosen by the user instead of by relevance.
+        //
+        // Spent by the *attempts*, not by the reads. A link that would not load still
+        // sent a request and still reached a host, so charging only the successes would
+        // let three dead links buy three more fetches — the ceiling saying one thing and
+        // the turn doing another. `alreadyRead` stays the successes, because it answers a
+        // different question: whether this turn has any page text at all, which is what
+        // the `noPagesRead` notice is about.
         harvested = await readPages(harvested,
                                     settings: settings,
-                                    budget: PageReaderFactory.maxPages - linked.count,
+                                    budget: PageReaderFactory.maxPages - linkedAttempts,
                                     alreadyRead: linked.count)
         try Task.checkCancellation()
 
@@ -794,8 +801,14 @@ final class ResearchRunner: ResearchRunning {
     /// rather than stepping over an entry that does not fit.
     static func combined(linked: [Source], results: [Any]) -> [Source] {
         guard !linked.isEmpty else { return EvidenceExtractor.sources(from: results) }
-        let already = Set(linked.map(\.url))
-        let found = EvidenceExtractor.sources(from: results).filter { !already.contains($0.url) }
+        // Compared by `canonicalKey`, not by the raw string. A URL pasted out of a
+        // browser carries what the address bar added — a fragment, a trailing slash, a
+        // `utm_` tag — and the search engine returns the canonical form without it. Byte
+        // equality calls those two pages and numbers one document twice, which is the
+        // exact thing this function exists to stop.
+        let already = Set(linked.map { SourceHarvester.canonicalKey(for: $0.url) })
+        let found = EvidenceExtractor.sources(from: results)
+            .filter { !already.contains(SourceHarvester.canonicalKey(for: $0.url)) }
         // Numbered here rather than through `startingAt`, because the filter above can
         // drop an entry and the numbering has to be settled after that — two places
         // assigning numbers to one list is how a gap gets in.
@@ -831,9 +844,17 @@ final class ResearchRunner: ResearchRunning {
     /// saying the link was not read, which is what this does. Same posture as the rest of
     /// page reading: never throws, because a page that will not load is not a failure of
     /// the research turn.
-    private func readLinkedPages(in question: String, settings: ProviderSettings) async -> [Source] {
+    ///
+    /// - Returns: the pages that answered, and how many were **asked for**. The two are
+    ///   different numbers and the caller needs both: the reads are the evidence, and the
+    ///   attempts are what came out of the turn's page budget. A link that failed still
+    ///   spent a request and still reached a host, so counting only the successes would
+    ///   let a question full of dead links push the turn past a ceiling documented as
+    ///   being about requests as well as context.
+    private func readLinkedPages(in question: String, settings: ProviderSettings)
+        async -> (read: [Source], attempted: Int) {
         let links = SourceHarvester.links(inQuestion: question, limit: Self.maxLinks)
-        guard !links.isEmpty else { return [] }
+        guard !links.isEmpty else { return ([], 0) }
         // The privacy setting decides, even here. Reading is the one thing Vervellum does
         // that reaches a host the user did not configure, and a link in a question is
         // still that — so a user who turned it off is told their link was left rather
@@ -845,7 +866,7 @@ final class ResearchRunner: ResearchRunning {
         guard settings.pageReading != .off else {
             trace.log("Question carries \(links.count) link(s), but page reading is off")
             update { $0.addNotice(.linkReadingOff) }
-            return []
+            return ([], 0)
         }
         if SourceHarvester.linkCount(inQuestion: question) > links.count {
             trace.log("Question carries more than \(Self.maxLinks) links; "
@@ -861,11 +882,11 @@ final class ResearchRunner: ResearchRunning {
         } catch {
             trace.warn("Link reading unavailable: \(ResearchError.safeLabel(for: error))")
             update { $0.addNotice(.linkNotRead) }
-            return []
+            return ([], 0)
         }
         guard let reader else {
             update { $0.addNotice(.linkNotRead) }
-            return []
+            return ([], 0)
         }
 
         // Numbered from one only to key the reader's result; the survivors are numbered
@@ -891,7 +912,7 @@ final class ResearchRunner: ResearchRunning {
         update { $0.pagesRead = sources.count }
         trace.log("Linked pages read: \(sources.count) of \(asked.count)")
         if sources.count < asked.count { update { $0.addNotice(.linkNotRead) } }
-        return sources
+        return (sources, asked.count)
     }
 
     /// Reads the pages behind the highest-ranked search results, when page reading is on.
@@ -911,6 +932,13 @@ final class ResearchRunner: ResearchRunning {
                            budget: Int,
                            alreadyRead: Int) async -> [Source] {
         guard settings.pageReading != .off, !sources.isEmpty, budget > 0 else { return sources }
+        // Decided before the reader is built, not after. A turn whose links filled the
+        // budget — or a link-only turn, which an empty plan now produces — has nothing
+        // unread left, and the MCP reader's handshake is a real request: paying for one
+        // on a path that provably fetches nothing costs a round trip and invents a
+        // failure surface, since a handshake that fails would warn about reading this
+        // turn never intended to do.
+        guard sources.contains(where: { !$0.wasRead }) else { return sources }
 
         let reader: PageReading?
         do {
@@ -926,8 +954,8 @@ final class ResearchRunner: ResearchRunning {
 
         // Skipping what is already read is what stops a linked page being fetched twice:
         // the linked sources sit at the front of this list and arrive carrying their text.
+        // Non-empty by the guard above, which is why there is no second check here.
         let targets = Array(sources.filter { !$0.wasRead }.prefix(budget))
-        guard !targets.isEmpty else { return sources }
         update { $0.pagesAttempted += targets.count }
         // Not `trace.stage`, which is for throwing work: reading never throws, because
         // a page that cannot be read is a source that keeps its snippet.

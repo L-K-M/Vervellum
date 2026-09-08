@@ -63,8 +63,13 @@ final class ResearchRunnerTests: XCTestCase {
 
     private static func stage(of call: StubTransport.Call) -> Stage? {
         guard let prompt = call.systemPrompt else { return nil }
-        if prompt.contains("TASK: plan the web searches") { return .plan }
+        // The deep round is tested first even though the two phrases do not currently
+        // overlap: they are two spellings of the same job, and a later round's prompt
+        // that borrowed a clause from the first would be classified as round one and fed
+        // round one's reply — which surfaces as a wrong search count several assertions
+        // away from the cause.
         if prompt.contains("TASK: this is round") { return .deepPlan }
+        if prompt.contains("TASK: plan the web searches") { return .plan }
         if prompt.contains("TASK: answer the user's question using the numbered evidence") {
             return .answer
         }
@@ -230,6 +235,47 @@ final class ResearchRunnerTests: XCTestCase {
                        "the duplicate must be dropped, not numbered twice")
         // Contiguous from one: a gap in the numbering is an invitation to cite the
         // number that is missing.
+        XCTAssertEqual(turn.sources.map(\.number), [1, 2])
+        // And the page is read once, not twice. Numbering it once while fetching it
+        // again would pass every assertion above while spending a second request and
+        // letting source 1's text disagree with the copy the second read returned.
+        XCTAssertEqual(transport.calls.filter {
+            $0.kind == .fetch && $0.url.absoluteString == "https://linked.example/paper"
+        }.count, 1, "the linked page is reused, not re-fetched as a search hit")
+    }
+
+    /// The dedupe compares pages, not strings. A browser hands over the fragment it was
+    /// scrolled to; the search engine returns the canonical address. Byte equality calls
+    /// those two sources and shows the model one document twice.
+    func testASearchHitUnderAVariantAddressIsNotNumberedTwice() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "https://www.linked.example/paper/",
+                                            title: "The paper"),
+                                           (url: "https://other.example/review",
+                                            title: "A review")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan: return .completion(json: Self.plan("the paper"))
+                case .assess: return .completion(json: Self.assessment)
+                default: return .unrouted
+                }
+            case .stream:
+                return .stream(["It holds up [1]."])
+            }
+        }
+
+        let turn = await run("What about https://linked.example/paper#results ?",
+                             transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.sources.map(\.url),
+                       ["https://linked.example/paper#results",
+                        "https://other.example/review"],
+                       "a fragment, a www. and a trailing slash are not a second page")
         XCTAssertEqual(turn.sources.map(\.number), [1, 2])
     }
 

@@ -20,6 +20,16 @@ import AppKit
 /// capture the engine (a reference that outlives the render) and this row's turn id
 /// (which never changes for the life of the row), so a skipped update cannot leave a
 /// stale one behind.
+///
+/// That is an **invariant, not an observation**, and the next callback added here has to
+/// keep it: a skipped update means the row keeps the closures from the last render that
+/// was not skipped, so they may only read storage that stays live — a reference type, or
+/// a `@State`/`@Binding` whose value lives in a box the view graph owns and which
+/// therefore reads through to the current value. A closure that captured a *value*
+/// snapshot instead — a draft string, an id read off the thread at construction — would
+/// go stale silently, with no crash and no failing assertion, which is the worst way for
+/// a performance change to be wrong. Anything a callback must see freshly belongs on
+/// `ResearchTurn`, which `==` does compare.
 struct TurnView: View, Equatable {
 
     static func == (lhs: TurnView, rhs: TurnView) -> Bool {

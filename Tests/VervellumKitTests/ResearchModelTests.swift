@@ -158,6 +158,18 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertEqual(turn.runningProgressLabel, "Reading 1 page")
     }
 
+    /// The turn this feature created: a question answered by its own links, whose plan
+    /// asked for no searches at all. There is no search progress to report and pages
+    /// were read, so the label has to be about the reading for the whole run — and never
+    /// "Searching the web · 0 of 0", which is a count of nothing presented as progress.
+    func testALinkOnlyTurnReportsItsReadingRatherThanASearchCountOfNothing() {
+        var turn = ResearchTurn(question: "Summarise https://example.com/a")
+        turn.stage = .searching
+        turn.searches = []
+        turn.pagesAttempted = 3
+        XCTAssertEqual(turn.runningProgressLabel, "Reading 3 pages")
+    }
+
     func testRunningProgressFallsBackToTheStageLabel() {
         var turn = ResearchTurn(question: "Q")
         turn.stage = .planning

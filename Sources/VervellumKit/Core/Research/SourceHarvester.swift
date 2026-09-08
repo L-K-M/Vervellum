@@ -86,9 +86,11 @@ enum SourceHarvester {
 
     /// The links the user pasted into a question, in the order they were typed.
     ///
-    /// Deduplicated, because the same address typed twice is one page — and reading it
-    /// twice would spend two requests to put the same text in the evidence under two
-    /// numbers, which is an invitation to cite it as if two sources agreed.
+    /// Deduplicated by `canonicalKey`, because the same address typed twice is one page
+    /// — and reading it twice would spend two requests to put the same text in the
+    /// evidence under two numbers, which is an invitation to cite it as if two sources
+    /// agreed. The *first* spelling of a page is the one kept, because it is the one the
+    /// user wrote.
     ///
     /// `limit` is applied last, so it counts *pages* rather than occurrences: a question
     /// that repeats one link and then adds a second still gets both.
@@ -97,12 +99,22 @@ enum SourceHarvester {
     /// sentence — "see https://example.com/a." is a link and a full stop, not a path
     /// ending in a dot. That is the opposite of what a search hit's `url` field wants,
     /// and it is why `normalized` takes the choice as a parameter.
+    ///
+    /// **Known limitation.** A closing parenthesis is not part of a match at all —
+    /// `bareURLs`'s pattern excludes it — so a pasted `/wiki/Mercury_(planet)` is cut to
+    /// `/wiki/Mercury_(planet` and fetched as an address that does not exist. That
+    /// exclusion is deliberate and load-bearing elsewhere: `CitationValidator` uses the
+    /// same walk, and a model writing "(see https://example.com/a)" must not have the
+    /// paren swallowed into the URL it is being flagged for. Balancing parentheses for a
+    /// question's links only — where the string is prose the user typed rather than one
+    /// the model produced — would fix it without touching that rule, and is the shape of
+    /// the fix if this is worth doing.
     static func links(inQuestion question: String, limit: Int) -> [String] {
         guard limit > 0 else { return [] }
         var seen: Set<String> = []
         var ordered: [String] = []
-        for url in bareURLs(in: question) where !seen.contains(url) {
-            seen.insert(url)
+        for url in bareURLs(in: question) {
+            guard seen.insert(canonicalKey(for: url)).inserted else { continue }
             ordered.append(url)
         }
         return Array(ordered.prefix(limit))
@@ -110,9 +122,66 @@ enum SourceHarvester {
 
     /// How many distinct links the question carries, so a caller that reads only the
     /// first few can say that the rest were left rather than silently dropping them.
+    ///
+    /// Counted the same way `links` deduplicates — distinct *pages*, not occurrences —
+    /// because the two numbers are compared against each other to decide whether
+    /// anything was left behind. Two counts of different things would report a link
+    /// dropped every time a question mentioned one page twice.
     static func linkCount(inQuestion question: String) -> Int {
-        Set(bareURLs(in: question)).count
+        Set(bareURLs(in: question).map { canonicalKey(for: $0) }).count
     }
+
+    /// The key two addresses are compared by when deciding whether they are one page.
+    ///
+    /// Exact string equality is the wrong test for that, and it is the test the first
+    /// version of this used. A URL pasted out of a browser routinely carries what the
+    /// address bar added — a `#section`, Chrome's `#:~:text=` scroll-to-text fragment, a
+    /// trailing slash, a `utm_` tag recording how the reader arrived — and a search
+    /// engine returns the canonical form with none of it. Compared byte for byte those
+    /// are two sources, and the model is then shown one page twice under two numbers.
+    ///
+    /// Deliberately conservative: only differences that **cannot change which document
+    /// the server sends** are folded away.
+    ///
+    /// * The scheme and host are lowercased and a leading `www.` dropped. Case is not
+    ///   significant in either, and `www.` is a redirect on all but a vanishing few hosts.
+    /// * The fragment is dropped. It selects a position *within* a document the server
+    ///   has already sent, and is never transmitted to the server at all.
+    /// * One trailing slash is dropped from the path.
+    /// * Attribution parameters are dropped. They record how a reader arrived, never
+    ///   which document is served.
+    ///
+    /// The path keeps its case and every other query item is kept, because either can
+    /// select a different document — and collapsing two real pages into one loses
+    /// evidence, which is the worse mistake of the two.
+    ///
+    /// Only ever a comparison key. What is fetched, numbered, cited and shown to the
+    /// reader stays the address exactly as it was given.
+    static func canonicalKey(for url: String) -> String {
+        guard var components = URLComponents(string: url) else { return url }
+        components.fragment = nil
+        components.scheme = components.scheme?.lowercased()
+        if let host = components.host?.lowercased() {
+            components.host = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        }
+        var path = components.path
+        if path.hasSuffix("/") { path.removeLast() }
+        components.path = path
+        if let items = components.queryItems {
+            let kept = items.filter { !attributionParameters.contains($0.name.lowercased()) }
+            // Emptied rather than left empty: an empty `queryItems` array still renders
+            // a trailing "?", so a URL whose only parameter was a tracking tag would not
+            // match the same URL without one — the case this exists for.
+            components.queryItems = kept.isEmpty ? nil : kept
+        }
+        return components.url?.absoluteString ?? url
+    }
+
+    /// Query items that say how a reader arrived, never what they arrived at.
+    private static let attributionParameters: Set<String> = [
+        "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+        "fbclid", "gclid", "msclkid", "mc_cid", "mc_eid", "ref_src",
+    ]
 
     /// Rejects anything that isn't an absolute http(s) URL with a host and, for a URL
     /// lifted out of prose, trims the punctuation it picked up at the end of a sentence.

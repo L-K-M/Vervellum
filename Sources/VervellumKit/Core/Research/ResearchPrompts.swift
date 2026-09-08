@@ -124,7 +124,15 @@ enum ResearchPrompts {
         // Folded into the existing sentence rather than added after it: the escape is
         // one list of cases, and a second sentence naming a fifth would read as a
         // different rule.
-        let linkedSettle = hasLinkedPages ? ", or a question the linked pages settle on their own" : ""
+        //
+        // The whole tail rather than just the new item, because a list carries exactly
+        // one "or" and it belongs before the last entry. Appending ", or …" to a list
+        // that already ended in "or …" produced two of them, which reads as two separate
+        // decisions rather than one list of five.
+        let escapes = hasLinkedPages
+            ? "a request to transform text the user supplied, or a question the linked "
+                + "pages settle on their own"
+            : "or a request to transform text the user supplied"
         return """
         \(trust)
 
@@ -156,9 +164,8 @@ enum ResearchPrompts {
         - "purpose": a short phrase naming what that search is meant to settle.
 
         If the question genuinely needs no external evidence — a definition, a \
-        calculation, a matter of pure preference, or a request to transform text the \
-        user supplied\(linkedSettle) — return an empty "searches" array and say why \
-        in "reading".
+        calculation, a matter of pure preference, \(escapes) — return an empty \
+        "searches" array and say why in "reading".
         \(jsonOnly)
         """
     }
