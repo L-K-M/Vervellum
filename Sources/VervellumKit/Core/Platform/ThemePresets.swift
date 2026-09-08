@@ -10,10 +10,14 @@ import Foundation
 ///
 /// Two things every preset must keep, however loud it is:
 ///
-/// * **Five distinguishable verdict colours.** They are paired with symbols and written
+/// * **Five verdict colours, no two identical.** They are paired with symbols and written
 ///   labels everywhere they appear, so colour is never the only carrier — but a preset
 ///   that made two verdicts the same colour would still be throwing away information the
-///   reader is entitled to.
+///   reader is entitled to. Identity, not perceptual distance: Solarized's own red and
+///   orange sit close enough to be confusable, and spreading them apart would make it
+///   something other than Solarized. The symbol and the written label are what carry the
+///   verdict for a reader who cannot tell the two apart; this rule only stops a preset
+///   throwing away the colour channel entirely.
 /// * **A scrim.** The panel floats over the whole desktop. Glass with no scrim is
 ///   readable over a dark editor and unreadable over a bright photo, and a preset is not
 ///   a licence to ship the second one. It has to be real even on a preset that ships an
@@ -205,8 +209,10 @@ extension PanelPalette {
         cornerScale: 0.4,
         backdrop: .solid)
 
-    /// Every preset, in the order the picker shows them: the default first, then light
-    /// to dark, then the loud ones.
+    /// Every preset, in the order the picker shows them: the two that leave the surface
+    /// to the system (the default first), then the light opaque ones, then the dark ones,
+    /// then the loud ones. Written to match the array rather than the other way round —
+    /// it said "light to dark", which puts Bubblegum in the wrong half.
     static let presets: [PanelPalette] = [
         .ember, .graphite, .paper, .newsprint, .solarized,
         .midnight, .terminal, .vapor, .bubblegum, .highContrast,

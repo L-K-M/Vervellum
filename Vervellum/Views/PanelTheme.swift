@@ -150,7 +150,17 @@ enum PanelTheme {
         static var scrim: Color { Color(theme.scrim) }
 
         /// The panel's own surface, or nil to use the system material behind it.
-        static var surface: Color? { theme.surface.map { Color($0) } }
+        ///
+        /// An alpha near zero reads as absent. `PanelBackground` paints the surface *or*
+        /// the scrim, so without this floor a surface dragged to 0.01 paints nothing
+        /// while still cancelling the 0.16 scrim — the least legible arrangement the
+        /// theme pane can produce, reached by a slider on its way to a state (Automatic)
+        /// that is fine. The legibility floor has to be continuous across that drag, not
+        /// fall away at one end and reappear at the other.
+        static var surface: Color? {
+            guard let surface = theme.surface, surface.alpha > 0.05 else { return nil }
+            return Color(surface)
+        }
 
         static func verdict(_ verdict: Verdict) -> Color {
             switch verdict {

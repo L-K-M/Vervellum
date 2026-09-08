@@ -15,9 +15,10 @@ import Foundation
 /// user can neither see nor fix.
 ///
 /// Not thread-safe, and not meant to be: this is read and written from the UI thread on
-/// both platforms. Two properties below keep mutable state across calls — the provider
-/// memo and the warned-about theme text — and neither is synchronized, because a settings
-/// object touched from two threads would have worse problems than those two.
+/// both platforms. Three properties below keep mutable state across calls — the provider
+/// memo, the theme memo, and the warned-about theme text — and none is synchronized,
+/// because a settings object touched from two threads would have worse problems than
+/// those three.
 final class CorePreferences {
 
     /// Invoked after any change, so a platform can republish it — `objectWillChange` on
@@ -215,6 +216,12 @@ final class CorePreferences {
     var panelPalette: PanelPalette {
         get {
             guard let text = store.string(for: Key.panelPalette) else { return .ember }
+            // Memoised on the stored text, for the reason `cachedProviderSettings` is:
+            // the comment below already says the theme pane reads this for every control
+            // on it, on every keystroke of a colour well, and each of those reads was a
+            // full `JSONDecoder` pass over the same bytes. Keyed on the text rather than
+            // invalidated by hand, so a store written from anywhere still decodes once.
+            if let memo = paletteMemo, memo.text == text { return memo.palette }
             guard let decoded = PanelPalette.decode(text) else {
                 // Falling back is right; falling back in silence is not. "My theme keeps
                 // resetting itself" is unanswerable without knowing a stored value was
@@ -234,8 +241,10 @@ final class CorePreferences {
                         + "and the default was used. It began: \(text.prefix(100))\n"
                     FileHandle.standardError.write(Data(warning.utf8))
                 }
+                paletteMemo = (text, .ember)
                 return .ember
             }
+            paletteMemo = (text, decoded)
             return decoded
         }
         set {
@@ -253,6 +262,12 @@ final class CorePreferences {
                 return
             }
             store.setString(encoded, for: Key.panelPalette)
+            // Seeded with the value rather than left for the next read to decode. Sound
+            // only because encode and decode round trip exactly, which
+            // `testAThemeSurvivesBeingStoredAndReadBack` pins for every preset and for a
+            // palette that states every field — if that ever stops being true, that test
+            // fails before this memo can hand anybody the wrong theme.
+            paletteMemo = (encoded, newValue)
             // A good value clears the complaint, so a file that is corrupted *again*
             // later warns again. Recording it forever would have made the second
             // occurrence the silent one, which is the case the warning exists for.
@@ -264,6 +279,15 @@ final class CorePreferences {
     /// The stored theme text already complained about, so the warning above fires once
     /// per bad value rather than once per read.
     private var complainedAboutTheme: String?
+
+    /// The last decoded theme, with the text it came from.
+    ///
+    /// Two fields rather than one, because the text is what makes the memo safe: a stored
+    /// value written by anything at all is noticed by the comparison, so there is no
+    /// invalidation to remember. The corrupt path is memoised too — the warning is
+    /// already once-per-value, so a second read of the same bad text has nothing to say
+    /// and nothing to decode.
+    private var paletteMemo: (text: String, palette: PanelPalette)?
 
     var textScale: Double {
         get { Self.clamped(store.double(for: Key.textScale), Default.textScale, Self.textScaleRange) }

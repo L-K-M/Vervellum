@@ -253,7 +253,11 @@ struct PanelPalette: Codable, Equatable {
          fontDesign: ThemeFontDesign = .system,
          cornerScale: Double = 1,
          backdrop: ThemeBackdrop = .glass) {
-        self.name = name
+        // Trimmed here as well as in the decoder, so the two paths cannot disagree about
+        // what a name is. `name` round trips through `encode`, so a padded or blank one
+        // built in code persisted verbatim until a decode happened to tidy it up.
+        let named = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.name = named.isEmpty ? "Custom" : named
         self.accent = accent
         self.primaryText = primaryText
         self.secondaryText = secondaryText
@@ -320,11 +324,17 @@ struct PanelPalette: Codable, Equatable {
         insufficient = colour(.insufficient, fallback.insufficient)
         opinion = colour(.opinion, fallback.opinion)
         let design = (try? container.decodeIfPresent(String.self, forKey: .fontDesign)) ?? nil
-        fontDesign = design.flatMap { ThemeFontDesign(rawValue: $0) } ?? .system
+        // The preset's own, like every colour above, rather than the type's default. A
+        // document that omits these two restores Ember's colours; restoring somebody
+        // else's font and backdrop with them is the half-of-one-theme-half-of-another
+        // mixing the single-blob storage exists to prevent. Ember states neither today,
+        // so this changes nothing — which is the point at which to write it down, not
+        // the first time a preset ships a serif.
+        fontDesign = design.flatMap { ThemeFontDesign(rawValue: $0) } ?? fallback.fontDesign
         let corner = ((try? container.decodeIfPresent(Double.self, forKey: .cornerScale)) ?? nil) ?? 1
         cornerScale = Self.clampedCornerScale(corner)
         let back = (try? container.decodeIfPresent(String.self, forKey: .backdrop)) ?? nil
-        backdrop = back.flatMap { ThemeBackdrop(rawValue: $0) } ?? .glass
+        backdrop = back.flatMap { ThemeBackdrop(rawValue: $0) } ?? fallback.backdrop
     }
 
     // MARK: Persistence

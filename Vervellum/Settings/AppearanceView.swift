@@ -256,7 +256,12 @@ struct AppearanceView: View {
 
             if let current = stored.wrappedValue {
                 ColorPicker("", selection: Binding(
-                    get: { Color(current) },
+                    // Live on the way out as well as on the way in. The `set` below reads
+                    // the binding for the same reason: a drag lands several events before
+                    // SwiftUI re-renders, and `current` is the value this body was built
+                    // with, so a read in that window answered with the pre-drag colour and
+                    // the well flicked back to it.
+                    get: { stored.wrappedValue.map { Color($0) } ?? Color(current) },
                     // The live value on the failure path, not the `current` this body was
                     // built with. A drag can land two sets before SwiftUI re-renders, so
                     // a conversion that fails on the second would have written the colour
@@ -282,10 +287,39 @@ struct AppearanceView: View {
     @State private var setAside: [WritableKeyPath<PanelPalette, ThemeColor?>: ThemeColor] = [:]
 
     /// Where an optional colour starts when it is switched on and nothing was set aside.
+    ///
+    /// Resolved from the semantic colour the token falls back to while the slot is
+    /// Automatic, rather than written out as constants. The constants were the dark
+    /// answers to all three — so ticking Text on in Light Mode pinned near-white text to
+    /// a light panel, which is exactly the recovery-not-adjustment the toggle above
+    /// promises not to hand anybody. `Color.primary` and `Color.secondary` are what
+    /// `PanelTheme.Palette` uses for a nil text colour, and the window background is what
+    /// shows through a nil surface, so these are the panel's current appearance rather
+    /// than a second opinion about it.
     private func fallback(for keyPath: WritableKeyPath<PanelPalette, ThemeColor?>) -> ThemeColor {
-        if keyPath == \PanelPalette.surface { return ThemeColor(0.10, 0.10, 0.12) }
-        if keyPath == \PanelPalette.secondaryText { return ThemeColor(0.55, 0.55, 0.58) }
-        return ThemeColor(0.90, 0.90, 0.92)
+        if keyPath == \PanelPalette.surface { return Self.resolved(.windowBackgroundColor) }
+        if keyPath == \PanelPalette.secondaryText { return Self.resolved(.secondaryLabelColor) }
+        return Self.resolved(.labelColor)
+    }
+
+    /// `colour` as sRGB components, resolved against the appearance the app is drawing in.
+    ///
+    /// A semantic `NSColor` has no components until an appearance is named — reading them
+    /// off one outside a drawing context answers for whichever appearance happened to be
+    /// current, which in a settings window is not reliably the one on screen.
+    private static func resolved(_ colour: NSColor) -> ThemeColor {
+        // Mid grey only if the conversion fails, which it does not for these three: it is
+        // a value that is obviously neither text nor a surface, rather than a black that
+        // would look deliberate.
+        var components = ThemeColor(0.5, 0.5, 0.5)
+        NSApplication.shared.effectiveAppearance.performAsCurrentDrawingAppearance {
+            guard let srgb = colour.usingColorSpace(.sRGB) else { return }
+            components = ThemeColor(Double(srgb.redComponent),
+                                    Double(srgb.greenComponent),
+                                    Double(srgb.blueComponent),
+                                    Double(srgb.alphaComponent))
+        }
+        return components
     }
 }
 

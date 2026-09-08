@@ -58,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Before the controller, not after: the panel's content reads the palette, so
         // assigning it later would leave the default theme one frame wide.
-        PanelTheme.palette = preferences.panelPalette
+        applyPanelPalette()
 
         // Every setting the panel reads is applied to the open panel as it changes,
         // rather than at the next summon. Width and edge used to be sampled once per
@@ -76,8 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // come first.
         preferences.onChanged = { [weak self] in
             guard let self else { return }
-            PanelTheme.palette = self.preferences.panelPalette
-            self.panelController?.preferencesDidChange()
+            self.applyPanelPalette()
         }
 
         let panelController = makePanelController()
@@ -119,6 +118,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: Panel
+
+    /// The one place "the palette changed" is acted on: the global every token reads,
+    /// then the live panel re-applying what it samples per show.
+    ///
+    /// One function because the pairing is the invariant. `PanelTheme.palette` is a
+    /// stored value rather than an environment key — `CitationText` builds an
+    /// `AttributedString` outside any view body and has to reach it — so nothing in
+    /// SwiftUI invalidates on a write to it, and a writer that skipped the refresh below
+    /// would leave the panel painting the previous theme with no compile error and no
+    /// failing test. There were two call sites keeping each other in step by hand; now
+    /// there is one, and a third writer has somewhere to go.
+    private func applyPanelPalette() {
+        PanelTheme.palette = preferences.panelPalette
+        panelController?.preferencesDidChange()
+    }
 
     private func makePanelController() -> PanelController {
         let controller = PanelController(preferences: preferences) { [weak self] in
