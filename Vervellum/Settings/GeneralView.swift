@@ -121,10 +121,12 @@ struct GeneralView: View {
                 if preferences.historyEnabled {
                     Picker("Keep at most", selection: Binding(
                         get: { preferences.keptThreads },
-                        set: { limit in
-                            preferences.keptThreads = limit
-                            store.keptThreads = limit
-                        })) {
+                        // Only the preference is written. `AppDelegate` forwards every
+                        // preference change to the live store, so assigning both here
+                        // would be a second path to keep in step by hand — and the one
+                        // that goes stale is the one that makes this control show a
+                        // limit the archive is not applying.
+                        set: { limit in preferences.keptThreads = limit })) {
                         // The stored value is clamped, not snapped to this list, so a
                         // settings file holding 7 reads back as 10 — which has no row
                         // here, and a Picker whose selection matches no option renders

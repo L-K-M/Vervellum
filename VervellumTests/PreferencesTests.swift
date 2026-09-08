@@ -128,4 +128,38 @@ final class PreferencesTests: XCTestCase {
         preferences.panelWidth = 512
         XCTAssertEqual(widthWhenAnnounced, 512)
     }
+
+    /// The retention picker's rows and the range the archive clamps into are separate
+    /// constants, and the picker's own doc comment claims they agree. A row outside the
+    /// range would be stored as something else the moment it was chosen, so the control
+    /// would show one number while the archive applied another.
+    func testEveryOfferedThreadLimitIsInsideTheRangeTheArchiveAccepts() {
+        XCTAssertFalse(GeneralView.threadLimits.isEmpty)
+        for limit in GeneralView.threadLimits {
+            XCTAssertTrue(ThreadLibrary.keptThreadsRange.contains(limit),
+                          "\(limit) is offered but would be clamped to something else")
+        }
+    }
+
+    /// The settings pane writes only the preference and relies on the composition root
+    /// to forward it. What this pins is the half that can break silently: that the write
+    /// fires `onChanged` *after* the new value is readable, so a forwarder reading
+    /// `preferences.keptThreads` from inside the callback sees 25 rather than the old
+    /// limit. The forwarder here stands in for `AppDelegate`'s.
+    func testChangingTheLimitPreferenceReachesTheStore() {
+        let preferences = Preferences(defaults: defaults)
+        let store = ThreadStore(fileURL: temporaryThreadsURL(), historyEnabled: true,
+                                keptThreads: preferences.keptThreads, debounce: 0)
+        preferences.onChanged = { [weak preferences] in
+            guard let preferences else { return }
+            store.keptThreads = preferences.keptThreads
+        }
+        preferences.keptThreads = 25
+        XCTAssertEqual(store.keptThreads, 25)
+    }
+
+    private func temporaryThreadsURL() -> URL {
+        URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("VervellumPrefsTest-\(UUID().uuidString).json")
+    }
 }

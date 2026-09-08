@@ -46,6 +46,12 @@ final class LinuxEnvironment {
             // Read once at construction for the same reason, and hand-edited in
             // `settings.json` on this platform — so a lowered limit has to reach the
             // archive without a relaunch.
+            // Deliberately unlike the load-time trim, which is memory-only so a hand
+            // edit stays recoverable: this prunes and writes at once, so lowering the
+            // limit here is final. That is the right trade for a setting the reader just
+            // changed — one that did nothing until relaunch would be worse — but the two
+            // paths answer the same question differently, so neither should be "fixed"
+            // into the other.
             if threadArchive.keptThreads != corePreferences.keptThreads {
                 threadArchive.keptThreads = corePreferences.keptThreads
             }
