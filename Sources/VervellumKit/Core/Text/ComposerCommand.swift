@@ -115,7 +115,13 @@ enum ComposerCommand: Equatable {
         case (false, nil): return 0
         case (true, nil): return last
         case (false, let index?): return min(index + 1, last)
-        case (true, let index?): return index == 0 ? nil : index - 1
+        case (true, let index?):
+            // Clamped first, like the down path. An index left over from a longer list
+            // must step up from the last row that exists, not from where it used to be:
+            // returning 8 for a two-row list highlights nothing, and the view's own
+            // `indices.contains` guard then falls through to submitting the draft.
+            let clamped = min(index, last)
+            return clamped == 0 ? nil : clamped - 1
         }
     }
 

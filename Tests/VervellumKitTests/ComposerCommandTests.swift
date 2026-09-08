@@ -159,7 +159,18 @@ final class ComposerCommandTests: XCTestCase {
     /// edit — but the arithmetic must not trust that and index past the end.
     func testAnIndexBeyondAShrunkListIsClamped() {
         XCTAssertEqual(ComposerCommand.moveSelection(9, up: false, count: 2), 1)
-        XCTAssertEqual(ComposerCommand.moveSelection(9, up: true, count: 2), 8)
+        XCTAssertEqual(ComposerCommand.moveSelection(9, up: true, count: 2), 0,
+                       "clamped to the last row, then stepped up from there")
+    }
+
+    /// The arrow keys hand themselves to the command list whenever one is on screen, so
+    /// the list disappearing the moment an argument is being typed is what stops ↑/↓ from
+    /// hijacking `/model gpt-4o` and Return from replacing it with `/model `.
+    func testTheListDisappearsOnceAnArgumentIsBeingTyped() {
+        XCTAssertNotNil(ComposerCommand.completions(for: "/model"))
+        XCTAssertNil(ComposerCommand.completions(for: "/model "))
+        XCTAssertNil(ComposerCommand.completions(for: "/model gpt-4o"))
+        XCTAssertNil(ComposerCommand.completions(for: "/direct what is the time"))
     }
 
     /// Typing a slash and nothing else offers everything, which is the list the arrow

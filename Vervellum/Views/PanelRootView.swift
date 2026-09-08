@@ -464,6 +464,10 @@ struct PanelRootView: View {
                         .background(index == selected
                             ? PanelTheme.Palette.accent.opacity(0.18)
                             : Color.clear)
+                        // The highlight was colour only, so VoiceOver had no way to say
+                        // which command Return would take — the whole point of the list
+                        // being keyboard-navigable.
+                        .accessibilityAddTraits(index == selected ? .isSelected : [])
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -634,9 +638,6 @@ struct PanelRootView: View {
         engine.replaceThread(with: thread)
     }
 
-    /// ↑/↓ walk back through this thread's earlier questions, the way a shell does.
-    /// Only acts on an empty or recalled draft, so it never eats an arrow press in
-    /// the middle of editing a long question.
     /// The command list currently on screen, if any.
     private var visibleCompletions: [ComposerCommand.Entry]? {
         ComposerCommand.completions(for: draft)
@@ -679,6 +680,9 @@ struct PanelRootView: View {
         return true
     }
 
+    /// ↑/↓ walk back through this thread's earlier questions, the way a shell does.
+    /// Only acts on an empty or recalled draft, so it never eats an arrow press in
+    /// the middle of editing a long question.
     private func recall(_ up: Bool) -> Bool {
         let questions = engine.thread.turns.map(\.question).reversed().map { $0 }
         guard !questions.isEmpty else { return false }
