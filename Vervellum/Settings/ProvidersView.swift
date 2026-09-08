@@ -288,6 +288,12 @@ struct ProvidersView: View {
         // stale, and a picker still offering the old host's models would be worse than
         // offering none.
         .onChange(of: profile.wrappedValue.endpoint) { _, _ in
+            // Retired, not just ignored. `stillCurrent` already refuses to let the result
+            // land, so this is about the request rather than the outcome: there is no
+            // reason to keep asking an address the reader has moved off, with a key they
+            // may have moved off too. Deleting a provider and reopening Settings both
+            // cancel; these two were the ones that did not.
+            modelFetches.removeValue(forKey: id)?.cancel()
             catalogues[id] = nil
         }
         // It belongs to the key just as much. Multi-tenant gateways filter `/models` by
@@ -296,6 +302,7 @@ struct ProvidersView: View {
         // discards a list that was in fact fetched with the key now stored — a click to
         // rebuild, and the same price this view already pays on every open.
         .onChange(of: keyEntries[id] ?? "") { _, _ in
+            modelFetches.removeValue(forKey: id)?.cancel()
             catalogues[id] = nil
         }
     }

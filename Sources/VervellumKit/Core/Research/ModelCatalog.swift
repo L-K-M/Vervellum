@@ -42,13 +42,19 @@ enum ModelCatalog {
             guard seen.insert(name).inserted else { continue }
             names.append(name)
         }
+        // Not the *localized* compare: it consults the user's locale, so the same reply
+        // could sort differently on two machines — which is the opposite of what the
+        // paragraph above promises. Model identifiers are ASCII; there is nothing here
+        // for a collation to be clever about, and a Turkish dotless i deciding the order
+        // of a model list would be a bug nobody could reproduce.
+        //
         // A total order, not just a case-insensitive one. Dedup above is exact, so
         // `GPT-4o` and `gpt-4o` can both survive — and they compare as the same under a
         // case-insensitive comparison, which leaves their order to whatever the sort
         // happened to do. The tie-break makes the list depend on the names alone, which
         // is the whole claim of the paragraph above.
         return names.sorted {
-            let order = $0.localizedCaseInsensitiveCompare($1)
+            let order = $0.caseInsensitiveCompare($1)
             return order == .orderedAscending || (order == .orderedSame && $0 < $1)
         }
     }
@@ -92,7 +98,8 @@ final class ModelCatalogClient {
     ///   lists nothing is a failure rather than an empty list: silently showing an empty
     ///   picker looks like a bug, and the user needs to know to keep typing.
     func fetch() async throws -> [String] {
-        // The same header `ChatCompletionsClient` builds, deliberately: a key that lists
+        // `Accept: application/json` is not set here because `getRequest` sets it for
+        // every GET it builds. The same header `ChatCompletionsClient` builds, deliberately: a key that lists
         // models and a key that answers questions have to be presented the same way, or
         // a provider that accepts one refuses the other and the refusal reads as a bad
         // key. If chat ever learns a second scheme, this has to learn it too.
