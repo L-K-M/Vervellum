@@ -257,12 +257,14 @@ final class ResearchRunner: ResearchRunning {
         // the words.
         let chain = ModelChain(profiles: settings.modelChain, keys: environment.modelKeys,
                                trace: trace, transport: transport)
-        chain.onSwitch = { [weak self] profile in
-            self?.update { turn in
-                turn.model = profile.model
-                turn.addNotice(.modelFellBack)
-            }
-        }
+        // Nothing is hooked here. Both halves of what the reader is told — the name on
+        // the turn and the note explaining it — are settled after the stage that produced
+        // the words, because both are statements about the answer. A turn whose answer
+        // streamed from the selection can still fall through for the assessment, and a
+        // notice fired there would say "the next provider answered instead" over an
+        // answer the badge correctly credits to the selection. So the chain is asked who
+        // answered, at the one moment the question has a right answer, rather than
+        // announcing every provider it starts.
         let today = ResearchContext.todayString()
 
         trace.log("Turn started mode=\(mode == .direct ? "direct" : "research") history=\(history.count)")
@@ -445,6 +447,7 @@ final class ResearchRunner: ResearchRunning {
                 self?.update { $0.answer += chunk }
             }
         }
+        recordAnsweringModel(from: chain)
         update { $0.applyCitationValidation(sourceCount: sources.count) }
         try Task.checkCancellation()
 
@@ -547,6 +550,7 @@ final class ResearchRunner: ResearchRunning {
                 self?.update { $0.answer += chunk }
             }
         }
+        recordAnsweringModel(from: chain)
         // The same check the research path makes after its answer. A Stop pressed
         // mid-stream ends the stream rather than failing it, and without this the
         // fragment would be completed, persisted and sent as history to every later
@@ -555,5 +559,32 @@ final class ResearchRunner: ResearchRunning {
         // Citations are meaningless here, but a model that emitted a URL anyway is
         // exactly the failure the badge needs to warn about.
         update { $0.applyCitationValidation(sourceCount: 0) }
+    }
+
+    /// Records which provider produced the answer, on every turn.
+    ///
+    /// Called straight after the answering stage, before the assessment can move the
+    /// chain on. Until now this was written only when a fallback happened, so the badge
+    /// in `TurnView` appeared exactly when something had gone wrong and stayed blank the
+    /// rest of the time — which is close to the opposite of what a field documented as
+    /// "the model that produced the answer" is for.
+    private func recordAnsweringModel(from chain: ModelChain) {
+        guard let profile = chain.lastAnswered else {
+            // Unreachable: every caller sits directly after a `perform` that returned,
+            // and every return writes this. If it ever trips, the wiring is wrong in
+            // exactly the way this function exists to fix, and a blank badge is the only
+            // symptom — so fail where it can be found instead.
+            assertionFailure("The answer streamed but no provider was recorded for it.")
+            // And a line for the builds where that assertion is compiled out, which are
+            // the ones a reader would be running when they noticed the blank badge.
+            trace.warn("The answer finished with no provider recorded; the turn is unattributed.")
+            return
+        }
+        update { turn in
+            turn.model = profile.model
+            // The note goes with the name, and says what the name shows: the answer came
+            // from somewhere other than the selection.
+            if profile.id != chain.head?.id { turn.addNotice(.modelFellBack) }
+        }
     }
 }

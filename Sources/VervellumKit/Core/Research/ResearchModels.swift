@@ -282,6 +282,12 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     var duration: TimeInterval?
     /// The model that produced the answer, recorded because a thread can outlive a
     /// settings change and a verdict is only meaningful with the model attached.
+    ///
+    /// Settled when the answer stream ends, not while it runs: until a provider has
+    /// finished without throwing, which one produced the words is not yet a question
+    /// with a right answer. So on a turn that fell back this stays blank for the length
+    /// of the stream rather than naming the provider that is being tried. Blank and late
+    /// beats confident and wrong.
     var model: String = ""
 
     init(question: String, askedAt: Date = Date()) {
