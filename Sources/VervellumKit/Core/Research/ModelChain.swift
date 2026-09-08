@@ -120,8 +120,13 @@ final class ModelChain {
             attempted += 1
             do {
                 return try await body(client)
-            } catch let error as ResearchError
-                        where error.isWorthAnotherProvider && !Task.isCancelled {
+            } catch let error as ResearchError where error.isWorthAnotherProvider {
+                // A Stop that landed while this provider was failing is a Stop, not the
+                // failure it interrupted. It used to fall out of the `where` clause and
+                // propagate the provider's own error, so the two cancellation windows —
+                // this one and the guard at the top of the loop — answered differently
+                // for the same press.
+                guard !Task.isCancelled else { throw ResearchError.cancelled }
                 if firstError == nil { firstError = error }
                 trace.warn("\(label) failed on \(profile.displayName): \(error.message)")
                 index += 1

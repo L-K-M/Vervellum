@@ -248,6 +248,26 @@ final class ModelChainTests: XCTestCase {
                        "the provider that actually answered must be announced")
     }
 
+    /// A skip in the *middle* of the chain is a substitution too: alpha fails, the blank
+    /// spare is never contacted, and gamma answers. Only the head-skip case was pinned,
+    /// so an implementation that announced when it moved on — rather than when a
+    /// provider is actually used — would have said "beta" over gamma's words with every
+    /// existing test still green.
+    func testAnnouncesTheProviderThatAnswersWhenASpareIsSkippedMidChain() async throws {
+        let profiles = [profile("alpha"),
+                        ModelProfile.new(name: "blank", endpoint: "", model: ""),
+                        profile("gamma")]
+        let subject = chain(profiles)
+        var switched: [String] = []
+        subject.onSwitch = { switched.append($0.model) }
+        let result = try await subject.perform("Plan") { client in
+            if client.model == "alpha" { throw ResearchError.connectionFailed }
+            return client.model
+        }
+        XCTAssertEqual(result, "gamma")
+        XCTAssertEqual(switched, ["gamma"], "the provider that answered is the one named")
+    }
+
     /// A turn runs three stages through the same chain. The switch happened once, so it
     /// is announced once — three notices for one substitution would be noise.
     func testASwitchIsAnnouncedOncePerTurnNotOncePerStage() async throws {
@@ -332,6 +352,11 @@ final class ModelChainTests: XCTestCase {
             XCTFail("expected the chain to fail")
         } catch let error as ResearchError {
             XCTAssertEqual(error, ResearchError.connectionFailed)
+            // The prose, which is what the comment above is actually about. Equality
+            // alone would keep passing if `ResearchError` ever compared something
+            // narrower than its message.
+            XCTAssertFalse(error.message.contains("All 1"),
+                           "one provider's failure keeps its own wording: \(error.message)")
         } catch {
             XCTFail("expected a ResearchError, got \(error)")
         }
