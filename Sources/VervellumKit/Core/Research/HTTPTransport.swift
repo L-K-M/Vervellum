@@ -165,12 +165,19 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable
     /// every budget was the ten-minute `deadline` and reads as "did not finish within 0
     /// minutes" for anything shorter than one.
     static func tookTooLong(_ budget: TimeInterval) -> ResearchError {
-        // Rounded once, and the unit chosen from the rounded value. Two ways to get this
-        // subtly wrong, both of which it has been: the message hard-coded "minutes"
+        // Floored, and the unit chosen from the floored value. Three ways to get this
+        // subtly wrong, all of which it has been: the message hard-coded "minutes"
         // because the only budget was ten of them, so generalising the number alone
-        // turned "0 minutes" into "1 minutes"; and choosing the unit from the raw budget
-        // reported 59.6 seconds as "60 seconds" while 60 said "1 minute".
-        let seconds = Int(budget.rounded())
+        // turned "0 minutes" into "1 minutes"; choosing the unit from the raw budget
+        // reported 59.6 seconds as "60 seconds" while 60 said "1 minute"; and rounding
+        // to nearest then claimed a 59.6-second budget "did not finish within 1 minute",
+        // which is a sentence about a wait that never happened. This message is the
+        // reader's record of what the app did, so it may understate and never overstate.
+        //
+        // The floor at 1 is prose, not arithmetic: no caller passes a budget under a
+        // second, and "did not finish within 0 seconds" is the nonsense the first bug
+        // above produced.
+        let seconds = Swift.max(1, Int(budget.rounded(.down)))
         let spelled: String
         if seconds < 60 {
             spelled = seconds == 1 ? "1 second" : "\(seconds) seconds"

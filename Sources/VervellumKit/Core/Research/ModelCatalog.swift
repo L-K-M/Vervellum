@@ -96,9 +96,16 @@ final class ModelCatalogClient {
     /// Handed to `sendCheapJSON`, which sets both clocks from it. Two are needed and
     /// only one is a bound: `URLRequest.timeoutInterval` is an *idle* timeout that
     /// restarts on every byte, so a host trickling one byte every 29 seconds satisfies
-    /// it forever, and the wall clock is what makes the number above true. They were
-    /// two arguments at two call sites until a comment was the only thing keeping them
-    /// equal.
+    /// it forever, and the wall clock is what stops that. They were two arguments at two
+    /// call sites until a comment was the only thing keeping them equal.
+    ///
+    /// The number is a bound on each half rather than on the exchange: `sendJSON` starts
+    /// its wall clock after `open` returns, so connecting and receiving the headers is
+    /// covered by the idle timeout and only the body read is covered by the clock. The
+    /// honest worst case is about twice this, which is still the right order of magnitude
+    /// for somebody watching a spinner and nothing like the ten minutes it replaced.
+    /// Bounding the whole exchange means a deadline through `open`, which is every
+    /// caller's contract and not this one's to change.
     static let listTimeout: TimeInterval = 30
 
     init(url: URL, apiKey: String?, trace: ResearchTrace, transport: HTTPTransport = .shared) {
@@ -111,7 +118,10 @@ final class ModelCatalogClient {
     /// - Returns: the model identifiers the endpoint lists, sorted.
     /// - Throws: a `ResearchError` naming the likely fix. An endpoint that answers but
     ///   lists nothing is a failure rather than an empty list: silently showing an empty
-    ///   picker looks like a bug, and the user needs to know to keep typing.
+    ///   picker looks like a bug, and the user needs to know to keep typing. A 200 whose
+    ///   body is not JSON is the same failure wearing a different hat — a home page, a
+    ///   captive portal, a gateway's HTML error — and is translated here rather than
+    ///   reaching the reader as the transport's generic "could not read".
     func fetch() async throws -> [String] {
         // `Accept: application/json` is not set here because `getRequest` sets it for
         // every GET it builds. The same header `ChatCompletionsClient` builds, deliberately: a key that lists
@@ -120,9 +130,21 @@ final class ModelCatalogClient {
         // key. If chat ever learns a second scheme, this has to learn it too.
         var headers: [String: String] = [:]
         if let apiKey { headers["Authorization"] = "Bearer " + apiKey }
-        let (_, body) = try await trace.stage("List models") {
-            try await self.transport.sendCheapJSON(url: self.url, headers: headers,
-                                                   within: Self.listTimeout)
+        let body: [String: Any]
+        do {
+            body = try await trace.stage("List models") {
+                try await self.transport.sendCheapJSON(url: self.url, headers: headers,
+                                                       within: Self.listTimeout).body
+            }
+        } catch let error as ResearchError where error == .invalidResponse {
+            // The 200-with-HTML case, and the likeliest mistake this button exists to
+            // catch: this is the field where people paste a URL by hand, and a host that
+            // answers a GET with its home page is the ordinary shape of getting it
+            // slightly wrong. `invalidResponse` is true and says nothing to do about it,
+            // so it becomes the same sentence as the empty list — which is the honest
+            // reading either way, since both mean no names could be read from the reply.
+            throw ResearchError("The endpoint answered, but not with a list of models. "
+                                + "Check the address, or type the model name instead.")
         }
         let models = ModelCatalog.parse(body)
         // Only a 2xx reply reaches here: `sendJSON` calls `checkStatus` before it

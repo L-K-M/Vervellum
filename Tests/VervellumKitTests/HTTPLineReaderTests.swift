@@ -84,14 +84,21 @@ final class HTTPLineReaderTests: XCTestCase {
     /// The budget is re-read between chunks, not once on the way in. A host that trickles
     /// keeps every individual wait short, so a check hoisted out of the loop would bound
     /// nothing at all — and the `-1` test above cannot tell the difference, because a
-    /// budget spent before the first chunk fails either way. Two seconds of sleep against
-    /// a one-second budget, so CI scheduling cannot flip it.
+    /// budget spent before the first chunk fails either way.
+    ///
+    /// Five seconds of sleep against a one-second budget. The two clocks start in
+    /// different places — the sleep from when the stream is built, the budget from when
+    /// `readLines` is entered — so the headroom is the gap minus the budget, and at two
+    /// seconds that was one second of tolerance for a cooperative pool that has not got
+    /// round to this task yet. Four is not a proof either, but it is past what a loaded
+    /// CI runner does between two adjacent statements. The green path does not pay for
+    /// it: the read is expected to throw at one second and never waits for the chunk.
     func testABudgetThatRunsOutBetweenChunksStopsBeforeTheNextLine() async {
         var lines: [String] = []
         let trickle = AsyncThrowingStream<Data, Error> { continuation in
             continuation.yield(Data("first\n".utf8))
             Task {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
                 continuation.yield(Data("second\n".utf8))
                 continuation.finish()
             }
@@ -123,16 +130,29 @@ final class HTTPLineReaderTests: XCTestCase {
         XCTAssertEqual(HTTPTransport.deadline, 600, "the ten-minute default")
         let tenMinutes = HTTPTransport.tookTooLong(HTTPTransport.deadline).message
         XCTAssertTrue(tenMinutes.contains("10 minutes"), tenMinutes)
-        // Rounded once rather than per unit: choosing the unit from the raw budget made
-        // 59.6 seconds "60 seconds" while 60 said "1 minute".
+        // Floored rather than rounded to nearest, and the unit taken from the floored
+        // value. The message is the reader's record of what the app did, so it may
+        // understate the wait and never overstate it: 59.6 seconds reads as "59 seconds",
+        // and the "1 minute" that rounding produced describes a wait nobody had.
+        // Choosing the unit from the raw budget was the first version of the same bug and
+        // reported it as "60 seconds".
         let almostAMinute = HTTPTransport.tookTooLong(59.6).message
-        XCTAssertTrue(almostAMinute.contains("1 minute."), almostAMinute)
+        XCTAssertTrue(almostAMinute.contains("59 seconds"), almostAMinute)
+        XCTAssertFalse(almostAMinute.contains("minute"),
+                       "a 59.6-second budget must not be reported as a minute")
         // Both sides of the unit switch, and both singulars. No budget in the app is one
         // of either today, which is exactly why the wording would rot unnoticed.
         let oneMinute = HTTPTransport.tookTooLong(60).message
         XCTAssertTrue(oneMinute.contains("1 minute."), oneMinute)
         let oneSecond = HTTPTransport.tookTooLong(1).message
         XCTAssertTrue(oneSecond.contains("1 second."), oneSecond)
+        // The floor under the floor. No caller passes a budget below a second, and
+        // flooring one would otherwise write the "0 seconds" this helper exists to avoid
+        // — a negative budget, which the deadline tests do pass, read "-1 seconds".
+        for tiny in [0.4, 0.0, -1.0] {
+            XCTAssertTrue(HTTPTransport.tookTooLong(tiny).message.contains("1 second."),
+                          "\(tiny): \(HTTPTransport.tookTooLong(tiny).message)")
+        }
     }
 
     func testPropagatesHandlerErrors() async {

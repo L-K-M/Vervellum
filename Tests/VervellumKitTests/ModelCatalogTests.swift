@@ -192,6 +192,14 @@ final class ModelCatalogTests: XCTestCase {
             // it is appended beside rather than folded away.
             ("https://r.openai.azure.com/openai/deployments/gpt-4o/extra",
              "https://r.openai.azure.com/openai/deployments/gpt-4o/extra/models"),
+            // The fold does not require the chat suffix, and every other Azure row here
+            // pairs the deployment with one — so the bare deployment somebody copies out
+            // of the portal was the shape this table did not cover. It falls straight out
+            // of the current order (strip the suffix if present, then fold), which is
+            // exactly why it needs pinning: gating the fold on the suffix would change
+            // this input alone, with nothing failing.
+            ("https://r.openai.azure.com/openai/deployments/gpt-4o",
+             "https://r.openai.azure.com/openai/models"),
         ]
         for (paste, expected) in cases {
             XCTAssertEqual(ProviderSettings.modelListURL(from: paste)?.absoluteString,
