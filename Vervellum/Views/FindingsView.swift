@@ -10,6 +10,8 @@ import SwiftUI
 /// caveat behind a disclosure triangle is how a research tool becomes a chatbot.
 struct FindingsView: View {
 
+    @Environment(\.panelTextScale) private var textScale
+
     let findings: [Finding]
     let sources: [Source]
     var onSelectSource: (Source) -> Void
@@ -40,7 +42,7 @@ struct FindingsView: View {
             // The verdict rail. Colour is never the only channel: the glyph differs
             // per verdict and the accessibility label spells the verdict out.
             Image(systemName: finding.verdict.symbolName)
-                .font(.system(size: 11, weight: .medium))
+                .font(PanelTheme.Font.at(11, textScale, weight: .medium))
                 .foregroundStyle(PanelTheme.Palette.verdict(finding.verdict))
                 .frame(width: 14)
                 .padding(.top, 1)
@@ -49,7 +51,7 @@ struct FindingsView: View {
             VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
                 HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
                     Text(finding.verdict.label.uppercased())
-                        .font(PanelTheme.Font.label)
+                        .font(PanelTheme.Font.label(textScale))
                         .tracking(0.7)
                         .foregroundStyle(PanelTheme.Palette.verdict(finding.verdict))
                     ForEach(citedSources(finding)) { source in
@@ -57,12 +59,12 @@ struct FindingsView: View {
                     }
                 }
                 Text(finding.claim)
-                    .font(PanelTheme.Font.body(1.0))
+                    .font(PanelTheme.Font.body(textScale))
                     .foregroundStyle(PanelTheme.Palette.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 if !finding.reasoning.isEmpty {
                     Text(finding.reasoning)
-                        .font(PanelTheme.Font.caption)
+                        .font(PanelTheme.Font.caption(textScale))
                         .foregroundStyle(PanelTheme.Palette.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -92,13 +94,15 @@ struct FindingsView: View {
 
 /// A compact `[3]` chip that opens its source.
 struct CitationChip: View {
+    @Environment(\.panelTextScale) private var textScale
+
     let source: Source
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Text("[\(source.number)]")
-                .font(PanelTheme.Font.citation(1.0))
+                .font(PanelTheme.Font.citation(textScale))
                 .foregroundStyle(PanelTheme.Palette.accent)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
@@ -113,18 +117,20 @@ struct CitationChip: View {
 
 /// A small uppercase section heading with an optional right-aligned summary.
 struct SectionLabel: View {
+    @Environment(\.panelTextScale) private var textScale
+
     let text: String
     var trailing: String?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
             Text(text.uppercased())
-                .font(PanelTheme.Font.label)
+                .font(PanelTheme.Font.label(textScale))
                 .tracking(0.7)
                 .foregroundStyle(PanelTheme.Palette.tertiaryText)
             if let trailing {
                 Text(trailing)
-                    .font(.system(size: 10))
+                    .font(PanelTheme.Font.at(10, textScale))
                     .foregroundStyle(PanelTheme.Palette.tertiaryText)
                     .lineLimit(1)
             }

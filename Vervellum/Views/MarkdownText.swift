@@ -191,7 +191,7 @@ struct CodeBlock: View {
         VStack(alignment: .leading, spacing: 0) {
             if !language.isEmpty {
                 Text(language.uppercased())
-                    .font(PanelTheme.Font.label)
+                    .font(PanelTheme.Font.label(scale))
                     .tracking(0.6)
                     .foregroundStyle(PanelTheme.Palette.tertiaryText)
                     .padding(.horizontal, PanelTheme.Space.medium)

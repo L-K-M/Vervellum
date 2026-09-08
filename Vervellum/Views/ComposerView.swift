@@ -22,15 +22,47 @@ struct ComposerView: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String
     var submitOnReturn: Bool
+    /// The panel's text-size preference. Taken as a parameter rather than read from the
+    /// environment because `height(for:width:scale:)` is a static measurement the layout
+    /// calls before there is a view to read an environment from.
+    var scale: Double = 1.0
     var onSubmit: () -> Void
     /// Return true to consume the key. Used for history recall on ↑/↓.
     var onArrow: (Bool) -> Bool = { _ in false }
 
+    /// The composer's text size before the preference is applied.
+    static let baseFontSize: CGFloat = 13
+
     /// One line of padding plus one line of text; the field never starts taller.
-    static let minimumHeight: CGFloat = 30
+    ///
+    /// Both bounds scale with the text, *proportionally*: a fixed 30pt minimum clips the
+    /// first line at the largest setting, and a fixed maximum would show fewer and fewer
+    /// lines as the text grew. Scaling both by the same factor is what makes six lines
+    /// stay six lines.
+    static func minimumHeight(_ scale: Double) -> CGFloat { 30 * sane(scale) }
     /// Roughly six lines. Past that the thread above disappears, which is worse than
     /// scrolling inside the composer.
-    static let maximumHeight: CGFloat = 132
+    static func maximumHeight(_ scale: Double) -> CGFloat { 132 * sane(scale) }
+
+    /// A scale that can safely become a font size and a frame height.
+    ///
+    /// `CorePreferences` clamps the preference on read, so nothing odd should reach here.
+    /// It is clamped again anyway because this end is where it would hurt: a NaN scale
+    /// becomes a NaN frame height, which is layout warnings and a field nobody can see,
+    /// and a zero becomes a composer of no height that cannot be typed into or fixed.
+    /// Clamping on read as well as on write is the same rule every bounded value in
+    /// `CorePreferences` already follows, for the same reason — a settings file a crash
+    /// interrupted must not be able to produce an app the user cannot recover.
+    /// Only NaN is treated as "not a number". An infinity is *out of range*, not
+    /// garbage, so it saturates like any other out-of-range value — which is what makes
+    /// the clamp uniform: everything above the range lands on the ceiling, everything
+    /// below it on the floor, and only a value that is no number at all falls back to
+    /// unscaled. Guarding on `isFinite` instead sent infinity to 1.0 while 1000 went to
+    /// 3.0, so two scales that are both "far too large" produced different geometry.
+    private static func sane(_ scale: Double) -> Double {
+        guard !scale.isNaN else { return 1 }
+        return min(max(scale, 0.5), 3)
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -40,7 +72,7 @@ struct ComposerView: NSViewRepresentable {
         textView.coordinator = context.coordinator
         textView.isRichText = false
         textView.allowsUndo = true
-        textView.font = .systemFont(ofSize: 13)
+        textView.font = .systemFont(ofSize: Self.baseFontSize * Self.sane(scale))
         textView.textContainerInset = NSSize(width: 4, height: 6)
         textView.drawsBackground = false
         textView.isVerticallyResizable = true
@@ -71,6 +103,23 @@ struct ComposerView: NSViewRepresentable {
         // resets the insertion point, so doing it on every keystroke would make the
         // caret jump to the end mid-word.
         if textView.string != text { textView.string = text }
+        // Applied on every update, not only at construction: the text-size slider moves
+        // while the panel is open, and an NSTextView keeps whatever font it was given.
+        //
+        // The font is then applied to the storage explicitly as well. With
+        // `isRichText = false` the text view holds one font for everything and setting
+        // `font` should already reach it, but the panel measures the composer's height
+        // from the same scale in the same frame — so if it ever did not, the box and the
+        // glyphs inside it would disagree until the draft was retyped. This makes that
+        // impossible to get wrong rather than relying on the setter's reach.
+        let wanted = NSFont.systemFont(ofSize: Self.baseFontSize * Self.sane(scale))
+        if textView.font != wanted {
+            textView.font = wanted
+            let whole = NSRange(location: 0, length: (textView.string as NSString).length)
+            if whole.length > 0 {
+                textView.textStorage?.addAttribute(.font, value: wanted, range: whole)
+            }
+        }
         // Never made read-only, not even while a turn is running. The moment a
         // clarification or a follow-up occurs to you is *while* the answer is arriving,
         // and a field that refuses the keystroke loses the thought. What a submitted
@@ -81,9 +130,9 @@ struct ComposerView: NSViewRepresentable {
     }
 
     /// The height the composer wants for its current content, clamped.
-    static func height(for text: String, width: CGFloat) -> CGFloat {
+    static func height(for text: String, width: CGFloat, scale: Double = 1.0) -> CGFloat {
         let storage = NSTextStorage(string: text.isEmpty ? " " : text,
-                                    attributes: [.font: NSFont.systemFont(ofSize: 13)])
+                                    attributes: [.font: NSFont.systemFont(ofSize: baseFontSize * sane(scale))])
         let container = NSTextContainer(size: NSSize(width: max(width - 8, 1),
                                                     height: .greatestFiniteMagnitude))
         container.lineFragmentPadding = 5
@@ -92,7 +141,7 @@ struct ComposerView: NSViewRepresentable {
         storage.addLayoutManager(layout)
         layout.ensureLayout(for: container)
         let used = layout.usedRect(for: container).height + 12
-        return min(max(used, minimumHeight), maximumHeight)
+        return min(max(used, minimumHeight(scale)), maximumHeight(scale))
     }
 
     // MARK: Coordinator
@@ -173,7 +222,7 @@ private final class ComposerTextView: NSTextView {
         super.draw(dirtyRect)
         guard string.isEmpty, let placeholder = coordinator?.parent.placeholder else { return }
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font ?? NSFont.systemFont(ofSize: 13),
+            .font: font ?? NSFont.systemFont(ofSize: ComposerView.baseFontSize),
             .foregroundColor: NSColor.tertiaryLabelColor,
         ]
         let origin = NSPoint(x: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 5),

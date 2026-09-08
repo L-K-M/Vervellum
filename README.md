@@ -44,8 +44,18 @@ runs the searches and answers based on current sources.
   over another app's full-screen window without switching Spaces.
 - **Threaded.** Follow-up questions carry the thread's context, including which
   earlier claims were left unsettled. Threads are searchable, and it's up to you
-  whether they're kept at all. Active turns are checkpointed; interrupted work
-  reopens as incomplete, with its partial answer retained.
+  whether they're kept at all, and how many are kept — older ones past the limit are
+  deleted. Lowering the limit **in the app** takes effect at once rather than at the
+  next question: on screen immediately, and on disk with the save that follows. Raising
+  it again does not undo that — nothing restores a thread the list has dropped; it is
+  re-read from a file that still has it. Lowering it **behind the app's back** — a hand
+  edit, a sync tool, or upgrading from a build that had no setting — is the recoverable
+  one: it trims in memory at the next launch and leaves the file alone, so raising the
+  limit and relaunching brings the threads back. Be aware how small "until something is
+  saved" is, though: asking one question writes the trimmed list, and that is what makes
+  it permanent. The write rotates the previous file to `threads.json.bak` first, so
+  there is one more chance after that and no more. Active turns are checkpointed;
+  interrupted work reopens as incomplete, with its partial answer retained.
 - **Keyboard-first.** `Return` asks, `Esc` clears then closes, `↑`/`↓` walk back
   through earlier questions, `/` opens commands. Everything in the header is also a
   command.
@@ -69,7 +79,9 @@ runs the searches and answers based on current sources.
 - **As many models as you want, chosen per question.** Configure several providers —
   a local server, a fast hosted model, a careful one — each with its own endpoint and
   its own key. Pick the one that answers next from the panel or with `/model`; every
-  turn records the model that produced it.
+  turn records the model that produced it. The refresh button beside a model field asks
+  the endpoint which models it serves, so the name is chosen from a list rather than
+  typed from memory — and the field stays typeable for a gateway that lists nothing.
 - **A failing provider hands the question on.** If the selected model doesn't respond,
   rejects its key, or errors, the next provider you configured is tried, then the one
   after it — so a rate limit somewhere else does not cost you the question. It is never
@@ -85,6 +97,11 @@ runs the searches and answers based on current sources.
   server](https://docs.z.ai/devpack/mcp/reader-mcp-server), or any MCP server with a
   compatible tool) fetches them instead, so the sites see the service and the service
   sees the URLs. Settings ▸ Providers ▸ Reading the page.
+- **Make it look like yours.** Ten themes — Ember, Paper, Midnight, Terminal, Solarized,
+  Vapor, Bubblegum and more — and then every colour, the typeface, the corner roundness
+  and the backdrop are yours to change, live, while the panel is open. A preset is a
+  starting point, not a mode. Verdicts keep their symbols and their written labels
+  whatever you do to their colours, so the worst you can make it is ugly.
 - **Native.** SwiftUI and AppKit, Liquid Glass on macOS 26, no dependencies.
 
 ## Getting started

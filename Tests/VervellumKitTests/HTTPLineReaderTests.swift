@@ -55,6 +55,106 @@ final class HTTPLineReaderTests: XCTestCase {
         XCTAssertEqual(lines, ["first"])
     }
 
+    /// The wall clock is the caller's budget now, not the transport's ten-minute
+    /// default. `URLRequest.timeoutInterval` cannot express "no longer than this": it
+    /// restarts on every byte, so a host trickling one byte just under the limit
+    /// satisfies it forever — which is why a caller that means a bound has to say this
+    /// one too. Checked before the chunk is consumed, so a spent budget delivers
+    /// nothing rather than one more line.
+    func testAReadWithNoBudgetLeftStopsBeforeDeliveringALine() async {
+        var lines: [String] = []
+        do {
+            try await HTTPTransport.readLines(from: stream([Data("first\n".utf8)]),
+                                              limit: HTTPTransport.maxStreamBytes,
+                                              deadline: -1) { line in
+                lines.append(line)
+                return true
+            }
+            XCTFail("Expected the spent budget to stop the read")
+        } catch {
+            // The budget's own error, not merely *a* `ResearchError` — the size cap and
+            // the handler both throw those, so the weaker assertion passed for a guard
+            // that had stopped being about the deadline at all.
+            XCTAssertEqual(error as? ResearchError, HTTPTransport.tookTooLong(-1),
+                           "expected the deadline's error, got \(error)")
+        }
+        XCTAssertTrue(lines.isEmpty, "the guard runs before the chunk does")
+    }
+
+    /// The budget is re-read between chunks, not once on the way in. A host that trickles
+    /// keeps every individual wait short, so a check hoisted out of the loop would bound
+    /// nothing at all — and the `-1` test above cannot tell the difference, because a
+    /// budget spent before the first chunk fails either way.
+    ///
+    /// Five seconds of sleep against a one-second budget. The two clocks start in
+    /// different places — the sleep from when the stream is built, the budget from when
+    /// `readLines` is entered — so the headroom is the gap minus the budget, and at two
+    /// seconds that was one second of tolerance for a cooperative pool that has not got
+    /// round to this task yet. Four is not a proof either, but it is past what a loaded
+    /// CI runner does between two adjacent statements. The green path does not pay for
+    /// it: the read is expected to throw at one second and never waits for the chunk.
+    func testABudgetThatRunsOutBetweenChunksStopsBeforeTheNextLine() async {
+        var lines: [String] = []
+        let trickle = AsyncThrowingStream<Data, Error> { continuation in
+            continuation.yield(Data("first\n".utf8))
+            Task {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                continuation.yield(Data("second\n".utf8))
+                continuation.finish()
+            }
+        }
+        do {
+            try await HTTPTransport.readLines(from: trickle,
+                                              limit: HTTPTransport.maxStreamBytes,
+                                              deadline: 1) { line in
+                lines.append(line)
+                return true
+            }
+            XCTFail("Expected the spent budget to stop the read")
+        } catch {
+            XCTAssertEqual(error as? ResearchError, HTTPTransport.tookTooLong(1),
+                           "expected the deadline's error, got \(error)")
+        }
+        XCTAssertEqual(lines, ["first"], "the second line arrived after the budget was gone")
+    }
+
+    /// Both readers used to divide the budget by 60 and write "minutes", which reads as
+    /// "did not finish within 0 minutes" for every budget shorter than one — and the
+    /// model list's is thirty seconds.
+    func testTheOverdueMessageIsSpelledInTheUnitTheBudgetIsIn() {
+        let halfMinute = HTTPTransport.tookTooLong(30).message
+        XCTAssertTrue(halfMinute.contains("30 seconds"), halfMinute)
+        // The constant, pinned separately: feeding `deadline` in and expecting "10
+        // minutes" out made this test a silent second home for that number, so raising
+        // it would have failed here as a wording regression rather than as itself.
+        XCTAssertEqual(HTTPTransport.deadline, 600, "the ten-minute default")
+        let tenMinutes = HTTPTransport.tookTooLong(HTTPTransport.deadline).message
+        XCTAssertTrue(tenMinutes.contains("10 minutes"), tenMinutes)
+        // Floored rather than rounded to nearest, and the unit taken from the floored
+        // value. The message is the reader's record of what the app did, so it may
+        // understate the wait and never overstate it: 59.6 seconds reads as "59 seconds",
+        // and the "1 minute" that rounding produced describes a wait nobody had.
+        // Choosing the unit from the raw budget was the first version of the same bug and
+        // reported it as "60 seconds".
+        let almostAMinute = HTTPTransport.tookTooLong(59.6).message
+        XCTAssertTrue(almostAMinute.contains("59 seconds"), almostAMinute)
+        XCTAssertFalse(almostAMinute.contains("minute"),
+                       "a 59.6-second budget must not be reported as a minute")
+        // Both sides of the unit switch, and both singulars. No budget in the app is one
+        // of either today, which is exactly why the wording would rot unnoticed.
+        let oneMinute = HTTPTransport.tookTooLong(60).message
+        XCTAssertTrue(oneMinute.contains("1 minute."), oneMinute)
+        let oneSecond = HTTPTransport.tookTooLong(1).message
+        XCTAssertTrue(oneSecond.contains("1 second."), oneSecond)
+        // The floor under the floor. No caller passes a budget below a second, and
+        // flooring one would otherwise write the "0 seconds" this helper exists to avoid
+        // — a negative budget, which the deadline tests do pass, read "-1 seconds".
+        for tiny in [0.4, 0.0, -1.0] {
+            XCTAssertTrue(HTTPTransport.tookTooLong(tiny).message.contains("1 second."),
+                          "\(tiny): \(HTTPTransport.tookTooLong(tiny).message)")
+        }
+    }
+
     func testPropagatesHandlerErrors() async {
         do {
             try await HTTPTransport.readLines(from: stream([Data("line\n".utf8)]),

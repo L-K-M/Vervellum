@@ -128,4 +128,79 @@ final class PreferencesTests: XCTestCase {
         preferences.panelWidth = 512
         XCTAssertEqual(widthWhenAnnounced, 512)
     }
+
+    /// The retention picker's rows and the range the archive clamps into are separate
+    /// constants, and the picker's own doc comment claims they agree. A row outside the
+    /// range would be stored as something else the moment it was chosen, so the control
+    /// would show one number while the archive applied another.
+    func testEveryOfferedThreadLimitIsInsideTheRangeTheArchiveAccepts() {
+        XCTAssertFalse(GeneralView.threadLimits.isEmpty)
+        for limit in GeneralView.threadLimits {
+            XCTAssertTrue(ThreadLibrary.keptThreadsRange.contains(limit),
+                          "\(limit) is offered but would be clamped to something else")
+        }
+    }
+
+    /// The settings pane writes only the preference and relies on the composition root
+    /// to forward it. What this pins is the half that can break silently: that the write
+    /// fires `onChanged` *after* the new value is readable, so a forwarder reading
+    /// `preferences.keptThreads` from inside the callback sees 25 rather than the old
+    /// limit. The forwarder here stands in for `AppDelegate`'s.
+    func testChangingTheLimitPreferenceReachesTheStore() {
+        let preferences = Preferences(defaults: defaults)
+        let store = ThreadStore(fileURL: temporaryThreadsURL(), historyEnabled: true,
+                                keptThreads: preferences.keptThreads, debounce: 0)
+        preferences.onChanged = { [weak preferences] in
+            guard let preferences else { return }
+            store.keptThreads = preferences.keptThreads
+        }
+        XCTAssertNotEqual(preferences.keptThreads, 25,
+                          "the starting value must differ, or the assertion below passes "
+                          + "whether or not anything was forwarded")
+        for index in 0..<40 { store.save(thread("q\(index)")) }
+        XCTAssertEqual(store.library.threads.count, 40)
+
+        preferences.keptThreads = 25
+        XCTAssertEqual(store.keptThreads, 25)
+        // The number arriving is half the contract. An empty store would have asserted
+        // the forwarding and nothing about what it is for — the pane promises the drop
+        // takes effect now, so the list the pane is looking at has to have shrunk.
+        XCTAssertEqual(store.library.threads.count, 25,
+                       "the forwarded limit must prune, and the store's own view of the "
+                       + "library must show it")
+        // Which twenty-five, not just how many. A prune that kept the *oldest* would
+        // satisfy the count above while throwing away the threads the setting exists to
+        // keep. Deterministic without timestamps: `upsert` puts the newest first and
+        // `prune` removes from the end, so position is the policy.
+        XCTAssertEqual(store.library.threads.first?.title, "q39", "the newest is kept")
+        XCTAssertFalse(store.library.threads.contains { $0.title == "q0" },
+                       "the oldest is what goes")
+    }
+
+    private func thread(_ question: String) -> ResearchThread {
+        var thread = ResearchThread()
+        thread.turns = [ResearchTurn(question: question)]
+        return thread
+    }
+
+    /// The default-versus-floor distinction rests entirely on an absent key reading as
+    /// nil rather than zero, and this is the store that ships. `UserDefaults`'s own
+    /// `double(forKey:)` answers `0` for a missing key, which would clamp a fresh
+    /// install to ten threads and prune its history at the first write — so the store
+    /// reads through `object(forKey:)` instead, and that is what this pins.
+    func testTheShippingStoreReadsAnAbsentNumberAsNilNotZero() {
+        let store = UserDefaultsSettingsStore(defaults: defaults)
+        XCTAssertNil(store.double(for: "keptThreads"))
+        XCTAssertEqual(Preferences(defaults: defaults).keptThreads, 200)
+    }
+
+    private func temporaryThreadsURL() -> URL {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("VervellumPrefsTest-\(UUID().uuidString).json")
+        // The retention test writes for real — forty threads at a zero debounce — so
+        // without this every run leaves a file behind. `ThreadArchiveTests` tears its
+        // directory down; this file had no equivalent.
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
 }

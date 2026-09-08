@@ -27,7 +27,8 @@ final class LinuxEnvironment {
         let store = JSONFileSettingsStore(url: settingsFile)
         let corePreferences = CorePreferences(store: store)
         let threadArchive = ThreadArchive(fileURL: threadsFile,
-                                          historyEnabled: corePreferences.historyEnabled)
+                                          historyEnabled: corePreferences.historyEnabled,
+                                          keptThreads: corePreferences.keptThreads)
 
         settingsStore = store
         preferences = corePreferences
@@ -41,6 +42,24 @@ final class LinuxEnvironment {
             guard let threadArchive, let corePreferences else { return }
             if threadArchive.isHistoryEnabled != corePreferences.historyEnabled {
                 threadArchive.isHistoryEnabled = corePreferences.historyEnabled
+            }
+            // Read once at construction for the same reason, so a lowered limit has to
+            // reach the archive without a relaunch.
+            //
+            // This prunes and writes at once, so lowering the limit here is final —
+            // deliberately unlike the load-time trim, which is memory-only so a hand
+            // edit stays recoverable. The two paths answer the same question differently
+            // and neither should be "fixed" into the other, because they are reached by
+            // different things. `onChange` fires from `CorePreferences`'s *setters*: it
+            // means the running app just wrote the value. A hand edit to `settings.json`
+            // never arrives here at all — `JSONFileSettingsStore` reads the file once at
+            // construction and serves from memory afterwards, with nothing watching it —
+            // so an edit made behind the app's back lands at the next launch, on the
+            // recoverable path. An earlier version of this comment said the hand edit
+            // reached this line, which made a permanent prune look like the wrong answer
+            // to it.
+            if threadArchive.keptThreads != corePreferences.keptThreads {
+                threadArchive.keptThreads = corePreferences.keptThreads
             }
         }
     }

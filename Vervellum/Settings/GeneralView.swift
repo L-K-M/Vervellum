@@ -3,6 +3,27 @@ import SwiftUI
 /// Panel behaviour, history, and updates.
 struct GeneralView: View {
 
+    /// The limits offered. A short list of round numbers rather than a slider: this is a
+    /// number nobody wants to tune to the unit, and every value here is inside
+    /// `ThreadLibrary.keptThreadsRange`.
+    ///
+    /// Asserted rather than asserted-by-comment. A row outside the range would clamp on
+    /// its way to the store and the picker would settle on a different row than the one
+    /// the reader clicked — which is the blank-selection confusion the note by the picker
+    /// warns about, arrived at from the other side.
+    static let threadLimits: [Int] = {
+        let limits = [25, 50, 100, 200, 500, 1000]
+        assert(limits.allSatisfy { ThreadLibrary.keptThreadsRange.contains($0) },
+               "a row outside the clamp range can never stay selected")
+        return limits
+    }()
+
+    /// The round numbers, plus whatever the limit actually is right now.
+    private var offeredThreadLimits: [Int] {
+        Array(Set(GeneralView.threadLimits + [preferences.keptThreads])).sorted()
+    }
+
+
     @ObservedObject var preferences: Preferences
     @ObservedObject var store: ThreadStore
     @ObservedObject var updateChecker: UpdateChecker
@@ -101,10 +122,35 @@ struct GeneralView: View {
                     + "merely hide it.") {
                 Toggle("Keep past threads", isOn: Binding(
                     get: { preferences.historyEnabled },
-                    set: { enabled in
-                        preferences.historyEnabled = enabled
-                        store.isHistoryEnabled = enabled
-                    }))
+                    // Only the preference, for the reason spelled out at the picker
+                    // below: `AppDelegate` forwards both to the live store, and writing
+                    // the store here as well would be a second path to keep in step by
+                    // hand. This used to do both, five lines above a comment arguing
+                    // against it.
+                    set: { preferences.historyEnabled = $0 }))
+                // Shown only while history is on: a limit on a history that is not being
+                // kept is a control with nothing to do.
+                if preferences.historyEnabled {
+                    Picker("Keep at most", selection: Binding(
+                        get: { preferences.keptThreads },
+                        // Only the preference is written. `AppDelegate` forwards every
+                        // preference change to the live store, so assigning both here
+                        // would be a second path to keep in step by hand — and the one
+                        // that goes stale is the one that makes this control show a
+                        // limit the archive is not applying.
+                        set: { limit in preferences.keptThreads = limit })) {
+                        // The stored value is clamped, not snapped to this list, so a
+                        // settings file holding 7 reads back as 10 — which has no row
+                        // here, and a Picker whose selection matches no option renders
+                        // blank. Offering the current value too means the control always
+                        // shows where it actually is.
+                        ForEach(offeredThreadLimits, id: \.self) { limit in
+                            Text("\(limit) threads").tag(limit)
+                        }
+                    }
+                    .help("Threads past this are deleted immediately and permanently when "
+                          + "the limit is lowered — not at the next question.")
+                }
                 HStack {
                     Text("\(store.library.threads.count) thread\(store.library.threads.count == 1 ? "" : "s") stored")
                         .font(.system(size: 11))

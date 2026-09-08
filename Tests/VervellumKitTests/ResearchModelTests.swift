@@ -221,7 +221,7 @@ final class ResearchModelTests: XCTestCase {
         var thread = ResearchThread()
         thread.turns = [turn]
         var library = ThreadLibrary()
-        library.upsert(thread)
+        library.upsert(thread, keeping: ThreadLibrary.defaultKeptThreads)
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
