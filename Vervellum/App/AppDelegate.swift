@@ -18,7 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let preferences = Preferences.shared
     private let secrets: SecretStore = KeychainStore()
-    private lazy var store = ThreadStore(historyEnabled: preferences.historyEnabled)
+    private lazy var store = ThreadStore(historyEnabled: preferences.historyEnabled,
+                                        keptThreads: preferences.keptThreads)
     private lazy var engine = ResearchEngine(preferences: preferences.core, secrets: secrets)
     private lazy var updateChecker = UpdateChecker(
         configuration: .init(owner: "L-K-M", repo: "Vervellum"))
@@ -77,6 +78,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         preferences.onChanged = { [weak self] in
             guard let self else { return }
             self.applyPanelPalette()
+            // The archive reads both of these when it is built, so without this a reader
+            // who lowered the limit would keep the threads they asked to drop, and one
+            // who turned history off would keep the file, until the next launch. Both
+            // forwarded from here rather than from the control that changed them: a
+            // settings pane that writes the preference *and* the store is two paths to
+            // keep in step by hand, and the one that goes stale is the one that leaves a
+            // control showing a state the archive is not in. `LinuxEnvironment` has
+            // forwarded both from its own change hook since it was written.
+            //
+            // One assignment, not two. `onChanged` is a single closure slot, and the
+            // theme and the archive arrived on separate branches that each wrote it
+            // whole. A second assignment anywhere below would not add to this one, it
+            // would replace it — silently, with nothing failing to build and no test
+            // able to see it.
+            self.store.keptThreads = self.preferences.keptThreads
+            self.store.isHistoryEnabled = self.preferences.historyEnabled
         }
 
         let panelController = makePanelController()

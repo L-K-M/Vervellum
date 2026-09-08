@@ -72,14 +72,52 @@ final class ThreadArchive {
     /// in `init` and afterwards only on `queue`, where every write runs.
     private var primaryIsTrustworthy: Bool
 
+    /// How many threads to keep. See `ThreadLibrary.prune(to:)`.
+    ///
+    /// Setting it prunes immediately rather than at the next write: a reader who has just
+    /// asked to keep fifty expects to see fifty, not to wait for a hundred and fifty more
+    /// questions to push the rest out.
+    ///
+    /// Clamped on every assignment, not only in `init`. `prune(to:)` clamps the number
+    /// it is handed, so an out-of-range value never cost a thread — but the property went
+    /// on reporting it, and a limit that says 3 while the archive enforces 10 is honest
+    /// about nothing. The same door `PanelPalette.cornerScale` was left standing open by:
+    /// clamping the initializer and trusting the property afterwards.
+    var keptThreads: Int {
+        didSet {
+            // Before the `oldValue` comparison, so assigning 3 to an archive already at
+            // the floor settles back to 10 and then does nothing, rather than pruning to
+            // 10 a second time. Assigning inside `didSet` does not re-enter it.
+            let clamped = ThreadLibrary.clampedKeptThreads(keptThreads)
+            if clamped != keptThreads { keptThreads = clamped }
+            guard keptThreads != oldValue, isHistoryEnabled, !isReadOnly else { return }
+            guard library.prune(to: keptThreads) > 0 else { return }
+            onChange?()
+            scheduleSave()
+        }
+    }
+
     init(fileURL: URL,
          fileManager: FileManager = .default,
          historyEnabled: Bool = true,
+         keptThreads: Int = ThreadLibrary.defaultKeptThreads,
          debounce: TimeInterval = 1.0) {
         self.fileURL = fileURL
         self.fileManager = fileManager
         self.debounce = debounce
         self.isHistoryEnabled = historyEnabled
+        // Clamped here *as well as* in the setter, because `didSet` never fires for an
+        // initial assignment. Nothing else in the observer would be right here either:
+        // it reads `isReadOnly` and `library`, neither of which is assigned until
+        // further down.
+        //
+        // Clamped, not replaced. `CorePreferences.keptThreads` reads a non-positive
+        // number as a damaged file and answers with the default; this layer has no idea
+        // where its argument came from, so it treats one as a number out of range. The
+        // production callers hand it the already-normalised preference, so the two rules
+        // never disagree in practice — a caller that builds an archive from raw input
+        // has to normalise first if it wants the damage rule.
+        self.keptThreads = ThreadLibrary.clampedKeptThreads(keptThreads)
 
         // The file is read for its *version* even when history is off, and only adopted
         // when it is on. Skipping the read entirely would leave `isReadOnly` false, so a
@@ -101,13 +139,47 @@ final class ThreadArchive {
         if !historyEnabled, !isReadOnly {
             recordingFailure { try eraseEverything() }
         }
+        // A file written when the limit was higher — or by a build that had no setting —
+        // is trimmed on the way in, so the list the reader sees already obeys what they
+        // asked for. Never when the document is read-only: re-encoding a newer version
+        // is exactly what that flag forbids.
+        //
+        // In memory only: the trimmed file lands with the next real write instead. This
+        // is the one destructive path with no user gesture behind it — the limit comes
+        // from `settings.json`, which a sync tool or a hand edit can lower without anyone
+        // asking — and writing at once would make a stray edit unrecoverable before the
+        // reader had done anything. Leaving the file alone means raising the limit and
+        // relaunching gets everything back. Every real write prunes anyway, so the file
+        // still converges; it just does so behind an action somebody took.
+        if historyEnabled, !isReadOnly {
+            let dropped = library.prune(to: keptThreads)
+            if dropped > 0 {
+                // Said out loud, because this is the one trim nobody asked for. Every
+                // other one follows a picker the reader just moved; this one follows a
+                // number that changed in a file while the app was closed, and the threads
+                // are gone from the list before anything is on screen. "Where did my
+                // threads go" is unanswerable without it — and the answer matters while
+                // it is still recoverable, which is until the next save.
+                let warning = "vervellum warning: \(dropped) thread(s) are not shown, "
+                    + "because the stored limit is \(keptThreads). They are still in the "
+                    + "file until something is saved — raise the limit and relaunch to "
+                    + "get them back.\n"
+                FileHandle.standardError.write(Data(warning.utf8))
+            }
+        }
     }
 
     // MARK: Mutation
 
+    /// The write that makes a launch-time trim permanent, if one happened: the trimmed
+    /// list is what gets encoded, and the reader's gesture was "ask a question" rather
+    /// than "delete two thousand threads". What stands between them and that is the
+    /// backup `writePending` rotates before every write — the untrimmed file survives as
+    /// `.bak` until the *second* save of the session. That is thin, and it is the reason
+    /// the load-time trim is memory-only rather than one more thing that also writes.
     func save(_ thread: ResearchThread) {
         guard isHistoryEnabled, !forgottenThreadIDs.contains(thread.id) else { return }
-        library.upsert(thread)
+        library.upsert(thread, keeping: keptThreads)
         onChange?()
         scheduleSave()
     }

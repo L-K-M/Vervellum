@@ -44,8 +44,18 @@ runs the searches and answers based on current sources.
   over another app's full-screen window without switching Spaces.
 - **Threaded.** Follow-up questions carry the thread's context, including which
   earlier claims were left unsettled. Threads are searchable, and it's up to you
-  whether they're kept at all. Active turns are checkpointed; interrupted work
-  reopens as incomplete, with its partial answer retained.
+  whether they're kept at all, and how many are kept — older ones past the limit are
+  deleted. Lowering the limit **in the app** takes effect at once rather than at the
+  next question: on screen immediately, and on disk with the save that follows. Raising
+  it again does not undo that — nothing restores a thread the list has dropped; it is
+  re-read from a file that still has it. Lowering it **behind the app's back** — a hand
+  edit, a sync tool, or upgrading from a build that had no setting — is the recoverable
+  one: it trims in memory at the next launch and leaves the file alone, so raising the
+  limit and relaunching brings the threads back. Be aware how small "until something is
+  saved" is, though: asking one question writes the trimmed list, and that is what makes
+  it permanent. The write rotates the previous file to `threads.json.bak` first, so
+  there is one more chance after that and no more. Active turns are checkpointed;
+  interrupted work reopens as incomplete, with its partial answer retained.
 - **Keyboard-first.** `Return` asks, `Esc` clears then closes, `↑`/`↓` walk back
   through earlier questions, `/` opens commands. Everything in the header is also a
   command.

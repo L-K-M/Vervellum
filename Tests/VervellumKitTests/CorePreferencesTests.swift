@@ -24,6 +24,43 @@ final class CorePreferencesTests: XCTestCase {
         XCTAssertEqual(settings.providerSettings.searchEndpoint, ProviderSettings.defaultSearchEndpoint)
     }
 
+    /// The default, not the bottom of the range it is clamped into.
+    ///
+    /// The two are a long way apart — 200 against 10 — and only one thing separates
+    /// them: `double(for:)` answers nil for an absent key rather than zero, so `clamped`
+    /// takes its fallback instead of clamping a zero up to the floor. Every store
+    /// implementation has to keep that promise, including the `UserDefaults` one, where
+    /// `object(forKey:)` is doing the work that `double(forKey:)` would have got wrong.
+    /// Pinned here because a fresh install silently keeping ten threads is not something
+    /// anyone would notice quickly.
+    func testAnEmptyStoreKeepsTheDefaultNumberOfThreads() {
+        XCTAssertEqual(preferences().keptThreads, 200)
+        XCTAssertNil(MemorySettingsStore().double(for: "keptThreads"),
+                     "an absent key must read as nil, not as zero")
+    }
+
+    /// A stored value outside the range is clamped rather than replaced, which is what
+    /// makes the picker offer the current value alongside its round numbers.
+    func testAStoredLimitOutsideTheRangeIsClamped() {
+        XCTAssertEqual(preferences(["keptThreads": 7.0]).keptThreads, 10)
+        // The endpoints themselves, which the two out-of-range rows do not reach. A clamp
+        // is wrong at its edges more often than in its middle, and this one also crosses a
+        // Double-to-Int conversion on the way, so a reader who deliberately picked the
+        // ceiling should get the ceiling.
+        XCTAssertEqual(preferences(["keptThreads": 10.0]).keptThreads, 10)
+        XCTAssertEqual(preferences(["keptThreads": 2000.0]).keptThreads, 2000)
+        XCTAssertEqual(preferences(["keptThreads": 99_999.0]).keptThreads, 2000)
+    }
+
+    /// A number below the floor is damage, not a setting — nothing the picker offers is
+    /// under ten — so it takes the default rather than the smallest legal value. Clamping
+    /// a zero to ten would keep ten of up to two thousand threads and call that honouring
+    /// the promise not to erase history.
+    func testANonPositiveStoredLimitIsTreatedAsDamage() {
+        XCTAssertEqual(preferences(["keptThreads": 0.0]).keptThreads, 200)
+        XCTAssertEqual(preferences(["keptThreads": -5.0]).keptThreads, 200)
+    }
+
     /// On by design: a false positive costs a re-typed word, a false negative sends a
     /// live credential to a third party.
     func testRedactionIsOnByDefault() {
