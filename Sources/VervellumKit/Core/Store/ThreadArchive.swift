@@ -95,7 +95,12 @@ final class ThreadArchive {
         self.fileManager = fileManager
         self.debounce = debounce
         self.isHistoryEnabled = historyEnabled
-        self.keptThreads = keptThreads
+        // Clamped here rather than in the setter: `didSet` never fires for an initial
+        // assignment, and the setter reads `isReadOnly`, which is not assigned until
+        // further down. Without it the property reports what it was handed while
+        // `prune(to:)` quietly enforces the floor — a value that is honest about nothing.
+        self.keptThreads = min(max(keptThreads, ThreadLibrary.keptThreadsRange.lowerBound),
+                               ThreadLibrary.keptThreadsRange.upperBound)
 
         // The file is read for its *version* even when history is off, and only adopted
         // when it is on. Skipping the read entirely would leave `isReadOnly` false, so a

@@ -8,7 +8,7 @@ struct GeneralView: View {
     /// `ThreadLibrary.keptThreadsRange`.
     static let threadLimits = [25, 50, 100, 200, 500, 1000]
 
-    /// The rounds numbers, plus whatever the limit actually is right now.
+    /// The round numbers, plus whatever the limit actually is right now.
     private var offeredThreadLimits: [Int] {
         Array(Set(GeneralView.threadLimits + [preferences.keptThreads])).sorted()
     }

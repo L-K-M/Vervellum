@@ -46,6 +46,15 @@ final class CorePreferencesTests: XCTestCase {
         XCTAssertEqual(preferences(["keptThreads": 99_999.0]).keptThreads, 2000)
     }
 
+    /// A number below the floor is damage, not a setting — nothing the picker offers is
+    /// under ten — so it takes the default rather than the smallest legal value. Clamping
+    /// a zero to ten would keep ten of up to two thousand threads and call that honouring
+    /// the promise not to erase history.
+    func testANonPositiveStoredLimitIsTreatedAsDamage() {
+        XCTAssertEqual(preferences(["keptThreads": 0.0]).keptThreads, 200)
+        XCTAssertEqual(preferences(["keptThreads": -5.0]).keptThreads, 200)
+    }
+
     /// On by design: a false positive costs a re-typed word, a false negative sends a
     /// live credential to a third party.
     func testRedactionIsOnByDefault() {

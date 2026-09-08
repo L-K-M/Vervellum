@@ -207,13 +207,23 @@ final class CorePreferences {
     /// clamped on read as well as on write like every other bound value here: a
     /// settings file left holding a zero by a crash or a hand edit must not be able to
     /// erase the history.
+    ///
+    /// Which is why a non-positive value falls back to the default rather than being
+    /// clamped. Clamping honoured the letter of that promise and broke its spirit: zero
+    /// became ten, and ten of two thousand kept threads is not meaningfully better than
+    /// none. Nothing the picker can produce is below the floor, so a number that is
+    /// says the file is damaged, and the answer to damage is the default rather than the
+    /// smallest legal setting.
     var keptThreads: Int {
         get {
             let range = ThreadLibrary.keptThreadsRange
-            let stored = Self.clamped(store.double(for: Key.keptThreads),
-                                      Double(Default.keptThreads),
-                                      Double(range.lowerBound)...Double(range.upperBound))
-            return Int(stored.rounded())
+            guard let stored = store.double(for: Key.keptThreads), stored > 0 else {
+                return Default.keptThreads
+            }
+            let bounded = Self.clamped(stored,
+                                       Double(Default.keptThreads),
+                                       Double(range.lowerBound)...Double(range.upperBound))
+            return Int(bounded.rounded())
         }
         set {
             let range = ThreadLibrary.keptThreadsRange

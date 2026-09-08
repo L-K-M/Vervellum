@@ -154,8 +154,22 @@ final class PreferencesTests: XCTestCase {
             guard let preferences else { return }
             store.keptThreads = preferences.keptThreads
         }
+        XCTAssertNotEqual(preferences.keptThreads, 25,
+                          "the starting value must differ, or the assertion below passes "
+                          + "whether or not anything was forwarded")
         preferences.keptThreads = 25
         XCTAssertEqual(store.keptThreads, 25)
+    }
+
+    /// The default-versus-floor distinction rests entirely on an absent key reading as
+    /// nil rather than zero, and this is the store that ships. `UserDefaults`'s own
+    /// `double(forKey:)` answers `0` for a missing key, which would clamp a fresh
+    /// install to ten threads and prune its history at the first write — so the store
+    /// reads through `object(forKey:)` instead, and that is what this pins.
+    func testTheShippingStoreReadsAnAbsentNumberAsNilNotZero() {
+        let store = UserDefaultsSettingsStore(defaults: defaults)
+        XCTAssertNil(store.double(for: "keptThreads"))
+        XCTAssertEqual(Preferences(defaults: defaults).keptThreads, 200)
     }
 
     private func temporaryThreadsURL() -> URL {
