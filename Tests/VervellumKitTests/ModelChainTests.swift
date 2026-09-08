@@ -59,26 +59,34 @@ final class ModelChainTests: XCTestCase {
     /// state a second provider exists to cover.
     func testARejectedKeyIsWorthAnotherProvider() async throws {
         let profiles = [profile("alpha"), profile("beta")]
+        var asked: [String] = []
         let result = try await chain(profiles).perform("Plan") { client in
+            asked.append(client.model)
             if client.model == "alpha" { throw ResearchError.rejectedCredential(401) }
             return client.model
         }
         XCTAssertEqual(result, "beta")
+        // Who was contacted, not only who answered: returning "beta" is also what a chain
+        // that retried the rejected key first, or skipped a spare, would return.
+        XCTAssertEqual(asked, ["alpha", "beta"], "left exactly once, for the next one")
     }
 
     /// A provider that died mid-sentence has already streamed text into the turn. The
     /// next one starts from the beginning, so the fragment has to go first.
     func testRunsTheResetBeforeEachRetryAndNotBeforeTheFirstTry() async throws {
-        let profiles = [profile("alpha"), profile("beta")]
+        // Three, because with two there is exactly one retry and "before each retry" is
+        // indistinguishable from "once, ever" — a one-shot flag would have passed.
+        let profiles = [profile("alpha"), profile("beta"), profile("gamma")]
         var resets = 0
         var seenAtEntry: [Int] = []
         _ = try await chain(profiles).perform("Answer", beforeRetry: { resets += 1 }) { client in
             seenAtEntry.append(resets)
-            if client.model == "alpha" { throw ResearchError.streamInterrupted }
+            if client.model != "gamma" { throw ResearchError.streamInterrupted }
             return client.model
         }
-        XCTAssertEqual(seenAtEntry, [0, 1], "no reset before the first provider, one before the second")
-        XCTAssertEqual(resets, 1)
+        XCTAssertEqual(seenAtEntry, [0, 1, 2],
+                       "no reset before the first provider, one before each later one")
+        XCTAssertEqual(resets, 2)
     }
 
     // MARK: Not falling back
@@ -102,8 +110,30 @@ final class ModelChainTests: XCTestCase {
         XCTAssertEqual(asked, ["alpha"])
     }
 
-    /// The payload is measured before a byte leaves the machine, so every provider in
-    /// the chain would fail on it identically.
+    /// The reset exists to clear a fragment before the next provider starts writing over
+    /// it. A Stop starts no next provider, so it must not run — and nothing pinned that:
+    /// an implementation that fired it from a `defer`, or on any exit from the attempt,
+    /// would pass every other test here while wiping the turn for no reason.
+    func testACancellationDoesNotRunTheReset() async {
+        let profiles = [profile("alpha"), profile("beta")]
+        var resets = 0
+        do {
+            _ = try await chain(profiles).perform("Answer", beforeRetry: { resets += 1 }) { _ in
+                throw ResearchError.cancelled
+            }
+            XCTFail("expected the cancellation to propagate")
+        } catch let error as ResearchError {
+            XCTAssertEqual(error, ResearchError.cancelled)
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+        XCTAssertEqual(resets, 0, "nothing was retried, so nothing was reset")
+    }
+
+    /// An unencodable payload would fail identically at every provider, so the chain has
+    /// to treat it as terminal rather than as this provider's bad day. What is pinned
+    /// here is that classification: the measurement itself happens where the payload is
+    /// built, and the error arrives from the body like any other.
     func testAnUnencodableContextIsNeverRetriedOnAnotherProvider() async {
         let profiles = [profile("alpha"), profile("beta")]
         var asked: [String] = []
@@ -244,6 +274,29 @@ final class ModelChainTests: XCTestCase {
                           "the head did not answer, and the notice hangs on that comparison")
     }
 
+    /// A skip in the *middle* of the chain, which is the head-skip case one step over:
+    /// alpha fails, the blank spare is never contacted, and gamma answers. Recording when
+    /// the chain *moves on* rather than when a provider is used would name beta over
+    /// gamma's words, and every other test here would stay green.
+    ///
+    /// This arrived on `claude/model-fallback-chain` as an `onSwitch` test; the hook is
+    /// gone on this branch, so it asks the record instead. The property it pins is the
+    /// same one.
+    func testASkipMidChainStillLeavesTheProviderThatAnsweredRecorded() async throws {
+        let profiles = [profile("alpha"),
+                        ModelProfile.new(name: "blank", endpoint: "", model: ""),
+                        profile("gamma")]
+        let subject = chain(profiles)
+        let result = try await subject.perform("Plan") { client in
+            if client.model == "alpha" { throw ResearchError.connectionFailed }
+            return client.model
+        }
+        XCTAssertEqual(result, "gamma")
+        XCTAssertEqual(subject.lastAnswered?.model, "gamma")
+        XCTAssertNotEqual(subject.lastAnswered?.id, subject.head?.id,
+                          "the head did not answer, and the notice hangs on that comparison")
+    }
+
     /// Nothing answered, so there is nothing to attribute — a turn that failed must not
     /// name a provider as having produced words it never produced.
     func testNothingIsRecordedWhenEveryProviderFails() async {
@@ -334,6 +387,11 @@ final class ModelChainTests: XCTestCase {
             XCTFail("expected the chain to fail")
         } catch let error as ResearchError {
             XCTAssertEqual(error, ResearchError.connectionFailed)
+            // The prose, which is what the comment above is actually about. Equality
+            // alone would keep passing if `ResearchError` ever compared something
+            // narrower than its message.
+            XCTAssertFalse(error.message.contains("All 1"),
+                           "one provider's failure keeps its own wording: \(error.message)")
         } catch {
             XCTFail("expected a ResearchError, got \(error)")
         }

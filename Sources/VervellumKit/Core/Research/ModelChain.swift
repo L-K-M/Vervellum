@@ -26,6 +26,12 @@ import Foundation
 /// Clients are built lazily rather than up front. Constructing one is cheap, but
 /// *validating* an endpoint is where a half-configured second profile would otherwise
 /// throw during setup and take down a turn the first provider could have served alone.
+///
+/// One task at a time. `index`, `built` and `lastAnswered` are plain mutable state, and
+/// what makes that safe is that a turn's stages call `perform` one after another rather
+/// than at once. Two concurrent stages would race the cursor, and would race the record
+/// of who answered — which the runner reads between stages precisely because they are
+/// serial.
 final class ModelChain {
 
     private let profiles: [ModelProfile]
@@ -114,6 +120,12 @@ final class ModelChain {
         lastAnswered = nil
 
         while index < profiles.count {
+            // Sampled before every attempt, not only where a failure is caught. Stop
+            // landing in the window between the catch and the next call — during
+            // `beforeRetry`, or as the request is being built — would otherwise put one
+            // more question on the wire, and `PRIVACY.md` says a cancelled question is
+            // never re-sent. Narrow, but it is the one promise this app makes about Stop.
+            guard !Task.isCancelled else { throw ResearchError.cancelled }
             let profile = profiles[index]
             guard let client = client(for: profile) else {
                 // An unusable endpoint or an empty model name. Not an error to report on
@@ -128,8 +140,13 @@ final class ModelChain {
                 let value = try await body(client)
                 lastAnswered = profile
                 return value
-            } catch let error as ResearchError
-                        where error.isWorthAnotherProvider && !Task.isCancelled {
+            } catch let error as ResearchError where error.isWorthAnotherProvider {
+                // A Stop that landed while this provider was failing is a Stop, not the
+                // failure it interrupted. It used to fall out of the `where` clause and
+                // propagate the provider's own error, so the two cancellation windows —
+                // this one and the guard at the top of the loop — answered differently
+                // for the same press.
+                guard !Task.isCancelled else { throw ResearchError.cancelled }
                 if firstError == nil { firstError = error }
                 trace.warn("\(label) failed on \(profile.displayName): \(error.message)")
                 index += 1

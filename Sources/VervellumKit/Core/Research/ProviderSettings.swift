@@ -322,6 +322,12 @@ struct ProviderSettings: Equatable, Codable {
     /// The order a chain tries providers in: the selection first, then the rest as the
     /// Providers list shows them.
     ///
+    /// The order fallback *would* take, which is not the same as the order a turn takes:
+    /// this does not consult `modelFallback`, because it is the ordering rule and the
+    /// setting is a separate question. A caller showing it has to ask that question
+    /// itself — `ProvidersView.fallbackExplanation` does, and says "nothing else is
+    /// tried" when the answer is no.
+    ///
     /// Static and separate from `modelChain` because the Settings pane prints this order
     /// back to the reader, and it was deriving it a second time from the same rule. Two
     /// copies of an ordering is how a caption ends up describing a chain the runner does
