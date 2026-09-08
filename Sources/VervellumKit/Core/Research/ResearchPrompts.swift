@@ -51,6 +51,60 @@ enum ResearchPrompts {
 
     // MARK: Stage 1 — plan
 
+    /// The planner again, for a later round of `deep` research, told what the earlier
+    /// rounds already found.
+    ///
+    /// Deliberately the same JSON contract as `plan`, so `PlanParser` reads both and
+    /// there is one definition of what a plan is. What differs is the job: the first
+    /// round plans against the question, and this one plans against the gap between the
+    /// question and what is on the table — which is the thing a single pass cannot do,
+    /// because the gap does not exist until something has been looked up.
+    ///
+    /// `found` is titles and snippets, not the evidence itself. This call decides what
+    /// to search for next; the answer is written elsewhere, over the whole sources, and
+    /// only it may cite them. Summarising here costs nothing a citation depends on.
+    ///
+    /// An empty `searches` list is the expected way to stop, not a failure: a round that
+    /// finds nothing left worth asking should say so rather than invent a query to fill
+    /// its quota.
+    static func deepFollowUp(maxSearches: Int, today: String, round: Int, of rounds: Int) -> String {
+        """
+        \(trust)
+
+        TASK: this is round \(round) of up to \(rounds) in a deeper piece of research. \
+        Earlier rounds have already searched. Decide what is still missing.
+
+        You are given the question and, under "found", the sources gathered so far as \
+        titles and snippets. Read them as a whole and ask what the question still needs: \
+        a claim resting on one source that a second could confirm or break, a figure \
+        with no date, a step in the argument nobody has addressed, a term the sources \
+        use in two different senses, a party to the matter who has not been heard.
+
+        Plan up to \(maxSearches) searches for those gaps and nothing else. Do not \
+        re-ask what has been answered: a query that would return sources already in \
+        "found" spends a request and adds nothing.
+
+        Prefer searches that would DISCONFIRM what the sources so far suggest. Rounds \
+        that only deepen agreement produce a confident wrong answer more efficiently \
+        than one round would have.
+
+        Today is \(today). Match the time frame the question implies.
+
+        Write each search's arguments to match the supplied search_tool.inputSchema \
+        exactly: use only properties it declares, and include every property it lists \
+        as required.
+
+        RETURN AN EMPTY "searches" LIST IF NOTHING IS MISSING. Stopping is a real \
+        answer here and the right one whenever the question is settled. Do not invent \
+        a search to fill the round.
+
+        Return {"reading": "...", "searches": [{"purpose": "...", "arguments": {...}}]}
+        - "reading": one sentence naming the gap this round is trying to close, or \
+        saying that the sources already settle the question.
+        - "purpose": a short phrase naming what that search is meant to settle.
+        """
+    }
+
     static func plan(maxSearches: Int, today: String) -> String {
         """
         \(trust)

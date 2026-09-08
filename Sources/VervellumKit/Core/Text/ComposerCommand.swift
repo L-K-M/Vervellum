@@ -18,6 +18,9 @@ enum ComposerCommand: Equatable {
     case ask(String)
     /// Answer without searching.
     case direct(String)
+    /// Research over several rounds of planning, each asking for what the last one
+    /// could not have known was missing.
+    case deepResearch(String)
     case newThread
     case openHistory
     case openSettings
@@ -40,6 +43,7 @@ enum ComposerCommand: Equatable {
 
     /// Commands offered in the composer's completion list.
     static let catalogue: [Entry] = [
+        Entry(name: "deep-research", summary: "Research over several rounds, following up what the first pass missed"),
         Entry(name: "direct", summary: "Answer from the model alone, with no web evidence"),
         Entry(name: "model", summary: "List the configured models, or switch to one by name"),
         Entry(name: "new", summary: "Start a fresh thread"),
@@ -61,6 +65,12 @@ enum ComposerCommand: Equatable {
         let rest = split.map { String(body[$0...]).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
 
         switch word {
+        case "deep-research":
+            // Argument-wanting, like `/direct`: the bare word is a mode with no question
+            // yet, so the composer keeps the text rather than sending "/deep-research" to
+            // a model as prose. `isHalfTypedCommand` reads the nil and declines to
+            // withhold Return a second time.
+            return rest.isEmpty ? nil : .deepResearch(rest)
         case "direct":
             // "/direct" with nothing after it is a mode request with no question yet,
             // not an empty question — leave it to the caller to keep the composer open.

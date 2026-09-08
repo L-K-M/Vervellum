@@ -42,6 +42,34 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertEqual(ComposerCommand.parse("/usr/bin/env"), .ask("/usr/bin/env"))
     }
 
+    /// The same argument-wanting shape as `/direct`, and pinned separately because the
+    /// two answer to different words: a `parse` branch that fell through would send
+    /// "/deep-research …" to a model as prose, which is the failure the whole
+    /// half-typed-command guard exists to prevent.
+    func testDeepResearchCarriesItsQuestionAndDeclinesWithoutOne() {
+        XCTAssertEqual(ComposerCommand.parse("/deep-research who owns the cobalt"),
+                       .deepResearch("who owns the cobalt"))
+        // Bare: a mode with no question yet, so the composer keeps the text.
+        XCTAssertNil(ComposerCommand.parse("/deep-research"))
+        XCTAssertNil(ComposerCommand.parse("/deep-research   "))
+        // The hyphen is part of the word, not a separator: `commandWord` refuses a
+        // command word containing whitespace, and would have refused this one too if the
+        // name had been spelled with a space.
+        XCTAssertEqual(ComposerCommand.parse("/DEEP-RESEARCH why"), .deepResearch("why"))
+    }
+
+    /// It is offered in the list, so Return must be able to submit it — the invariant
+    /// `testEveryOfferedCommandCanBeSubmitted` pins for the catalogue as a whole, named
+    /// here for the entry this branch adds.
+    func testDeepResearchIsOfferedAndCompletes() {
+        // `XCTAssertNotNil` on the `contains` would have passed for any non-nil list,
+        // including one this entry is missing from — the assertion has to name the row.
+        XCTAssertEqual(ComposerCommand.completions(for: "/deep")?.map(\.name),
+                       ["deep-research"])
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/deep-research"),
+                       "an exact command name must not withhold Return")
+    }
+
     /// "/direct" alone is a mode the user is about to type into, not an empty
     /// question — submitting it must do nothing rather than ask a blank question.
     func testBareDirectIsNotSubmittable() {

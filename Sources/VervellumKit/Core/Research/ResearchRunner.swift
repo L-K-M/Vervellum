@@ -58,6 +58,13 @@ final class ResearchRunner: ResearchRunning {
         ///   Turn diagnostics name profiles, never keys.
         var modelKeys: [UUID: String]
         var searchKey: String?
+        /// Every configured search provider's key, by profile id.
+        ///
+        /// `deep` research asks more than one engine, and each has its own slot.
+        /// Captured with the rest of the environment for the same reason `modelKeys` is:
+        /// a key edited while the turn runs must not change which credential a later
+        /// round sends.
+        var searchKeys: [UUID: String]
         var readerKey: String?
 
         /// Which secrets are present, never what they are. Profile ids are safe to name
@@ -74,6 +81,7 @@ final class ResearchRunner: ResearchRunning {
         /// `ProviderSettings` later cannot leak through here by default.
         var description: String {
             let ids = modelKeys.keys.map(\.uuidString).sorted().joined(separator: ", ")
+            let searchIDs = searchKeys.keys.map(\.uuidString).sorted().joined(separator: ", ")
             func held(_ secret: String?) -> String { secret == nil ? "absent" : "present" }
             return "Environment(model: \(settings.modelName), "
                 // The switch as well as the count. `modelChain` is the *effective* chain,
@@ -82,6 +90,7 @@ final class ResearchRunner: ResearchRunning {
                 // never tried" is the likeliest question this rendering has to answer.
                 + "fallback: \(settings.modelFallback), "
                 + "providers: \(settings.modelChain.count), modelKeys: [\(ids)], "
+                + "searchKeys: [\(searchIDs)], "
                 + "modelKey: \(held(modelKey)), searchKey: \(held(searchKey)), "
                 + "readerKey: \(held(readerKey)))"
         }
@@ -102,11 +111,22 @@ final class ResearchRunner: ResearchRunning {
              modelKey: String?,
              searchKey: String?,
              readerKey: String? = nil,
-             modelKeys: [UUID: String]? = nil) {
+             modelKeys: [UUID: String]? = nil,
+             searchKeys: [UUID: String]? = nil) {
             self.settings = settings
             self.modelKey = modelKey
             self.searchKey = searchKey
             self.readerKey = readerKey
+            // Same shape as `modelKeys` below, and for the same callers: a test or the
+            // single-provider construction that knows only the selected engine still
+            // gets a map with that engine's key in it rather than an empty one.
+            if let searchKeys {
+                self.searchKeys = searchKeys
+            } else if let searchKey, let selected = settings.selectedSearch {
+                self.searchKeys = [selected.id: searchKey]
+            } else {
+                self.searchKeys = [:]
+            }
             // Callers that know only about the selected provider — the tests, and the
             // single-provider construction the Linux front end uses — still get a
             // working one-element chain rather than a chain with no key in it.
@@ -132,7 +152,8 @@ final class ResearchRunner: ResearchRunning {
                       modelKey: secrets.modelKey(for: settings),
                       searchKey: secrets.searchKey(for: settings),
                       readerKey: secrets.value(for: .readerAPIKey),
-                      modelKeys: secrets.modelKeys(for: settings))
+                      modelKeys: secrets.modelKeys(for: settings),
+                      searchKeys: secrets.searchKeys(for: settings))
         }
     }
 
@@ -141,10 +162,65 @@ final class ResearchRunner: ResearchRunning {
         case research
         /// No search: answer from the model's own knowledge, badged as unsourced.
         case direct
+        /// The full pipeline, but the plan is allowed to come back for more. Each round
+        /// reads what the last one found and asks for what is still missing; the answer
+        /// is written once, over everything gathered.
+        ///
+        /// Evidence is kept whole rather than summarised between rounds. The answer may
+        /// cite only the numbered sources this turn collected, so a digest would buy
+        /// room by dissolving the very things the citations point at. Rounds stop when
+        /// the budget is close to spent instead — see `deepRoundsAreWorthwhile`.
+        case deep
+
+        /// Every mode but `direct` gathers evidence before answering.
+        var searches: Bool { self != .direct }
+
+        /// What the trace calls this. Named here rather than spelled at the call site,
+        /// which was a ternary and so had no room for a third answer — it would have
+        /// logged `deep` turns as `research` and been right about nothing.
+        var traceName: String {
+            switch self {
+            case .research: return "research"
+            case .direct: return "direct"
+            case .deep: return "deep"
+            }
+        }
     }
 
-    /// The most searches one turn may run. Each is a billed request, and past three or
-    /// four the marginal source rarely changes the answer.
+    /// The most rounds of planning `deep` may run, the first included.
+    ///
+    /// Three, because the second round is where the gaps the first could not have known
+    /// about get asked, and the third is where a gap the second opened gets closed. A
+    /// fourth mostly re-asks the third in other words, and each round is
+    /// `maxSearches` billed requests.
+    static let maxDeepRounds = 3
+
+    /// What the rounds have found, for the follow-up planner to read the gaps in.
+    ///
+    /// Titles and snippets, capped, and never page text. This goes to a call that chooses
+    /// the next queries and cites nothing, so it can be as lossy as it likes — which is
+    /// exactly why the *evidence* is not summarised the same way: only the answer cites,
+    /// and it must have the sources themselves.
+    private static func digest(of sources: [Source]) -> String {
+        // `suffix`, not `prefix`. This list is cumulative, so once several engines over
+        // several rounds push it past the cap, taking from the front would show a later
+        // planner the round-one material it has already planned against and hide what the
+        // round before it just found — the opposite of reading the gaps.
+        sources.suffix(40).enumerated().map { index, source in
+            let snippet = source.snippet.prefix(200)
+            return "\(index + 1). \(source.title) — \(snippet)"
+        }.joined(separator: "\n")
+    }
+
+    /// The most searches one *plan* may ask for. Past three or four the marginal source
+    /// rarely changes the answer.
+    ///
+    /// Not the same as the number of billed requests, which it used to be. A `deep` turn
+    /// puts each planned search to every engine still answering, over as many as
+    /// `maxDeepRounds` rounds, so the ceiling on requests is this times the engines times
+    /// the rounds. That is the cost of a wider net and it is the reader's to choose by
+    /// configuring a second engine — but it should be said plainly here rather than left
+    /// for someone to discover on a metered account.
     static let maxSearches = 4
 
     private let environment: Environment
@@ -240,7 +316,7 @@ final class ResearchRunner: ResearchRunning {
         let settings = environment.settings
         let problems = settings.problems(hasModelKey: environment.modelKey != nil,
                                          hasSearchKey: environment.searchKey != nil,
-                                         requiresSearch: mode != .direct)
+                                         requiresSearch: mode.searches)
         guard problems.isEmpty else {
             throw ResearchError("Vervellum is not configured yet. " + problems.joined(separator: " "))
         }
@@ -267,7 +343,7 @@ final class ResearchRunner: ResearchRunning {
         // announcing every provider it starts.
         let today = ResearchContext.todayString()
 
-        trace.log("Turn started mode=\(mode == .direct ? "direct" : "research") history=\(history.count)")
+        trace.log("Turn started mode=\(mode.traceName) history=\(history.count)")
 
         if mode == .direct {
             try await answerDirectly(chain: chain, question: question, history: history, today: today)
@@ -291,6 +367,47 @@ final class ResearchRunner: ResearchRunning {
                                                   trace: trace, transport: transport)
         try await search.connect()
         try Task.checkCancellation()
+
+        // The selected engine, and for `deep` every other configured one behind it.
+        //
+        // The selected engine still throws when it cannot be built or connected, in every
+        // mode: a turn whose chosen engine is misconfigured should say so rather than
+        // quietly research with somebody else. The extras are best effort — the posture
+        // `ModelChain` takes toward a half-configured provider — because adding a second
+        // engine must not be able to break a turn the first can serve alone.
+        //
+        // Worth having because two engines disagree. Different indexes and different
+        // ranking mean different top results, and for a question worth several rounds the
+        // disagreement is most of what the second engine is for. Overlap costs nothing:
+        // `EvidenceExtractor.sources` deduplicates by URL across everything it is handed,
+        // and it is handed every round's results at once.
+        var engines: [SearchBackend] = [search]
+        if mode == .deep {
+            for profile in settings.searchProfiles where profile.id != searchProfile.id {
+                do {
+                    let spare = try SearchBackendFactory.make(
+                        profile: profile, apiKey: environment.searchKeys[profile.id],
+                        trace: trace, transport: transport)
+                    try await spare.connect()
+                    engines.append(spare)
+                } catch is CancellationError {
+                    throw ResearchError.cancelled
+                } catch let error as ResearchError where error == .cancelled {
+                    throw error
+                } catch {
+                    // Everything else, not only `ResearchError`. The comment above promises
+                    // a spare cannot break a turn the selected engine can serve alone, and
+                    // a catch narrowed to one error type does not keep that promise: the
+                    // transport is entitled to throw `URLError` and the chain's own
+                    // fallback code already says in as many words that a non-`ResearchError`
+                    // can reach it. Only a Stop propagates.
+                    let reason = (error as? ResearchError)?.message ?? String(describing: error)
+                    trace.warn("Search engine \(profile.displayName) is not usable: \(reason)")
+                }
+                try Task.checkCancellation()
+            }
+            trace.log("Deep research over \(engines.count) search engine(s)")
+        }
 
         // 2 — plan.
         let planContext = ResearchContext.assemble(
@@ -344,27 +461,139 @@ final class ResearchRunner: ResearchRunning {
         update { $0.stage = .searching }
         var rawResults: [Any] = []
         var searchFailures: [String] = []
-        for (index, planned) in plan.searches.enumerated() {
-            try Task.checkCancellation()
-            do {
-                let result = try await trace.stage("Search \(index + 1)/\(plan.searches.count)") {
-                    try await search.search(arguments: planned.arguments)
+        var attempted = 0
+
+        // One round's searches, asked of every engine still in the running. Returns the
+        // engines that answered with something, so a later round can stop asking the ones
+        // that did not — the plan is written against the selected engine's `inputSchema`,
+        // and an engine declaring a different one refuses those arguments every time. It
+        // costs a request per search to find that out once; it should not cost one per
+        // round.
+        func runSearches(_ planned: [PlannedSearch], across asked: [SearchBackend]) async throws
+            -> [SearchBackend] {
+            var productive: Set<ObjectIdentifier> = []
+            for step in planned {
+                try Task.checkCancellation()
+                for engine in asked {
+                    do {
+                        let label = asked.count > 1
+                            ? "Search \(attempted + 1) via \(engine.backendName)"
+                            : "Search \(attempted + 1)"
+                        let result = try await trace.stage(label) {
+                            try await engine.search(arguments: step.arguments)
+                        }
+                        // Structure only — keys, counts and sizes, never a title or a
+                        // link — so a result the extractor cannot read is diagnosable
+                        // from a log that must not contain results.
+                        // The same label the stage used, so two engines answering one
+                        // planned search do not emit two identical lines about different
+                        // shapes — which is the case this log exists for.
+                        trace.log(label + " result shape: "
+                                  + "\(EvidenceExtractor.shape(of: result))")
+                        rawResults.append(result)
+                        productive.insert(ObjectIdentifier(engine))
+                    } catch is CancellationError {
+                        throw ResearchError.cancelled
+                    } catch let error as ResearchError where error == .cancelled {
+                        throw error
+                    } catch {
+                        // One failed search must not lose the others, and in `deep` that
+                        // now means the other engines and every earlier round too — a turn
+                        // may have spent a dozen billed requests before reaching here.
+                        // Narrowed to `ResearchError` this caught none of the failures the
+                        // transport can raise on its own. A cancellation is not a failed
+                        // search and still propagates.
+                        let reason = (error as? ResearchError)?.message ?? String(describing: error)
+                        trace.warn("Search \(attempted + 1) failed on "
+                                   + "\(engine.backendName): \(reason)")
+                        searchFailures.append(reason)
+                    }
                 }
-                // Structure only — keys, counts and sizes, never a title or a link — so a
-                // result the extractor cannot read is diagnosable from a log that must
-                // not contain results.
-                trace.log("Search \(index + 1) result shape: \(EvidenceExtractor.shape(of: result))")
-                rawResults.append(result)
-            } catch let error as ResearchError where error != ResearchError.cancelled {
-                // One failed search must not lose the other three. Record it and go on;
-                // if every search fails, the first reason is what the user is told below.
-                // A cancellation is not a failed search and propagates.
-                trace.warn("Search \(index + 1) failed: \(error.message)")
-                searchFailures.append(error.message)
+                // Counted whether the attempts succeeded or failed, and once per planned
+                // search rather than once per request: "2 of 3" is about the plan the
+                // reader can see, not about how many engines it was put to.
+                attempted += 1
+                update { $0.searchesCompleted = attempted }
             }
-            // Counted whether the attempt succeeded or failed: "2 of 3" means two
-            // attempts are done, and a failed attempt is done.
-            update { $0.searchesCompleted = index + 1 }
+            return asked.filter { productive.contains(ObjectIdentifier($0)) }
+        }
+
+        engines = try await runSearches(plan.searches, across: engines)
+
+        // 3a — later rounds, `deep` only. Each reads what is on the table and asks for
+        // what the first round could not have known was missing, because the gap does not
+        // exist until something has been looked up.
+        //
+        // Evidence is carried whole between rounds rather than summarised. The answer may
+        // cite only the numbered sources this turn collected, so a digest would buy room
+        // by dissolving the things the citations point at. Rounds stop as the budget
+        // fills instead — and the budget is asked with the same trimmer that will decide
+        // what the answer sees, rather than a second rule that could disagree with it.
+        // The follow-up *planner* is given a digest, which is a different matter: it
+        // chooses queries and never cites.
+        // `maxDeepRounds > 1` before the range: `2...1` is a runtime trap rather than an
+        // empty loop, so setting the ceiling to one round would crash every deep turn
+        // instead of quietly doing one. The constant is meant to be tuneable.
+        if mode == .deep, !engines.isEmpty, Self.maxDeepRounds > 1 {
+            var everySearch = plan.searches
+            for round in 2...Self.maxDeepRounds {
+                try Task.checkCancellation()
+                let soFar = EvidenceExtractor.sources(from: rawResults)
+                guard ResearchContext.evidence(from: soFar).dropped == 0 else {
+                    trace.log("Round \(round) not run: the evidence budget is already full")
+                    break
+                }
+
+                update { $0.stage = .planning }
+                let followContext = ResearchContext.assemble(
+                    question: question, history: history, today: today,
+                    extra: ["search_tool": search.toolDescriptor,
+                            "found": Self.digest(of: soFar)])
+                // `try?`, because a later round failing to plan is not a reason to lose
+                // the turn. Everything gathered so far is still good evidence and still
+                // answers the question; the rounds are an improvement on one pass, not a
+                // precondition for any answer at all. The loop already treats an *empty*
+                // plan as a clean stop, and an unparseable one had no such courtesy — so
+                // a malformed reply on round three discarded two rounds of billed
+                // searches, which is the most expensive way this feature could fail.
+                let follow = try? await chain.perform("Plan \(round)") { chat in
+                    let object = try await chat.completeJSON(
+                        system: ResearchPrompts.deepFollowUp(maxSearches: Self.maxSearches,
+                                                             today: today,
+                                                             round: round,
+                                                             of: Self.maxDeepRounds),
+                        payload: followContext.payload, label: "Plan \(round)")
+                    return try PlanParser.parse(object, maxSearches: Self.maxSearches)
+                }
+                // Before the guard, because `try?` swallows the cancellation too: a Stop
+                // during planning must end the turn rather than quietly settle for the
+                // evidence already in hand.
+                try Task.checkCancellation()
+                guard let follow else {
+                    trace.warn("Round \(round) could not be planned; "
+                               + "answering from the evidence already gathered")
+                    break
+                }
+
+                // An empty plan is the documented way to stop, not a failure: a round with
+                // nothing left worth asking should say so rather than fill its quota.
+                guard !follow.searches.isEmpty else {
+                    trace.log("Round \(round) found nothing left to ask; stopping")
+                    break
+                }
+
+                everySearch += follow.searches
+                // The reader sees every round's searches, not just the first plan's:
+                // `searchesCompleted` counts against this list, and a list that stopped
+                // growing would leave the progress label counting past its own total.
+                update { $0.searches = everySearch }
+                update { $0.stage = .searching }
+                engines = try await runSearches(follow.searches, across: engines)
+                if engines.isEmpty {
+                    trace.warn("No search engine is still answering; stopping the rounds")
+                    break
+                }
+            }
         }
 
         var harvested = EvidenceExtractor.sources(from: rawResults)

@@ -58,6 +58,29 @@ extension SecretStore {
         return keys
     }
 
+    /// Every configured search provider's key, by profile id.
+    ///
+    /// `deep` research asks more than one engine, because the point of a wider net is a
+    /// wider net: two engines with different indexes and different ranking disagree
+    /// about what the top results are, and the disagreement is most of the value.
+    /// Each has its own slot, so the keys are read together at the start of the turn for
+    /// the same reason the model keys are — a key edited while the turn runs must not
+    /// change which credential a later round sends.
+    ///
+    /// Every profile, not just the selected one, and not filtered by whether a key was
+    /// found: an engine that needs no key is configured by having none, so an absent key
+    /// is a fact about the engine rather than a reason to leave it out. It is also what
+    /// a key nobody entered, or a keychain read that failed, looks like — the dictionary
+    /// cannot tell those apart — so a caller that knows an engine requires one still has
+    /// to check.
+    func searchKeys(for settings: ProviderSettings) -> [UUID: String] {
+        var keys: [UUID: String] = [:]
+        for profile in settings.searchProfiles {
+            if let key = value(for: profile.secretAccount) { keys[profile.id] = key }
+        }
+        return keys
+    }
+
     /// The selected search provider's key, or nil. Same reasoning as `modelKey(for:)`.
     func searchKey(for settings: ProviderSettings) -> String? {
         settings.selectedSearch.flatMap { value(for: $0.secretAccount) }
