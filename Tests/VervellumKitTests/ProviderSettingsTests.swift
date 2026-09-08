@@ -361,6 +361,16 @@ final class ProviderSettingsTests: XCTestCase {
 
     /// Off is the single-provider behaviour, expressed as a one-element chain so every
     /// caller can be written against a chain rather than branching.
+    /// `PRIVACY.md` and the README both state that fallback is on unless the reader
+    /// turns it off, and a privacy document that describes where a question goes has to
+    /// be right about that. Pinned mechanically rather than by the convention that
+    /// somebody rereads two files after changing a constant.
+    func testFallbackIsOnByDefaultAsThePrivacyDocumentSays() {
+        XCTAssertTrue(ProviderSettings.defaultModelFallback)
+        XCTAssertTrue(ProviderSettings(modelProfiles: []).modelFallback,
+                      "and the initialiser takes that default rather than its own")
+    }
+
     func testFallbackOffLeavesOnlyTheSelection() {
         let alpha = chainProfile("alpha")
         let beta = chainProfile("beta")

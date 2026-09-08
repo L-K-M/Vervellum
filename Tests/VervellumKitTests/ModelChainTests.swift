@@ -118,6 +118,24 @@ final class ModelChainTests: XCTestCase {
         XCTAssertEqual(asked, ["alpha", "beta"], "left exactly once, for the next one")
     }
 
+    /// The same question one step down. Every other test that moves past a provider fails
+    /// it with a connection or a stream error, so a chain that treated a rejected key as
+    /// retryable *only at the head* would pass this whole file. What is worth another
+    /// provider cannot depend on where in the chain the failure happened: two misconfigured
+    /// keys and a healthy third is an ordinary state, and it should still answer.
+    func testARejectedKeyOnASpareIsWorthAnotherProviderToo() async throws {
+        let profiles = [profile("alpha"), profile("beta"), profile("gamma")]
+        var asked: [String] = []
+        let result = try await chain(profiles).perform("Plan") { client in
+            asked.append(client.model)
+            if client.model == "alpha" { throw ResearchError.connectionFailed }
+            if client.model == "beta" { throw ResearchError.rejectedCredential(401) }
+            return client.model
+        }
+        XCTAssertEqual(result, "gamma")
+        XCTAssertEqual(asked, ["alpha", "beta", "gamma"])
+    }
+
     /// A provider that died mid-sentence has already streamed text into the turn. The
     /// next one starts from the beginning, so the fragment has to go first.
     func testRunsTheResetBeforeEachRetryAndNotBeforeTheFirstTry() async throws {
@@ -177,6 +195,26 @@ final class ModelChainTests: XCTestCase {
         XCTAssertEqual(resets, 1)
     }
 
+    /// A skipped *head* is not a retry either, and it is a different path from the test
+    /// above: there the reset was earned by a provider that failed, so a chain that
+    /// stepped over unusable slots through the retry hook would still have counted one.
+    /// Here nothing has been attempted at all, and there is no fragment on screen for a
+    /// reset to clear.
+    func testASkippedHeadDoesNotConsumeAResetEither() async throws {
+        let profiles = [ModelProfile.new(name: "blank", endpoint: "", model: ""),
+                        profile("beta")]
+        var resets = 0
+        var seenAtEntry: [Int] = []
+        let result = try await chain(profiles).perform("Answer",
+                                                       beforeRetry: { resets += 1 }) { client in
+            seenAtEntry.append(resets)
+            return client.model
+        }
+        XCTAssertEqual(result, "beta")
+        XCTAssertEqual(seenAtEntry, [0], "beta was entered without a reset — nothing was retried")
+        XCTAssertEqual(resets, 0)
+    }
+
     // MARK: Not falling back
 
     /// A Stop is a Stop. Re-asking a second provider would be the opposite of what the
@@ -216,6 +254,34 @@ final class ModelChainTests: XCTestCase {
             XCTFail("expected a ResearchError, got \(error)")
         }
         XCTAssertEqual(resets, 0, "nothing was retried, so nothing was reset")
+    }
+
+    /// The seam between the two rules above, where each has a green test of its own and
+    /// nothing holds them together. A Stop that lands *after* a switch has to keep the
+    /// reset that switch earned — exactly one, not repeated on the way out — and still
+    /// end the turn without asking a third provider. A reset moved into a `defer` around
+    /// the whole loop, or re-run as the cancellation unwinds, passes both tests
+    /// separately and fails this one.
+    func testACancellationAfterASwitchKeepsItsResetAndStopsTheChain() async {
+        let profiles = [profile("alpha"), profile("beta"), profile("gamma")]
+        var resets = 0
+        var asked: [String] = []
+        do {
+            _ = try await chain(profiles).perform("Answer", beforeRetry: { resets += 1 }) { client in
+                asked.append(client.model)
+                if client.model == "alpha" { throw ResearchError.streamInterrupted }
+                throw ResearchError.cancelled
+            }
+            XCTFail("expected the cancellation to propagate")
+        } catch let error as ResearchError {
+            // Unwrapped: a Stop is not "all 2 model providers failed", even though two
+            // were contacted before it arrived.
+            XCTAssertEqual(error, ResearchError.cancelled)
+        } catch {
+            XCTFail("expected a ResearchError, got \(error)")
+        }
+        XCTAssertEqual(asked, ["alpha", "beta"], "gamma is never asked after a Stop")
+        XCTAssertEqual(resets, 1, "one reset for the switch, none for the cancellation")
     }
 
     /// An unencodable payload would fail identically at every provider, so the chain has

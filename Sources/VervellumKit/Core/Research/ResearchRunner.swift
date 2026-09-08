@@ -39,6 +39,11 @@ final class ResearchRunner: ResearchRunning {
     /// a hurried log line is what this is for — `String(reflecting:)` takes
     /// `debugDescription`, and `dump()`, a debugger and a crash reporter go round both
     /// through `Mirror`. Closing two of the three would only have moved the hole.
+    ///
+    /// Every *printing* path, not memory: an attached debugger reading the stored
+    /// properties directly — lldb's `frame variable`, as against `po` — still sees the
+    /// keys, and nothing in a value type can prevent that. The guarantee is that no
+    /// rendering of this value writes a key somewhere it can be read later.
     struct Environment: CustomStringConvertible, CustomDebugStringConvertible,
                         CustomReflectable {
         var settings: ProviderSettings
@@ -71,6 +76,11 @@ final class ResearchRunner: ResearchRunning {
             let ids = modelKeys.keys.map(\.uuidString).sorted().joined(separator: ", ")
             func held(_ secret: String?) -> String { secret == nil ? "absent" : "present" }
             return "Environment(model: \(settings.modelName), "
+                // The switch as well as the count. `modelChain` is the *effective* chain,
+                // so five configured providers with fallback off print as `providers: 1`
+                // — indistinguishable from having configured one, and "why was my spare
+                // never tried" is the likeliest question this rendering has to answer.
+                + "fallback: \(settings.modelFallback), "
                 + "providers: \(settings.modelChain.count), modelKeys: [\(ids)], "
                 + "modelKey: \(held(modelKey)), searchKey: \(held(searchKey)), "
                 + "readerKey: \(held(readerKey)))"

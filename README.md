@@ -74,7 +74,10 @@ runs the searches and answers based on current sources.
   rejects its key, or errors, the next provider you configured is tried, then the one
   after it — so a rate limit somewhere else does not cost you the question. It is never
   silent: the turn says it happened and names the model that actually answered. Off in
-  one switch, and a Stop is never re-sent to anyone.
+  one switch, and a Stop is never re-sent to anyone. Two failures deliberately stop the
+  turn instead of moving on, because they are Vervellum's rather than the provider's: a
+  Stop, and a question too large to send — that limit is Vervellum's own and the same at
+  every endpoint, so the next provider would refuse it in exactly the same way.
 - **Three ways to read a page.** **Snippets only** is the old behaviour. **Fetch
   directly** is the default: Vervellum requests the page itself, with no key, no cookie
   and no referrer — the only thing it does that contacts a site you didn't configure, so

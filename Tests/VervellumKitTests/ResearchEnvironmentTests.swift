@@ -91,6 +91,9 @@ final class ResearchEnvironmentTests: XCTestCase {
         XCTAssertTrue(rendering.contains("searchKey: present"), "searchKey is not reported")
         XCTAssertTrue(rendering.contains("readerKey: present"), "readerKey is not reported")
         XCTAssertTrue(rendering.contains("model: alpha"), "the model is not named")
+        // The switch as well as the count: with fallback off `providers` reads 1 whatever
+        // is configured, so the count alone cannot answer "why was my spare not tried".
+        XCTAssertTrue(rendering.contains("fallback: true"), "the fallback switch is not reported")
     }
 
     /// The absent case has to be distinguishable from the present one, or the rendering
