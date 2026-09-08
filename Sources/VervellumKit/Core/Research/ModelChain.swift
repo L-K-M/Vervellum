@@ -153,13 +153,40 @@ final class ModelChain {
                 guard let next = nextUsableProfile() else { break }
                 beforeRetry?()
                 trace.log("\(label): trying \(next.displayName)")
+            } catch let error as ResearchError {
+                // A cancellation, or a context no endpoint could take: the two failures
+                // the chain deliberately does not retry. Out unchanged, and named here so
+                // the clause below can say something true about everything else.
+                throw error
+            } catch {
+                // The contract in this method's doc — everything arrives as a
+                // `ResearchError` — is kept a file away, in `HTTPTransport` and
+                // `ChatCompletionsClient`. A call path added later that forgets it would
+                // leave the chain silently not falling back, which is the one failure
+                // this loop cannot see from the inside.
+                //
+                // Still not retried. Something that is not a `ResearchError` got here by
+                // a route nobody wrote down, and re-sending the question is not the
+                // repair for that. It is said out loud instead, in the trace the turn is
+                // already carrying.
+                trace.warn("\(label): \(type(of: error)) is not a ResearchError, "
+                    + "so the chain did not fall back")
+                throw error
             }
         }
 
-        // No provider ever ran, so nothing failed: the chain was empty, or every profile
-        // in it was too incomplete to build a request from.
+        // No provider ever ran, so nothing failed. Two reasons, and they send the reader
+        // to two different places: an empty chain means there is nothing in Settings to
+        // run, while a chain whose every profile was skipped means the entries are there
+        // and each is missing an endpoint or a model name. Telling somebody looking at
+        // three configured providers that none is configured reads as a bug in the app,
+        // and hides the one thing they could go and fix.
         guard let firstError else {
-            throw ResearchError("No model provider is configured. Check Settings ▸ Providers.")
+            guard !profiles.isEmpty else {
+                throw ResearchError("No model provider is configured. Check Settings ▸ Providers.")
+            }
+            throw ResearchError("No model provider could be used. Check the endpoint and "
+                + "model name on each one in Settings ▸ Providers.")
         }
         guard attempted > 1 else { throw firstError }
         throw ResearchError("All \(attempted) model providers failed. " + firstError.message)
