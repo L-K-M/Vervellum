@@ -69,6 +69,12 @@ runs the searches and answers based on current sources.
   puts it back beside Settings while you adjust it.
 - **Research the selection.** An optional second shortcut opens the panel with
   whatever text you had selected, with credential-shaped values stripped out first.
+- **Paste a link and it reads it first.** A question carrying a URL has that page
+  fetched *before* the searches are planned, so the plan is written against what the
+  page actually says rather than against a guess from its address. The page becomes the
+  turn's first numbered source, so the answer can cite it — and "summarise this" needs
+  no search at all. Up to three links, and only while page reading is on; a link that
+  is left unread says so on the turn.
 - **`/direct`** answers with no search at all, and is clearly badged as unsourced.
 - **Bring your own providers.** An OpenAI-compatible Chat Completions endpoint, and
   for search either an HTTP MCP server — recognized tools include z.ai, Brave, Tavily,

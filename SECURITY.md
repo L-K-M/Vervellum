@@ -115,8 +115,9 @@ replaced, with a visible count of how many.
   endpoint or a remote search server forget what was sent to it. Their handling is
   governed by their own policies.
 - **A page you read learns you read it.** With direct page reading the site behind a
-  search result receives a request from your machine and therefore your IP address, plus
-  whatever its own logs record. Nothing identifies Vervellum's user beyond that, but
+  search result — or behind a link you pasted into a question, which is read before the
+  searches are planned — receives a request from your machine and therefore your IP
+  address, plus whatever its own logs record. Nothing identifies Vervellum's user beyond that, but
   "the search provider saw the query" and "the site saw the visit" are different
   disclosures. A reader service moves the visit to the service and shows it the URLs
   instead; *Snippets only* makes neither request.

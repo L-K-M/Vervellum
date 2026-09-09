@@ -198,6 +198,13 @@ enum TurnNotice: String, Codable, Equatable {
     /// A page was read but its text did not fit the model's context, so the answer saw
     /// that source's summary only.
     case pageTextTrimmed
+    /// The question carried a link, but page reading is off — so the answer rests on
+    /// search results rather than on the page the user pointed at.
+    case linkReadingOff
+    /// A link in the question was not read — it could not be fetched, or it was past
+    /// the limit on links per question. Distinct from `noPagesRead`, which is about the
+    /// pages behind search results: this one is a page the user chose.
+    case linkNotRead
     /// A model provider failed and the next one in the chain answered instead. Not
     /// necessarily the *selected* provider: a turn can move on twice, and the second
     /// failure is a spare's. The turn's `model` is the one that actually answered.
@@ -241,6 +248,18 @@ enum TurnNotice: String, Codable, Equatable {
         case .pageTextTrimmed:
             return "A page was read but did not fit the model's context, so the answer saw that "
                 + "source's summary only. It is listed as a summary."
+        case .linkReadingOff:
+            // Not "the answer rests on search results instead", which this cannot know.
+            // A question that carries a link and needs no searches — a definition, a
+            // calculation — produces a plan with none, and the answer then rests on the
+            // model alone. Saying what did *not* happen is true in every case, and is
+            // the part the reader needs.
+            return "This question contains a link, but page reading is off in Settings, so its "
+                + "contents were not read. The answer does not rest on that page."
+        case .linkNotRead:
+            return "A link in this question was not read, so nothing below rests on it. Either "
+                + "it was past the number of links one question is read from, or the page could "
+                + "not be fetched — a login, a consent wall, or a file that is not a document."
         case .modelFellBack:
             return "A model provider failed, so the next one configured answered instead, "
                 + "and the rest of this turn used it too. The model named on this turn is "
@@ -356,6 +375,14 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// would make a thread written here unreadable there. A label is not worth that.
     var runningProgressLabel: String {
         guard case .searching = stage else { return stage.label }
+        // Searches first, while any are outstanding. `pagesAttempted` is no longer only
+        // set once the searching is done — a question carrying links has pages read
+        // before the plan even exists — so testing it first would report "Reading 2
+        // pages" over the whole search stage.
+        if !searches.isEmpty, searchesCompleted < searches.count {
+            let attempted = min(max(searchesCompleted, 1), searches.count)
+            return "Searching the web · \(attempted) of \(searches.count)"
+        }
         // No "2 of 3" here, unlike the searches: the direct reader fetches the pages
         // concurrently, so there is no meaningful running count to report — only how
         // many are being read.
@@ -363,8 +390,7 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
             return "Reading \(pagesAttempted) page\(pagesAttempted == 1 ? "" : "s")"
         }
         guard !searches.isEmpty else { return stage.label }
-        let attempted = min(max(searchesCompleted, 1), searches.count)
-        return "Searching the web · \(attempted) of \(searches.count)"
+        return "Searching the web · \(searches.count) of \(searches.count)"
     }
 
     /// Records a notice once. Notices are a set in spirit but an array on disk, so

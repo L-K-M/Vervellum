@@ -46,7 +46,7 @@ enum PageReaderFactory {
     static func make(settings: ProviderSettings,
                      readerKey: String?,
                      trace: ResearchTrace,
-                     transport: HTTPTransport = .shared) throws -> PageReading? {
+                     transport: any HTTPTransporting = HTTPTransport.shared) throws -> PageReading? {
         switch settings.pageReading {
         case .off:
             return nil
@@ -102,9 +102,9 @@ final class DirectPageReader: PageReading {
     let readerName = "direct fetch"
 
     private let trace: ResearchTrace
-    private let transport: HTTPTransport
+    private let transport: any HTTPTransporting
 
-    init(trace: ResearchTrace, transport: HTTPTransport = .shared) {
+    init(trace: ResearchTrace, transport: any HTTPTransporting = HTTPTransport.shared) {
         self.trace = trace
         self.transport = transport
     }

@@ -65,7 +65,7 @@ enum SearchBackendFactory {
     static func make(profile: SearchProfile,
                      apiKey: String?,
                      trace: ResearchTrace,
-                     transport: HTTPTransport = .shared) throws -> SearchBackend {
+                     transport: any HTTPTransporting = HTTPTransport.shared) throws -> SearchBackend {
         switch profile.kind {
         case .mcp:
             guard let url = ProviderSettings.validatedEndpointURL(profile.endpoint) else {

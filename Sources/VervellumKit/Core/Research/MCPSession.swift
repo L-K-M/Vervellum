@@ -29,7 +29,7 @@ import Foundation
 final class MCPSession {
 
     private let endpoint: URL
-    private let transport: HTTPTransport
+    private let transport: any HTTPTransporting
     private let trace: ResearchTrace
     /// What this server is *for*, in the user's words — "search provider", "page
     /// reader". Every failure names it, because "the provider rejected the key" is not
@@ -42,7 +42,7 @@ final class MCPSession {
          apiKey: String,
          subject: String,
          trace: ResearchTrace,
-         transport: HTTPTransport = .shared) {
+         transport: any HTTPTransporting = HTTPTransport.shared) {
         self.endpoint = endpoint
         self.transport = transport
         self.subject = subject

@@ -135,6 +135,69 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertEqual(turn.runningProgressLabel, "Searching the web · 3 of 3")
     }
 
+    /// Pages the question linked to are read before the plan exists, so `pagesAttempted`
+    /// is no longer zero until the searching is over. The searches still have to be what
+    /// the label reports while any of them are outstanding, or a turn that started from
+    /// a pasted link would read "Reading 2 pages" for the whole search stage.
+    func testSearchProgressOutranksPagesAlreadyReadForALink() {
+        var turn = ResearchTurn(question: "Summarise https://example.com/a")
+        turn.stage = .searching
+        turn.pagesAttempted = 2
+        turn.searches = [PlannedSearch(purpose: "a", argumentsJSON: "{\"q\":\"a\"}"),
+                         PlannedSearch(purpose: "b", argumentsJSON: "{\"q\":\"b\"}")]
+
+        turn.searchesCompleted = 1
+        XCTAssertEqual(turn.runningProgressLabel, "Searching the web · 1 of 2")
+
+        // Every search is in: reading the pages behind them is what happens next, and
+        // is now the honest thing to report.
+        turn.searchesCompleted = 2
+        XCTAssertEqual(turn.runningProgressLabel, "Reading 2 pages")
+
+        turn.pagesAttempted = 1
+        XCTAssertEqual(turn.runningProgressLabel, "Reading 1 page")
+    }
+
+    /// The turn this feature created: a question answered by its own links, whose plan
+    /// asked for no searches at all. There is no search progress to report and pages
+    /// were read, so the label has to be about the reading for the whole run — and never
+    /// "Searching the web · 0 of 0", which is a count of nothing presented as progress.
+    func testALinkOnlyTurnReportsItsReadingRatherThanASearchCountOfNothing() {
+        var turn = ResearchTurn(question: "Summarise https://example.com/a")
+        turn.stage = .searching
+        turn.searches = []
+        turn.pagesAttempted = 3
+        XCTAssertEqual(turn.runningProgressLabel, "Reading 3 pages")
+    }
+
+    /// The gap between the two branches: every search is in, and no page was attempted.
+    /// The count is still the honest report there — nothing is being read — so it stays
+    /// rather than falling through to the bare stage label.
+    func testCompletedSearchesWithNoPagesStillReportTheCount() {
+        var turn = ResearchTurn(question: "Q")
+        turn.stage = .searching
+        turn.searches = [PlannedSearch(purpose: "a", argumentsJSON: "{\"q\":\"a\"}")]
+        turn.searchesCompleted = 1
+        turn.pagesAttempted = 0
+        XCTAssertEqual(turn.runningProgressLabel, "Searching the web · 1 of 1")
+    }
+
+    /// A partial search count must not resurface once the turn has moved past searching.
+    /// The label is gated on the stage, not on the counters, and a turn that began with a
+    /// pasted link spends most of its life past that stage.
+    func testSearchCountsDoNotResurfaceOnceTheTurnMovesOn() {
+        var turn = ResearchTurn(question: "Summarise https://example.com/a")
+        turn.searches = [PlannedSearch(purpose: "a", argumentsJSON: "{\"q\":\"a\"}"),
+                         PlannedSearch(purpose: "b", argumentsJSON: "{\"q\":\"b\"}")]
+        turn.searchesCompleted = 1
+        turn.pagesAttempted = 2
+
+        turn.stage = .answering
+        XCTAssertEqual(turn.runningProgressLabel, ResearchStage.answering.label)
+        turn.stage = .assessing
+        XCTAssertEqual(turn.runningProgressLabel, ResearchStage.assessing.label)
+    }
+
     func testRunningProgressFallsBackToTheStageLabel() {
         var turn = ResearchTurn(question: "Q")
         turn.stage = .planning

@@ -105,11 +105,38 @@ enum ResearchPrompts {
         """
     }
 
-    static func plan(maxSearches: Int, today: String) -> String {
-        """
+    /// `hasLinkedPages` adds the paragraph about links the user pasted, which Vervellum
+    /// has already read by the time this call is made. Conditional rather than always
+    /// present because a prompt that describes a "linked_pages" key the payload does not
+    /// carry invites the model to go looking for one, and to explain its absence.
+    static func plan(maxSearches: Int, today: String, hasLinkedPages: Bool = false) -> String {
+        let linked = hasLinkedPages ? """
+
+
+        The question came with links, and their pages have already been read for you: \
+        they are under "linked_pages" as excerpts, and they are this turn's first \
+        numbered sources. Start there. The user pointed at those pages, so plan for \
+        what the question still needs *given* what they say — background they assume, \
+        a claim of theirs worth checking against an independent source, a date they \
+        do not carry, the other side of a case they put one side of. Do not plan a \
+        search whose purpose is to find a page you have already been given.
+        """ : ""
+        // Folded into the existing sentence rather than added after it: the escape is
+        // one list of cases, and a second sentence naming a fifth would read as a
+        // different rule.
+        //
+        // The whole tail rather than just the new item, because a list carries exactly
+        // one "or" and it belongs before the last entry. Appending ", or …" to a list
+        // that already ended in "or …" produced two of them, which reads as two separate
+        // decisions rather than one list of five.
+        let escapes = hasLinkedPages
+            ? "a request to transform text the user supplied, or a question the linked "
+                + "pages settle on their own"
+            : "or a request to transform text the user supplied"
+        return """
         \(trust)
 
-        TASK: plan the web searches needed to answer the user's question with evidence.
+        TASK: plan the web searches needed to answer the user's question with evidence.\(linked)
 
         Work out which factual questions the answer actually depends on, then plan up \
         to \(maxSearches) searches that would resolve them — as few as settle the \
@@ -137,8 +164,8 @@ enum ResearchPrompts {
         - "purpose": a short phrase naming what that search is meant to settle.
 
         If the question genuinely needs no external evidence — a definition, a \
-        calculation, a matter of pure preference, or a request to transform text the \
-        user supplied — return an empty "searches" array and say why in "reading".
+        calculation, a matter of pure preference, \(escapes) — return an empty \
+        "searches" array and say why in "reading".
         \(jsonOnly)
         """
     }

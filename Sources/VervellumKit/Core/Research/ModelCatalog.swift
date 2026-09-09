@@ -84,7 +84,7 @@ final class ModelCatalogClient {
     private let url: URL
     private let apiKey: String?
     private let trace: ResearchTrace
-    private let transport: HTTPTransport
+    private let transport: any HTTPTransporting
 
     /// How long to wait for a list of model names.
     ///
@@ -108,7 +108,8 @@ final class ModelCatalogClient {
     /// caller's contract and not this one's to change.
     static let listTimeout: TimeInterval = 30
 
-    init(url: URL, apiKey: String?, trace: ResearchTrace, transport: HTTPTransport = .shared) {
+    init(url: URL, apiKey: String?, trace: ResearchTrace,
+         transport: any HTTPTransporting = HTTPTransport.shared) {
         self.url = url
         self.apiKey = apiKey?.isEmpty == true ? nil : apiKey
         self.trace = trace
