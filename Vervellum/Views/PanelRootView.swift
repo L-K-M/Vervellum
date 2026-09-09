@@ -254,7 +254,7 @@ struct PanelRootView: View {
                 guard isPinnedToBottom else { return }
                 scrollToBottom(proxy)
             }
-            .onChange(of: draft) { _, _ in
+            .onChange(of: draft) { old, new in
                 // Any edit invalidates the highlight: the list is filtered by what has
                 // been typed, so an index kept across a keystroke could point past the
                 // end of the shorter list, or at a command the user has just filtered out.
@@ -262,6 +262,7 @@ struct PanelRootView: View {
                 // And the list is a new list, so leaving the old one says nothing about
                 // this one.
                 clearCompletionChoices(dismissed: false)
+                announceListOpening(from: old, to: new)
             }
             .onChange(of: engine.thread.turns.count) { _, _ in
                 scrollToBottom(proxy)
@@ -952,6 +953,30 @@ struct PanelRootView: View {
     /// chokepoint rather than a key handler, so it holds today only because the send
     /// button greys itself out on the same predicate and cannot reach the guard. A
     /// caller added later that is not a keystroke would need to say so.
+    /// Said once, when a command list appears where there was none.
+    ///
+    /// The gap this closes is real: the list opening changes what Return does — from
+    /// declining a half-typed word to taking a row — and a reader whose cursor is in the
+    /// field had no way to know until they pressed it and heard the result.
+    ///
+    /// It does not name the row, and that is the difference from the announcement
+    /// declined earlier. Naming it goes stale immediately: the list opens at `/` holding
+    /// the whole catalogue, so the row named would be the first of eight, and the reader
+    /// is in the middle of typing the word that narrows it. What does not go stale is
+    /// that a list is there and Return will take from it.
+    ///
+    /// Only on the opening. Every later keystroke narrows a list already announced, and
+    /// a line spoken per keystroke would talk over the character echo — which is what
+    /// makes a field unusable rather than merely quiet.
+    private func announceListOpening(from old: String, to new: String) {
+        guard ComposerCommand.completions(for: old) == nil,
+              let opened = ComposerCommand.completions(for: new), !opened.isEmpty,
+              ComposerCommand.isHalfTypedCommand(new)
+        else { return }
+        announce("Command list, \(opened.count) \(opened.count == 1 ? "match" : "matches"). "
+                 + "Return completes the highlighted one.")
+    }
+
     private func announce(_ message: String) {
         NSAccessibility.post(element: NSApp as Any,
                              notification: .announcementRequested,

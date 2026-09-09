@@ -83,6 +83,13 @@ struct ProcessTrailView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isExpanded ? "Hide research detail" : "Show research detail")
+        // The same swallowed-label bug `SourcesView` has, and here it costs more. An
+        // explicit label replaces the one SwiftUI composes from the button's children, so
+        // the live line goes with it — and since the detail now starts closed, that line
+        // is the *only* place a running turn says what it is doing. A reader using
+        // VoiceOver heard "Show research detail" for the whole forty seconds. "Loud while
+        // it is happening" has to mean out loud.
+        .accessibilityValue(summaryLine)
     }
 
     @ViewBuilder
