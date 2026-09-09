@@ -235,6 +235,11 @@ final class ResearchRunnerTests: XCTestCase {
 
         XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
         XCTAssertTrue(turn.notices.contains(.noPagesRead), "notices: \(turn.notices)")
+        // The other half of the same contract: a refused result is still a source, kept
+        // with its snippet, exactly as it is on the turn where only some were refused.
+        // Dropping them here would leave the answer's `[1]` pointing at nothing.
+        XCTAssertEqual(turn.sources.map(\.url), ["http://192.168.1.1/admin"])
+        XCTAssertFalse(turn.sources.first?.snippet.isEmpty ?? true)
         XCTAssertEqual(turn.pagesAttempted, 0)
         XCTAssertEqual(turn.pagesRead, 0)
         XCTAssertTrue(transport.calls.allSatisfy { $0.kind != .fetch },

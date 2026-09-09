@@ -394,20 +394,30 @@ final class DirectPageReader: PageReading {
 
     /// The same question for IPv6, with one rule doing most of the work: **an address
     /// that carries an IPv4 destination inside it is decided by that destination.**
-    /// Four prefixes do — `::ffff:0:0/96` (v4-mapped), the deprecated v4-compatible
-    /// form, `2002::/16` (6to4, where the relay encapsulates to the embedded address)
-    /// and `64:ff9b::/96` (the well-known prefix a NAT64 network translates) — and
-    /// writing `192.168.1.1` in any of them has to mean what writing it plainly means.
+    /// Writing `192.168.1.1` inside an IPv6 literal has to mean what writing it plainly
+    /// means, in every spelling that does so: the v4-mapped `::ffff:a.b.c.d`, the
+    /// deprecated v4-compatible `::a.b.c.d`, the RFC 2765 v4-translated
+    /// `::ffff:0:a.b.c.d`, `2002::/16` (6to4, where the relay encapsulates to the
+    /// embedded address) and `64:ff9b::/96` (the prefix a NAT64 network translates).
     ///
     /// Teredo (`2001:0::/32`) is not on that list deliberately: the IPv4 addresses it
     /// embeds are the relay's and the client's own, not a destination inside the user's
     /// network, so there is nothing there to decide.
     static func isPublicIPv6(_ bytes: [UInt8]) -> Bool {
         guard bytes.count == 16 else { return false }
-        if bytes[0..<10].allSatisfy({ $0 == 0 }),
-           (bytes[10] == 0 && bytes[11] == 0) || (bytes[10] == 0xff && bytes[11] == 0xff) {
-            // `::` and `::1` land here too, and fail on their first octet being zero.
-            return isPublicIPv4(Array(bytes[12..<16]))
+        // Eight zero bytes and then a marker: `0000 0000` is the v4-compatible form,
+        // `0000 ffff` the v4-mapped one, and `ffff 0000` the v4-translated one — three
+        // spellings of "the address is in the last four bytes". Stated as one rule
+        // rather than three branches, because the rule is what has to hold: the
+        // translated form was written as a fourth case nobody had, and it read as public
+        // while carrying `10.0.0.1`.
+        if bytes[0..<8].allSatisfy({ $0 == 0 }) {
+            let marker = Array(bytes[8..<12])
+            if marker == [0, 0, 0, 0] || marker == [0, 0, 0xff, 0xff]
+                || marker == [0xff, 0xff, 0, 0] {
+                // `::` and `::1` land here too, and fail on their first octet being zero.
+                return isPublicIPv4(Array(bytes[12..<16]))
+            }
         }
         // 6to4 keeps the address in the second and third groups: `2002:c0a8:0101::`.
         if bytes[0] == 0x20, bytes[1] == 0x02 { return isPublicIPv4(Array(bytes[2..<6])) }

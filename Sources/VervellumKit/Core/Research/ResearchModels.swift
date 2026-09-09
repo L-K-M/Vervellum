@@ -287,6 +287,13 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// How many pages Vervellum tried to read, and how many it got. Zero for a turn
     /// where page reading was off, which is also what a thread written before page
     /// reading decodes to.
+    ///
+    /// "Tried" means different things in the two passes, and the difference is policy
+    /// rather than drift. The question's own links are all counted, private addresses
+    /// included, because the user asked for them and they were handed to the reader. A
+    /// search result that fails the public-address filter was never attempted at all —
+    /// no request was made and none was going to be — so it is not counted here, only
+    /// in the trace.
     var pagesAttempted: Int = 0
     var pagesRead: Int = 0
     /// How many pages are being fetched *right now*, and zero the rest of the time.

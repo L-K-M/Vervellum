@@ -86,7 +86,8 @@ and they are built to have nothing worth stealing:
   `data:` targets are rejected at each hop rather than only at the first.
 - **A redirect cannot cross into private address space.** A chain that started on a
   public address must stay on one. A hop to loopback, link-local, an RFC 1918 block or
-  carrier NAT ends the read, in IPv4 and in IPv6 alike — `::1`, `fc00::/7`, `fe80::/9`,
+  carrier NAT ends the read, in IPv4 and in IPv6 alike — `::1`, `fc00::/7`, and
+  `fe80::/9`, which is link-local plus the deprecated site-local block above it,
   and the forms that carry an IPv4 address inside them (`::ffff:192.168.1.1`, 6to4,
   NAT64) are decided by what they actually name. So do the reserved local names
   (`localhost`, `.local`, `.localdomain`), and so does any host that cannot be read as
@@ -116,13 +117,13 @@ and they are built to have nothing worth stealing:
   from it, and neither is hidden. **The page's text leaves your machine** — it becomes
   numbered evidence and is sent to your model provider like any other source, so a link
   to an internal admin page discloses that page's contents to them. And the licence is
-  yours alone, as far as an address can be checked: **an address you did not type never
-  reaches private space.** A search result that points at one is left unread with its
-  snippet, and a page that answers a redirect with one ends the read, so no page that
-  wins a search slot can turn Vervellum into a probe of your network by naming it. A
-  *hostname* is the exception, and it is the gap described three bullets up: a name that
-  resolves into private space is not caught, because nothing here sees what it resolved
-  to. If any of this matters for how you run Vervellum, set **Reading the page** to
+  yours alone: **an address you did not type never reaches private space.** A search
+  result that names one is left unread with its snippet, and a page that answers a
+  redirect with one ends the read, so no page that wins a search slot can turn Vervellum
+  into a probe of your network by naming it. That sentence is deliberately about an
+  *address*: a **hostname** that resolves into private space is not caught, which is the
+  gap described three bullets up — nothing here sees what a name resolved to. If any of
+  this matters for how you run Vervellum, set **Reading the page** to
   *Snippets only*: nothing is fetched at all, and a question that carried a link says so
   in a notice rather than having it read for you.
 

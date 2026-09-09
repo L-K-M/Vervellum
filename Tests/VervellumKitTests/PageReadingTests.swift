@@ -225,6 +225,21 @@ final class PageReadingTests: XCTestCase {
         XCTAssertEqual(isPublic("ff02::1"), false)                  // multicast
         XCTAssertEqual(isPublic("::ffff:192.168.0.1"), false)       // v4-mapped, and private
         XCTAssertEqual(isPublic("::ffff:127.0.0.1"), false)
+        // The same two addresses in hex groups. Pinned because the premise of this test
+        // is that classification reads parsed bytes: a check that matched the `::ffff:`
+        // and a dotted quad as *text* would let these through.
+        XCTAssertEqual(isPublic("::ffff:7f00:1"), false)            // 127.0.0.1
+        XCTAssertEqual(isPublic("::ffff:c0a8:1"), false)            // 192.168.0.1
+        XCTAssertEqual(isPublic("::ffff:808:808"), true)            // 8.8.8.8
+        // RFC 2765's v4-translated form puts the marker one group earlier, which is a
+        // third spelling of "the address is in the last four bytes" — and was a fourth
+        // case nobody had: it read as public while carrying 10.0.0.1.
+        XCTAssertEqual(isPublic("::ffff:0:10.0.0.1"), false)
+        XCTAssertEqual(isPublic("::ffff:0:169.254.169.254"), false)
+        XCTAssertEqual(isPublic("::ffff:0:127.0.0.1"), false)
+        XCTAssertEqual(isPublic("::ffff:0:8.8.8.8"), true)
+        // And the deprecated v4-compatible form, which has no marker at all.
+        XCTAssertEqual(isPublic("::10.0.0.1"), false)
         XCTAssertEqual(isPublic("2002:c0a8:0101::"), false)          // 6to4 around 192.168.1.1
         XCTAssertEqual(isPublic("2002:7f00:0001::"), false)          // 6to4 around 127.0.0.1
         XCTAssertEqual(isPublic("64:ff9b::192.168.1.1"), false)      // NAT64 around the same
@@ -314,6 +329,30 @@ final class PageReadingTests: XCTestCase {
         XCTAssertTrue(pages.isEmpty)
         XCTAssertEqual(stub.trail, ["fetch https://public.example.com/a"],
                        "the cloud metadata address was requested")
+    }
+
+    /// The mirror of the refusal above, and the half a guard like this usually gets
+    /// wrong: a scheme-relative hop to a *public* host is still followed. Refusing the
+    /// form rather than the address would break one of the most common redirect shapes
+    /// on the web, and would do it silently.
+    func testASchemeRelativePublicLocationIsStillFollowed() async {
+        let stub = StubTransport { call in
+            switch call.url.absoluteString {
+            case "https://public.example.com/a":
+                return .page(status: 302, headers: ["Location": "//other.example.com/b"],
+                             text: "")
+            case "https://other.example.com/b":
+                return .html("<p>Behind a scheme-relative hop.</p>")
+            default:
+                return .unrouted
+            }
+        }
+        let reader = DirectPageReader(trace: ResearchTrace(sink: SilentLog()), transport: stub)
+        let source = Source(number: 1, url: "https://public.example.com/a", title: "T", snippet: "S")
+
+        let pages = await reader.read([source])
+        XCTAssertTrue(pages[1]?.contains("Behind a scheme-relative hop.") ?? false,
+                      "a scheme-relative hop to a public host stopped being followed")
     }
 
     /// And the same refusal one hop later, because a chain that starts public must stay

@@ -162,7 +162,7 @@ final class ResearchModelTests: XCTestCase {
     /// while nothing is being searched is the confusion this field exists to end. The
     /// two are different facts, which is exactly why the label stopped inferring one
     /// from the other.
-    func testSearchProgressOutranksPagesAlreadyReadForALink() {
+    func testSearchProgressOutranksPagesAlreadyReadButNotOnesInFlight() {
         var turn = ResearchTurn(question: "Summarise https://example.com/a")
         turn.stage = .searching
         turn.pagesAttempted = 2
@@ -183,6 +183,26 @@ final class ResearchModelTests: XCTestCase {
 
         turn.pagesInFlight = 1
         XCTAssertEqual(turn.runningProgressLabel, "Reading 1 page")
+    }
+
+    /// The state a link-question actually spends time in, and the one place the two
+    /// facts are genuinely both true: the pre-plan fetch is still outstanding while the
+    /// searches are only part done. In flight wins here too — it is what the turn is
+    /// waiting on — and the precedence is pinned rather than left to the two tests that
+    /// only ever ask it once the searches are finished.
+    func testAnInFlightReadOutranksSearchesThatAreNotFinished() {
+        var turn = ResearchTurn(question: "Summarise https://example.com/a")
+        turn.stage = .searching
+        turn.searches = [PlannedSearch(purpose: "a", argumentsJSON: "{\"q\":\"a\"}"),
+                         PlannedSearch(purpose: "b", argumentsJSON: "{\"q\":\"b\"}")]
+        turn.searchesCompleted = 1
+        turn.pagesAttempted = 1
+        turn.pagesInFlight = 1
+        XCTAssertEqual(turn.runningProgressLabel, "Reading 1 page")
+
+        // And the moment it lands, the searches are what is left to wait for.
+        turn.pagesInFlight = 0
+        XCTAssertEqual(turn.runningProgressLabel, "Searching the web · 1 of 2")
     }
 
     /// The reason the field counts rather than flags. A turn that read one pasted link
