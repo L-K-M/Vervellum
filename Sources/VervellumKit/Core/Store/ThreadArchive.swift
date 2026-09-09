@@ -31,6 +31,16 @@ final class ThreadArchive {
     /// understands. In that case the archive never writes.
     let isReadOnly: Bool
 
+    /// Whether `library` is a true picture of what is stored — either the file decoded,
+    /// or there was no file to decode.
+    ///
+    /// False means a document exists and could not be read: a corrupt file, a partial
+    /// write, or one this build must not touch. It matters to anything that *deletes*
+    /// what the library does not mention. `AttachmentStore`'s sweep is exactly that, and
+    /// an empty library from a failed read would tell it to delete every attachment
+    /// while a repairable thread file — and its `.bak` — still name them.
+    let libraryIsTrustworthy: Bool
+
     /// Why the last erase left the file in place, in words fit for the interface; nil
     /// once an erase succeeds. "History off means the bytes are gone" is a promise
     /// Settings makes, and when the file system breaks it the user has to be told
@@ -126,6 +136,7 @@ final class ThreadArchive {
         // flag exists to prevent.
         let onDisk = Self.load(from: fileURL, fileManager: fileManager)
         isReadOnly = onDisk.newerVersion != nil
+        libraryIsTrustworthy = onDisk.library != nil || !onDisk.fileExisted
         library = historyEnabled ? (onDisk.library ?? ThreadLibrary()) : ThreadLibrary()
         primaryIsTrustworthy = onDisk.primaryDecoded
         if let newer = onDisk.newerVersion {
@@ -324,6 +335,15 @@ final class ThreadArchive {
         var newerVersion: Int?
         /// Whether the primary file decoded, as opposed to the backup standing in for it.
         var primaryDecoded = false
+        /// Whether a document is *there*, readable or not. Distinguishes "no library
+        /// yet" from "a library that would not decode", which look the same afterwards.
+        ///
+        /// Presence, deliberately, rather than "bytes came back": a file whose contents
+        /// cannot be read at all — a permissions change, an I/O error, a directory where
+        /// the file should be — leaves `candidates` empty exactly as an absent file
+        /// does, and calling that "nothing stored" is what would let a sweep delete
+        /// every attachment the unreadable file still names.
+        var fileExisted = false
     }
 
     private static func load(from url: URL, fileManager: FileManager) -> Loaded {
@@ -334,6 +354,8 @@ final class ThreadArchive {
             guard let data = fileManager.contents(atPath: candidate.path) else { return nil }
             return (candidate, data)
         }
+        loaded.fileExisted = fileManager.fileExists(atPath: url.path)
+            || fileManager.fileExists(atPath: url.appendingPathExtension("bak").path)
         // Inspect both stamps before adopting either file; rotation can erase a newer backup.
         for (_, data) in candidates {
             if let stamp = try? decoder.decode(VersionStamp.self, from: data),

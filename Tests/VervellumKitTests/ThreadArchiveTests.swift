@@ -163,6 +163,33 @@ final class ThreadArchiveTests: XCTestCase {
 
         let reloaded = ThreadArchive(fileURL: fileURL, debounce: 0)
         XCTAssertFalse(reloaded.library.threads.isEmpty)
+        // A backup standing in is still the whole of what this launch will honour: the
+        // save it is behind by is lost either way, so bytes only that save named are
+        // orphaned, not in use, and the sweep may run.
+        XCTAssertTrue(reloaded.libraryIsTrustworthy)
+    }
+
+    /// The launch sweep deletes every attachment the library does not name, so it may
+    /// only run when the library that came back is the whole truth. A first launch has
+    /// nothing to protect and passes that test; a document that would not decode fails it.
+    func testAnAbsentLibraryIsTrustworthyAndAnUndecodableOneIsNot() throws {
+        XCTAssertTrue(ThreadArchive(fileURL: fileURL, debounce: 0).libraryIsTrustworthy)
+
+        try "{ not json".write(to: fileURL, atomically: true, encoding: .utf8)
+        XCTAssertFalse(ThreadArchive(fileURL: fileURL, debounce: 0).libraryIsTrustworthy)
+    }
+
+    /// Unreadable is not absent, and only the second is safe. A document whose bytes
+    /// never arrive — a permissions change, an I/O error, a directory standing where the
+    /// file should be — leaves the archive holding an empty library exactly as a first
+    /// launch does. Reading that as "nothing was ever stored" is what would let the
+    /// launch sweep delete the attachments the unread document still names.
+    func testALibraryThatIsThereButCannotBeReadIsNotTrustworthy() throws {
+        try FileManager.default.createDirectory(at: fileURL, withIntermediateDirectories: false)
+
+        let archive = ThreadArchive(fileURL: fileURL, debounce: 0)
+        XCTAssertTrue(archive.library.threads.isEmpty)
+        XCTAssertFalse(archive.libraryIsTrustworthy)
     }
 
     /// "Off" has to mean the bytes are gone, not that they are hidden.
