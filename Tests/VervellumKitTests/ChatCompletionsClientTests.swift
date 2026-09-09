@@ -301,6 +301,13 @@ final class ChatCompletionsClientTests: XCTestCase {
         let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
         let parts = try XCTUnwrap(messages.last?["content"] as? [[String: Any]])
         XCTAssertEqual(parts.count, 2)
+        // The count alone was the whole assertion, so a regression that swapped the two,
+        // sent two text parts, or mangled the `data:` prefix would have read as green
+        // here — and this is the unit-level home for that shape.
+        XCTAssertEqual(parts[0]["type"] as? String, "text")
+        XCTAssertEqual(parts[1]["type"] as? String, "image_url")
+        XCTAssertEqual((parts[1]["image_url"] as? [String: Any])?["url"] as? String,
+                       "data:image/png;base64,AAAA")
     }
 
     /// Inline rather than hosted. The alternative is uploading the user's screenshot

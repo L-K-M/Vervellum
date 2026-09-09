@@ -443,6 +443,14 @@ final class ResearchRunnerTests: XCTestCase {
         let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
         XCTAssertNotNil(messages.last?["content"] as? String,
                         "an image-less request must still send a plain string")
+        // The whole request, not only the last message: an image part placed anywhere
+        // else — the system message, an extra message appended later — is the placement
+        // failure the client-level test scans for, and the comment above claims the
+        // shape of the request rather than the shape of one message in it.
+        let whole = String(decoding: try JSONSerialization.data(withJSONObject: body),
+                           as: UTF8.self)
+        XCTAssertFalse(whole.contains("image_url"),
+                       "an image reached a provider that cannot see")
     }
 
     /// An attached text file is inlined into the payload, so a model with no eyes at all

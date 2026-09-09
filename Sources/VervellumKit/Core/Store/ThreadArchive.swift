@@ -39,6 +39,17 @@ final class ThreadArchive {
     /// what the library does not mention. `AttachmentStore`'s sweep is exactly that, and
     /// an empty library from a failed read would tell it to delete every attachment
     /// while a repairable thread file — and its `.bak` — still name them.
+    ///
+    /// Two states look as though they should need a clause here and do not. A *read-only*
+    /// document — one stamped with a version this build does not know — never arrives
+    /// trustworthy, because `load` returns on the version stamp before it decodes
+    /// anything: the library is nil beside a file that existed, which is the false case
+    /// already. And with history *off*, `library` is deliberately empty while the file
+    /// may still be on disk — but the erase in `init` is what makes the disk agree, and a
+    /// sweep that then finds nothing live is that erase reaching the bytes rather than a
+    /// flag vouching for a picture it does not have. Gating this on `historyEnabled`
+    /// would undo it: the sweep is the only thing that clears attachment bytes when the
+    /// app launches with history already off.
     let libraryIsTrustworthy: Bool
 
     /// Why the last erase left the file in place, in words fit for the interface; nil

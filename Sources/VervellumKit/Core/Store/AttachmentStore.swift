@@ -98,18 +98,28 @@ final class AttachmentStore {
         try? fileManager.setAttributes([.posixPermissions: 0o600],
                                        ofItemAtPath: staged.path)
         let destination = url(for: attachment.id)
+        let displaced = url(for: UUID())
         do {
-            // Removed first because `moveItem` refuses an occupied destination. The gap
-            // is between two writes of the same attachment, which is the "retaken
-            // screenshot" case and not one anything can be reading through.
+            // Moved aside rather than removed, because `moveItem` refuses an occupied
+            // destination and a *removal* is the one step here that cannot be taken
+            // back. If the move that follows then fails — a locked file, a transient
+            // error — the previous bytes are gone while the turn that names them is
+            // still on screen. A rename keeps them until the new ones are in place, and
+            // the catch puts them back. What a crash strands is a copy under a UUID name
+            // nothing refers to, which is precisely what the sweep is for.
             if fileManager.fileExists(atPath: destination.path) {
-                try fileManager.removeItem(at: destination)
+                try fileManager.moveItem(at: destination, to: displaced)
             }
             try fileManager.moveItem(at: staged, to: destination)
+            try? fileManager.removeItem(at: displaced)
         } catch {
             // Never leave the staged copy behind on a failure: it is bytes of the user's
-            // file under a name no turn will ever mention.
+            // file under a name no turn will ever mention. The displaced copy is the
+            // opposite — bytes a turn *does* name — so it goes back where it was.
             try? fileManager.removeItem(at: staged)
+            if !fileManager.fileExists(atPath: destination.path) {
+                try? fileManager.moveItem(at: displaced, to: destination)
+            }
             throw error
         }
     }
@@ -141,13 +151,14 @@ final class AttachmentStore {
     /// Getting the set wrong in the safe direction costs a stale file until the next
     /// sweep; getting it wrong in the other direction would delete a live attachment, so
     /// the caller passes what it *kept*, never what it dropped.
-    @discardableResult
+    ///
     /// The window assumes bytes are written at *send* time, which is what both front
     /// ends do: `ResearchEngine.start` and `LinuxPanel.ask` write inside the same
     /// function that appends the turn and saves the library, milliseconds apart. Five
     /// minutes is margin against a slow disk, not against a reader who is still typing —
     /// a front end that ever wrote at attach time would need a window longer than a
     /// compose, and should raise this rather than hope.
+    @discardableResult
     func sweep(keeping live: Set<UUID>, sparingFilesNewerThan grace: TimeInterval = 300) -> Int {
         guard let names = try? fileManager.contentsOfDirectory(atPath: directory.path) else {
             return 0

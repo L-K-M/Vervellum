@@ -33,8 +33,13 @@ struct Attachment: Codable, Equatable, Identifiable {
         case other
 
         init(from decoder: Decoder) throws {
-            let raw = try decoder.singleValueContainer().decode(String.self)
-            self = Kind(rawValue: raw) ?? .other
+            // `try?`, so the leniency covers the *shape* and not only the spelling. A
+            // string this build has never seen was already answered with `.other`; a
+            // value that is not a string at all — corruption, or a later build changing
+            // how it writes this — threw, and the throw climbed the ladder this whole
+            // decoder was hand-written to stop: attachment, turn, library.
+            let raw = try? decoder.singleValueContainer().decode(String.self)
+            self = raw.flatMap(Kind.init(rawValue:)) ?? .other
         }
     }
 
@@ -81,7 +86,15 @@ struct Attachment: Codable, Equatable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
         kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .other
-        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "attachment"
+        // Through `displayName` like every other way a name arrives. The property says
+        // it is sanitised on the way in, and this was a way in that was not: a document
+        // hand-edited, restored from a backup, or written by anything but this code
+        // could put a newline, a bidi override or a path separator straight into the
+        // panel and the request payload. Idempotent, so a name this build wrote is
+        // unchanged — and it is also what bounds the length, which is the other promise
+        // the property makes.
+        let storedName = try container.decodeIfPresent(String.self, forKey: .name)
+        name = Attachment.displayName(for: storedName ?? "attachment")
         mediaType = try container.decodeIfPresent(String.self, forKey: .mediaType)
             ?? "application/octet-stream"
         byteCount = try container.decodeIfPresent(Int.self, forKey: .byteCount) ?? 0
@@ -123,10 +136,12 @@ struct Attachment: Codable, Equatable, Identifiable {
         ([0xFF, 0xD8, 0xFF], "image/jpeg"),
         // The full six bytes, not the four of "GIF8". The other two signatures contain
         // bytes that cannot appear in valid UTF-8, so they can never collide with a text
-        // file — this one is pure ASCII, and a changelog or a note that happens to begin
-        // "GIF89a" would have sniffed as an image, been base64'd into a `data:` URL, and
-        // had its actual text never sent at all. Sniffing is only worth doing if the
-        // signature is the whole signature.
+        // file — this one is pure ASCII, and a note beginning "GIF8" is ordinary enough
+        // that four bytes was not a signature at all. Six narrows it to a file that opens
+        // with the literal "GIF87a" or "GIF89a" and is not one: that collision is still
+        // there, and is accepted rather than closed. Closing it would mean preferring a
+        // successful text decode over the magic bytes, which trades a note nobody writes
+        // for a real GIF read as text — the same failure pointing the other way.
         ([0x47, 0x49, 0x46, 0x38, 0x37, 0x61], "image/gif"),
         ([0x47, 0x49, 0x46, 0x38, 0x39, 0x61], "image/gif"),
     ]
@@ -222,7 +237,8 @@ struct Attachment: Codable, Equatable, Identifiable {
         // the panel, and its name carried into every later turn's history — telling the
         // model about a file whose contents are nothing, which is an invitation to
         // explain the emptiness rather than answer the question.
-        guard let text = text(from: data), !text.isEmpty else {
+        guard let text = text(from: data),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return .failure(.unsupported(name: display))
         }
         let kept = truncated(text)

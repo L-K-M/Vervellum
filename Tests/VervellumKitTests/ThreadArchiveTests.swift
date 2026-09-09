@@ -173,10 +173,31 @@ final class ThreadArchiveTests: XCTestCase {
     /// only run when the library that came back is the whole truth. A first launch has
     /// nothing to protect and passes that test; a document that would not decode fails it.
     func testAnAbsentLibraryIsTrustworthyAndAnUndecodableOneIsNot() throws {
+        // Absence, established rather than assumed: the sibling test below defends the
+        // same precondition, and without it a file left by an earlier state would turn
+        // the first assertion into "a decodable library is trustworthy" — true, and not
+        // what this test is named after.
+        try? FileManager.default.removeItem(at: fileURL)
         XCTAssertTrue(ThreadArchive(fileURL: fileURL, debounce: 0).libraryIsTrustworthy)
 
         try "{ not json".write(to: fileURL, atomically: true, encoding: .utf8)
         XCTAssertFalse(ThreadArchive(fileURL: fileURL, debounce: 0).libraryIsTrustworthy)
+    }
+
+    /// A newer build's document must never vouch for a sweep, and nothing in the flag's
+    /// own expression says so: it falls out of `load` returning on the version stamp
+    /// before it decodes anything, which leaves the library nil beside a file that
+    /// existed. Two facts in two places agreeing by luck until something pins them — and
+    /// a `load` that ever decoded a newer document first would hand the sweep a library
+    /// this build had read only the legible half of.
+    func testANewerDocumentNeverVouchesForASweep() throws {
+        let future = #"{"version": 99, "threads": []}"#
+        try future.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let archive = ThreadArchive(fileURL: fileURL, debounce: 0)
+        XCTAssertTrue(archive.isReadOnly, "a version this build does not know is read-only")
+        XCTAssertFalse(archive.libraryIsTrustworthy,
+                       "read-only means the attachments beside it are not ours to sweep")
     }
 
     /// Unreadable is not absent, and only the second is safe. A document whose bytes

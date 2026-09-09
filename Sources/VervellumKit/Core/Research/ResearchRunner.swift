@@ -548,6 +548,19 @@ final class ResearchRunner: ResearchRunning {
         let planContext = ResearchContext.assemble(
             question: question, history: history, today: today, extra: planExtra)
         if planContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
+        // The second payload for a planner with no eyes, built exactly as the answer
+        // stage builds its own. This used to argue the other way — that naming a picture
+        // the provider was not sent would be "a sentence about something that is not
+        // there" — and the answer stage settles that argument against it. A question
+        // *about* a screenshot, planned by a model with no screenshot and nothing saying
+        // one was meant to be there, is planned from the words alone; being told the
+        // picture exists and is unavailable is what lets it plan around the fact.
+        let withheldPlanContext = planImages.isEmpty ? nil : ResearchContext.assemble(
+            question: question, history: history, today: today,
+            extra: planExtra.merging([
+                "attachments": attachments.payload
+                    + attachments.imageNames.map { ["name": $0, "unavailable": "yes"] },
+            ]) { _, new in new })
 
         // Parsed *inside* the chain, not after it. A provider that answers with valid
         // JSON in the wrong shape has failed at the same job as one that answers with
@@ -569,19 +582,28 @@ final class ResearchRunner: ResearchRunning {
             let object = try await chat.completeJSON(
                 system: ResearchPrompts.plan(maxSearches: Self.maxSearches, today: today,
                                              hasLinkedPages: !linked.isEmpty,
-                                             // `images`, not `planImages`: a provider
-                                             // without eyes is not sent the picture, so
-                                             // telling it one is attached to this message
-                                             // would be a sentence about something that
-                                             // is not there.
-                                             hasAttachments: !images.isEmpty
+                                             // `planImages`, not `images`: the turn
+                                             // either carries attachments or it does
+                                             // not, and which provider this attempt
+                                             // reached does not change that. The payload
+                                             // below says which of them actually came.
+                                             hasAttachments: !planImages.isEmpty
                                                  || !attachments.payload.isEmpty),
-                payload: planContext.payload, label: "Plan", images: images)
+                payload: images.isEmpty ? (withheldPlanContext ?? planContext).payload
+                                        : planContext.payload,
+                label: "Plan", images: images)
             return try PlanParser.parse(object, maxSearches: Self.maxSearches)
         }
         // Said in the trace, because the turn's own notice is raised by the answer stage:
         // a plan made without the screenshot, on a chain that fell back to a provider
         // with no eyes, otherwise looks in the log exactly like a plan made with it.
+        // The withheld payload is a superset of the ordinary one — the same evidence
+        // plus an entry naming each picture — so it can trip the trimming budget where
+        // the ordinary one did not, and the notice belongs to whichever payload actually
+        // went. `addNotice` refuses a duplicate, so a retry that trims twice says it once.
+        if !sentPlanImages, withheldPlanContext?.trimmed == true {
+            update { $0.addNotice(.contextTrimmed) }
+        }
         if !planImages.isEmpty, !sentPlanImages {
             trace.log("Plan: \(planImages.count) image(s) withheld — "
                       + "this provider is not set to be sent images")
@@ -891,6 +913,11 @@ final class ResearchRunner: ResearchRunning {
             ) { [weak self] chunk in
                 self?.update { $0.answer += chunk }
             }
+        }
+        // As in the plan stage: the payload that went is the one whose trimming the
+        // reader has to be told about, and the withheld one carries more.
+        if !sentImages, withheldContext?.trimmed == true {
+            update { $0.addNotice(.contextTrimmed) }
         }
         if !answerImages.isEmpty, !sentImages { update { $0.addNotice(.imagesNotSent) } }
         recordAnsweringModel(from: chain)
@@ -1255,6 +1282,10 @@ final class ResearchRunner: ResearchRunning {
             ) { [weak self] chunk in
                 self?.update { $0.answer += chunk }
             }
+        }
+        // And here, for the same reason as the research path.
+        if !sentImages, withheldContext?.trimmed == true {
+            update { $0.addNotice(.contextTrimmed) }
         }
         if !attachments.images.isEmpty, !sentImages { update { $0.addNotice(.imagesNotSent) } }
         recordAnsweringModel(from: chain)

@@ -417,7 +417,15 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         id = try container.decode(UUID.self, forKey: .id)
         question = try container.decode(String.self, forKey: .question)
         askedAt = try container.decode(Date.self, forKey: .askedAt)
-        attachments = try container.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
+        // `try?` around the whole array, not only `decodeIfPresent`, which answers a
+        // missing key and nothing else. `Attachment`'s own decoder is lenient about every
+        // field but `id`, and an id that will not decode belongs to bytes nothing can
+        // look up anyway — so the cost of dropping the list is a turn that forgets what
+        // was attached to it, against the cost of not dropping it, which is the failure
+        // this file already paid once: a turn that would not decode, a library that came
+        // back empty, and an older build writing that emptiness over the newer file.
+        attachments = (try? container.decodeIfPresent([Attachment].self,
+                                                      forKey: .attachments)) ?? []
         stage = try container.decode(ResearchStage.self, forKey: .stage)
         reading = try container.decode(String.self, forKey: .reading)
         searches = try container.decode([PlannedSearch].self, forKey: .searches)

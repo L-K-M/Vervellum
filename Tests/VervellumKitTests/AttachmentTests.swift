@@ -34,6 +34,13 @@ final class AttachmentTests: XCTestCase {
         XCTAssertNil(Attachment.imageMediaType(sniffing: wav))
         XCTAssertNil(Attachment.imageMediaType(sniffing: Data("<html></html>".utf8)))
         XCTAssertNil(Attachment.imageMediaType(sniffing: Data()))
+        // Shorter than any signature, which is what a truncated download delivers. The
+        // sniffer answers nil rather than trapping — a fixed-offset read would not, and
+        // nothing else here would tell the two apart.
+        for length in 1...7 {
+            XCTAssertNil(Attachment.imageMediaType(sniffing: Data(png().prefix(length))),
+                         "\(length) bytes is not a signature")
+        }
     }
 
     /// A file called `diagram.png` whose bytes are text is text. The name loses.
@@ -125,6 +132,11 @@ final class AttachmentTests: XCTestCase {
         XCTAssertEqual(attachment.kind, .text)
         XCTAssertTrue(text.hasSuffix("[…]"), "no truncation marker")
         XCTAssertLessThan(text.count, long.count)
+        // And not *much* less: "shorter than the input" is also satisfied by a
+        // regression that keeps a fraction of the allowance, which would quietly show
+        // the model less of the user's file than the cap promises.
+        XCTAssertEqual(text.count, Attachment.maxTextCharacters + "\n[…]".count,
+                       "truncation kept something other than the allowance")
         XCTAssertEqual(attachment.byteCount, bytes.count,
                        "the record's size must be the size of what was stored")
 
