@@ -30,7 +30,7 @@ final class ResearchRunnerTests: XCTestCase {
 
     private func settings(pageReading: PageReadingMode = .direct,
                           searchKind: SearchProviderKind = .searxng,
-                          searchEndpoint: String = Self.searchEndpoint) -> ProviderSettings {
+                          searchEndpoint: String = ResearchRunnerTests.searchEndpoint) -> ProviderSettings {
         ProviderSettings(modelEndpoint: Self.modelEndpoint,
                          modelName: "test-model",
                          searchEndpoint: searchEndpoint,
@@ -40,7 +40,7 @@ final class ResearchRunnerTests: XCTestCase {
 
     private func environment(pageReading: PageReadingMode = .direct,
                              searchKind: SearchProviderKind = .searxng,
-                             searchEndpoint: String = Self.searchEndpoint)
+                             searchEndpoint: String = ResearchRunnerTests.searchEndpoint)
         -> ResearchRunner.Environment {
         ResearchRunner.Environment(settings: settings(pageReading: pageReading,
                                                       searchKind: searchKind,
@@ -52,7 +52,7 @@ final class ResearchRunnerTests: XCTestCase {
                      mode: ResearchRunner.Mode = .research,
                      pageReading: PageReadingMode = .direct,
                      searchKind: SearchProviderKind = .searxng,
-                     searchEndpoint: String = Self.searchEndpoint,
+                     searchEndpoint: String = ResearchRunnerTests.searchEndpoint,
                      transport: StubTransport,
                      commandRunner: StubCommandRunner = StubCommandRunner { _ in .unrouted })
         async -> ResearchTurn {
