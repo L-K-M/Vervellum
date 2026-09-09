@@ -195,8 +195,14 @@ enum TurnNotice: String, Codable, Equatable {
     /// The check found claims the evidence contradicts or only half-supports, and the
     /// answer above was rewritten against them.
     case answerRevised
-    /// The check found claims worth correcting, and the rewrite did not arrive — so the
-    /// answer above is the draft the findings grade.
+    /// The check found claims worth correcting and the rewrite could not be used — it
+    /// did not arrive, came back empty, or broke the citation rule and was discarded. So
+    /// the answer above is the draft the findings grade.
+    ///
+    /// One case for all three, because the reader's position is the same in each and
+    /// there is nothing different for them to do. The three are told apart in the trace,
+    /// which is where the difference matters: a rewrite discarded for inventing a source
+    /// number will keep being discarded, and a provider that timed out will not.
     case revisionUnavailable
     /// Page reading was on, but no page could be read — so every source is a summary,
     /// exactly as if it were off.
@@ -253,8 +259,8 @@ enum TurnNotice: String, Codable, Equatable {
                 + "rewritten against them. The findings below grade the first draft, which "
                 + "is what they were written about."
         case .revisionUnavailable:
-            return "The check found claims worth correcting, but the rewrite did not arrive. "
-                + "The answer above is the draft the findings below describe."
+            return "The check found claims worth correcting, but the rewrite could not be "
+                + "used. The answer above is the draft the findings below describe."
         case .noPagesRead:
             return "No page could be read in full, so every source below is a search summary. "
                 + "A summary cannot show that a page says what the answer claims it says."

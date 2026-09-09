@@ -654,6 +654,7 @@ final class ResearchRunnerTests: XCTestCase {
     /// closure captures nothing that is not `Sendable` — the same reason every other
     /// fixture here is reached through `Self.` instead of captured.
     private func revisionTransport(verdict: String,
+                                   claim: String = "Parallax is measured in arcseconds.",
                                    answer: [String],
                                    revision: StubTransport.Reply?) -> StubTransport {
         StubTransport { call in
@@ -661,7 +662,8 @@ final class ResearchRunnerTests: XCTestCase {
             case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
                 switch Self.stage(of: call) {
                 case .plan: return .completion(json: Self.plan("stellar parallax"))
-                case .assess: return .completion(json: Self.assessment(verdict: verdict))
+                case .assess:
+                    return .completion(json: Self.assessment(verdict: verdict, claim: claim))
                 default: return .unrouted
                 }
             case .json where call.url.path == "/search":
@@ -702,7 +704,50 @@ final class ResearchRunnerTests: XCTestCase {
         let revise = try XCTUnwrap(transport.calls.first { Self.stage(of: $0) == .revise })
         let sent = try XCTUnwrap(revise.userContent)
         XCTAssertTrue(sent.contains("Parallax is measured in degrees"), sent)
+        // The finding's own claim, not the verdict word — the revise prompt explains
+        // what "contradicted" means, so matching that alone would pass on the template
+        // even if the findings payload had been dropped entirely.
+        XCTAssertTrue(sent.contains("Parallax is measured in arcseconds."), sent)
         XCTAssertTrue(sent.contains("contradicted"), sent)
+    }
+
+    /// `mixed` is the other verdict that sends an answer back, and nothing else here
+    /// pins that a valid rewrite under it is *accepted*: the citation test proves only
+    /// that it triggers an attempt. A change that gated the stage on `contradicted`
+    /// alone would pass every other test in this section.
+    func testAMixedVerdictIsRevisedAndKeepsItsDraft() async throws {
+        let transport = revisionTransport(
+            verdict: "mixed",
+            claim: "The answer gives the unit as degrees.",
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .stream(["Parallax is measured in arcseconds [1]."]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "Parallax is measured in arcseconds [1].")
+        XCTAssertEqual(turn.draftAnswer, "Parallax is measured in degrees [1].")
+        XCTAssertTrue(turn.notices.contains(.answerRevised), "\(turn.notices)")
+    }
+
+    /// A reviser that fences the whole answer would otherwise replace good prose with a
+    /// wall of monospace — and the citation check would pass it, because a bracketed
+    /// number inside a fence is code rather than a citation.
+    func testAWholeAnswerWrappedInAFenceIsUnwrapped() {
+        let fenced = "```markdown\nParallax is measured in arcseconds [1].\n```"
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence(fenced),
+                       "Parallax is measured in arcseconds [1].")
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("```\nOne\nTwo\n```"),
+                       "One\nTwo")
+
+        // A fence that names a language is a real code block, and an answer that is
+        // nothing but one has to survive: the reviser is told to return what it was
+        // given where the findings name nothing.
+        let code = "```swift\nlet x = 1\n```"
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence(code), code)
+        // And a fence that closes in the middle is not a wrapper at all.
+        let partial = "Text.\n```\nlet x = 1\n```\nMore text."
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence(partial), partial)
     }
 
     /// The common case, and the one that decides whether this stage costs a call on
@@ -722,7 +767,8 @@ final class ResearchRunnerTests: XCTestCase {
             XCTAssertNil(turn.draftAnswer, "\(verdict) sent the answer back for rewriting")
             XCTAssertTrue(transport.calls.allSatisfy { Self.stage(of: $0) != .revise },
                           "\(verdict) spent a model call")
-            XCTAssertFalse(turn.notices.contains(.answerRevised))
+            XCTAssertFalse(turn.notices.contains(.answerRevised),
+                           "\(verdict) announced a revision")
         }
     }
 
@@ -741,8 +787,8 @@ final class ResearchRunnerTests: XCTestCase {
 
             XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
             XCTAssertEqual(turn.answer, "Parallax is measured in degrees [1].",
-                           "a revision that broke the rule reached the screen")
-            XCTAssertNil(turn.draftAnswer)
+                           "\(bad): a revision that broke the rule reached the screen")
+            XCTAssertNil(turn.draftAnswer, "\(bad): the discarded revision replaced the draft")
             XCTAssertTrue(turn.notices.contains(.revisionUnavailable), "\(turn.notices)")
             XCTAssertFalse(turn.notices.contains(.answerRevised))
             // And the answer keeps the notices its own validation earned, rather than

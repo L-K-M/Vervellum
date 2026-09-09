@@ -811,6 +811,32 @@ final class ResearchRunner: ResearchRunning {
         }
     }
 
+    /// The answer with a fence that wraps the *whole* of it removed.
+    ///
+    /// The revise prompt forbids fencing the answer and models do it anyway — it is the
+    /// commonest way a "return the document and nothing else" instruction is misread. It
+    /// matters more here than at the answer stage, which streams into view where a
+    /// leading ``` is visible immediately: a revision is swapped in whole, and a fenced
+    /// one would replace good prose with a wall of monospace. Worse, the citation check
+    /// would pass it — a bracketed number inside a fence is code, not a citation, so a
+    /// fenced revision validates as an answer that cites nothing at all.
+    ///
+    /// Only an *undecorated* opening fence is unwrapped: ``` or one labelled `markdown`
+    /// or `md`. A fence that names a language is a real code block, and an answer that is
+    /// genuinely nothing but one — rare, but the reviser is told to preserve what it was
+    /// given — must survive this untouched.
+    static func unwrappingWholeAnswerFence(_ answer: String) -> String {
+        let lines = answer.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.count > 2,
+              let first = lines.first, let last = lines.last,
+              first.hasPrefix("```"), last.trimmingCharacters(in: .whitespaces) == "```"
+        else { return answer }
+        let label = first.dropFirst(3).trimmingCharacters(in: .whitespaces).lowercased()
+        guard label.isEmpty || label == "markdown" || label == "md" else { return answer }
+        return lines.dropFirst().dropLast().joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Rewrites the answer against the findings, when there are findings worth rewriting
     /// for.
     ///
@@ -850,6 +876,11 @@ final class ResearchRunner: ResearchRunning {
                  "sources": finding.sourceNumbers]
             }
         trace.log("Revising: \(revisable.count) claim(s) the evidence does not carry")
+        // `trace.elapsed` counts from the start of the *run*, so the figure logged at
+        // the end has to be a difference. Reporting it raw would say "revised the answer
+        // in 47 seconds" about a turn that spent 45 of them searching — and how long this
+        // stage costs is the number the decision to have it at all rests on.
+        let began = trace.elapsed
         update { $0.isRevising = true }
         // Cleared on every path out, including the ones that keep the draft: a label
         // saying a request is outstanding must not outlive the request.
@@ -872,13 +903,29 @@ final class ResearchRunner: ResearchRunning {
                 try await chat.streamText(system: ResearchPrompts.revise,
                                           payload: context.payload, label: "Revise") { _ in }
             }
-        } catch let error as ResearchError where error != ResearchError.cancelled && !Task.isCancelled {
-            trace.warn("Revision unavailable: \(error.message)")
+        } catch {
+            // Every error that is not a Stop, not only the ones this file knows how to
+            // name. "Fails soft" was written above as a promise and matching on
+            // `ResearchError` alone did not keep it: anything else — a transport error
+            // that escaped wrapping, an encoding failure assembling the payload — would
+            // propagate out of here and fail a turn whose answer had already been
+            // streamed, validated, read and assessed. That is the outcome this whole
+            // function is arranged to avoid, arriving through the one path that was not
+            // covered.
+            let stopped = Task.isCancelled
+                || error is CancellationError
+                || (error as? ResearchError) == ResearchError.cancelled
+            guard !stopped else { throw error }
+            // `safeLabel`, not the error's own description: an unknown error can carry a
+            // URL with a query string or a path in it, and this trace is written to a
+            // log the user may paste somewhere. A type name says enough to debug with.
+            trace.warn("Revision unavailable: \(ResearchError.safeLabel(for: error))")
             update { $0.addNotice(.revisionUnavailable) }
             return
         }
 
-        let trimmed = revised.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = Self.unwrappingWholeAnswerFence(
+            revised.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !trimmed.isEmpty else {
             // A reply with nothing in it is a call that failed and happened to return.
             trace.warn("Revision unavailable: the reply was empty")
@@ -908,7 +955,7 @@ final class ResearchRunner: ResearchRunning {
             turn.answer = trimmed
             turn.addNotice(.answerRevised)
         }
-        trace.log("Revised the answer in " + String(format: "%.1fs", trace.elapsed))
+        trace.log("Revised the answer in " + String(format: "%.1fs", trace.elapsed - began))
     }
 
     /// How much of a linked page the *planner* is shown. The answer sees the whole
