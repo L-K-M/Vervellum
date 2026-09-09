@@ -235,8 +235,12 @@ final class ResearchRunner: ResearchRunning {
     /// A closure rather than a store, so this file does no file IO and a test can attach
     /// an image without a directory existing. It answers nil for an attachment whose
     /// bytes are gone — a library copied without its attachments folder — and the turn
-    /// carries on without the picture, which is the same outcome as a provider that
-    /// cannot be shown one.
+    /// carries on without the picture, saying `attachmentMissing` so the reader knows.
+    ///
+    /// It has no default, deliberately. A default of "no bytes, ever" would compile
+    /// everywhere and leave any caller that forgot it with a build where every
+    /// attachment is silently unreadable — a feature dead on arrival with one trace line
+    /// to show for it. A front end with no attachments says so in one line instead.
     private let attachmentBytes: (Attachment) -> Data?
 
     /// The turn being run, and where to report it. Instance state rather than threaded
@@ -249,7 +253,7 @@ final class ResearchRunner: ResearchRunning {
     init(environment: Environment, trace: ResearchTrace,
          transport: any HTTPTransporting = HTTPTransport.shared,
          commandRunner: any CommandRunning = CommandRunner.shared,
-         attachmentBytes: @escaping (Attachment) -> Data? = { _ in nil }) {
+         attachmentBytes: @escaping (Attachment) -> Data?) {
         self.environment = environment
         self.trace = trace
         self.transport = transport
@@ -338,6 +342,11 @@ final class ResearchRunner: ResearchRunning {
     ///
     /// Only counts reach the trace. A file name is the user's own text, and this log has
     /// the same rule for it as for a page's: it records shape, never content.
+    ///
+    /// An attachment that cannot be sent — its bytes gone, or text that no longer
+    /// decodes — raises `attachmentMissing` on the turn rather than disappearing. The
+    /// turn still lists it, because it is a record of what was asked; saying nothing
+    /// would leave a reader with an answer that ignores a file for no visible reason.
     private func preparedAttachments() -> (payload: [[String: String]],
                                            images: [ChatCompletionsClient.ImagePart]) {
         let attachments = current?.attachments ?? []
@@ -345,10 +354,10 @@ final class ResearchRunner: ResearchRunning {
 
         var payload: [[String: String]] = []
         var images: [ChatCompletionsClient.ImagePart] = []
-        var missing = 0
+        var lost = 0
         for attachment in attachments {
             guard let data = attachmentBytes(attachment) else {
-                missing += 1
+                lost += 1
                 continue
             }
             switch attachment.kind {
@@ -357,18 +366,23 @@ final class ResearchRunner: ResearchRunning {
                     mediaType: attachment.mediaType, base64: data.base64EncodedString()))
             case .text:
                 // Re-decoded rather than trusted: the record says what the bytes were
-                // when they were stored, and the bytes are what is being sent now.
+                // when they were stored, and the bytes are what is being sent now. A
+                // file that no longer decodes counts as lost, for the same reason bytes
+                // that are gone do — it is not being sent, and the reader has to know.
                 if let text = Attachment.text(from: data) {
                     payload.append(["name": attachment.name, "text": text])
+                } else {
+                    lost += 1
                 }
             case .other:
-                // A kind a later build wrote. Nothing here knows how to send it, and
-                // guessing would be worse than leaving it out.
-                continue
+                // A kind a later build wrote. Nothing here knows how to send it, which
+                // is a thing the reader has to be told rather than a thing to guess at.
+                lost += 1
             }
         }
         trace.log("Attachments: \(images.count) image(s), \(payload.count) text file(s)"
-                  + (missing > 0 ? ", \(missing) whose bytes are gone" : ""))
+                  + (lost > 0 ? ", \(lost) that could not be sent" : ""))
+        if lost > 0 { update { $0.addNotice(.attachmentMissing) } }
         return (payload, images)
     }
 

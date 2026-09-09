@@ -37,6 +37,10 @@ final class ResearchRunnerTests: XCTestCase {
                                         searchEndpoint: searchEndpoint,
                                         searchKind: searchKind,
                                         pageReading: pageReading)
+        // Without a profile to stamp, `sendsImages` would be a silently ignored
+        // argument and every image test would run on the default configuration.
+        XCTAssertFalse(settings.modelProfiles.isEmpty,
+                       "no model profile to configure; sendsImages would do nothing")
         for index in settings.modelProfiles.indices {
             settings.modelProfiles[index].sendsImages = sendsImages
         }
@@ -405,6 +409,10 @@ final class ResearchRunnerTests: XCTestCase {
         let body = try XCTUnwrap(transport.calls.first?.body)
         let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
         let parts = try XCTUnwrap(messages.last?["content"] as? [[String: Any]])
+        // Exactly two: the question and the picture. Endpoint-only checks would let a
+        // duplicated text part or a stray empty one through, and a provider charges for
+        // every part.
+        XCTAssertEqual(parts.count, 2, "unexpected parts: \(parts)")
         XCTAssertEqual(parts.first?["type"] as? String, "text")
         XCTAssertEqual((parts.last?["image_url"] as? [String: Any])?["url"] as? String,
                        "data:image/png;base64,iVBORw==")
@@ -464,9 +472,48 @@ final class ResearchRunnerTests: XCTestCase {
                              attachmentBytes: { _ in nil })
 
         XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        // And it is said out loud. An answer that ignores the picture with nothing
+        // explaining why is the thing the notices exist to prevent — the bytes being
+        // gone is a different reason from the provider having no eyes, so it is a
+        // different notice.
+        XCTAssertTrue(turn.notices.contains(.attachmentMissing), "notices: \(turn.notices)")
+        XCTAssertFalse(turn.notices.contains(.imagesNotSent),
+                       "no setting would have made this one arrive")
         let body = try XCTUnwrap(transport.calls.first?.body)
         let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
         XCTAssertNotNil(messages.last?["content"] as? String)
+    }
+
+    /// A picture and a log on the same question. The image rides only because this
+    /// provider has eyes; the log would have been inlined either way, and both reach the
+    /// same request.
+    func testAnImageAndATextFileTravelTogether() async throws {
+        let transport = StubTransport { call in
+            call.kind == .stream ? .stream(["The trace shows a timeout."]) : .unrouted
+        }
+        let log = Attachment(kind: .text, name: "log.txt", mediaType: "text/plain", byteCount: 12)
+
+        let turn = await run("What failed?", mode: .direct, transport: transport,
+                             sendsImages: true, attachments: [Self.image, log],
+                             attachmentBytes: { attachment in
+                                 attachment.kind == .image
+                                     ? Data([0x89, 0x50, 0x4E, 0x47])
+                                     : Data("read timeout".utf8)
+                             })
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertFalse(turn.notices.contains(.attachmentMissing), "notices: \(turn.notices)")
+        XCTAssertFalse(turn.notices.contains(.imagesNotSent), "notices: \(turn.notices)")
+        let call = try XCTUnwrap(transport.calls.first)
+        let messages = try XCTUnwrap(call.body?["messages"] as? [[String: Any]])
+        let parts = try XCTUnwrap(messages.last?["content"] as? [[String: Any]])
+        XCTAssertEqual(parts.count, 2, "unexpected parts: \(parts)")
+        // The text file rides inside the question payload, which is the text part.
+        let text = try XCTUnwrap(parts.first?["text"] as? String)
+        XCTAssertTrue(text.contains("read timeout"), text)
+        XCTAssertTrue(text.contains("log.txt"), text)
+        XCTAssertEqual((parts.last?["image_url"] as? [String: Any])?["url"] as? String,
+                       "data:image/png;base64,iVBORw==")
     }
 
     // MARK: Links in the question

@@ -102,7 +102,12 @@ public enum VervellumLinuxApp {
 
         let runner = ResearchRunner(
             environment: .init(preferences: environment.preferences, secrets: environment.secrets),
-            trace: ResearchTrace(sink: StandardErrorLog()))
+            trace: ResearchTrace(sink: StandardErrorLog()),
+            // A question typed as an argument carries nothing: there is no composer to
+            // paste into and no turn on disk to inherit from. Stated rather than
+            // defaulted, so a later change that gives the command line attachments has
+            // to come through here.
+            attachmentBytes: { _ in nil })
         var draft = ResearchTurn(question: question)
         draft.model = environment.preferences.providerSettings.modelName
         if direct { draft.notices = [.noEvidence] }

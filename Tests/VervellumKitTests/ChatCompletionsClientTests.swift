@@ -237,6 +237,44 @@ final class ChatCompletionsClientTests: XCTestCase {
                        "data:image/jpeg;base64,BBBB")
     }
 
+    /// The guarantee is the client's, not the caller's. `ModelProfile.sendsImages` exists
+    /// because a text-only endpoint handed an `image_url` part answers 400 and the whole
+    /// question fails — so the filter lives where every request is built, and a caller
+    /// that hands over an image anyway cannot cost a turn.
+    func testAProviderWithoutEyesIsNeverSentAnImageEvenIfOneIsHandedOver() async throws {
+        let images = [ChatCompletionsClient.ImagePart(mediaType: "image/png", base64: "AAAA")]
+        let transport = StubTransport { _ in .completion(json: [:]) }
+        let client = ChatCompletionsClient(url: URL(string: "https://a.example/v1/chat/completions")!,
+                                           model: "m", apiKey: nil, sendsImages: false,
+                                           trace: ResearchTrace(sink: SilentLog()),
+                                           transport: transport)
+
+        _ = try await client.completeJSON(system: "s", payload: ["q": "?"], label: "Plan",
+                                          images: images)
+        let body = try XCTUnwrap(transport.calls.first?.body)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        XCTAssertNotNil(messages.last?["content"] as? String,
+                        "an image reached a provider that was never configured for one")
+    }
+
+    /// And the same client with the flag on sends it, so the guard above is a filter
+    /// rather than a wall.
+    func testAProviderWithEyesIsSentTheImage() async throws {
+        let images = [ChatCompletionsClient.ImagePart(mediaType: "image/png", base64: "AAAA")]
+        let transport = StubTransport { _ in .completion(json: [:]) }
+        let client = ChatCompletionsClient(url: URL(string: "https://a.example/v1/chat/completions")!,
+                                           model: "m", apiKey: nil, sendsImages: true,
+                                           trace: ResearchTrace(sink: SilentLog()),
+                                           transport: transport)
+
+        _ = try await client.completeJSON(system: "s", payload: ["q": "?"], label: "Plan",
+                                          images: images)
+        let body = try XCTUnwrap(transport.calls.first?.body)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        let parts = try XCTUnwrap(messages.last?["content"] as? [[String: Any]])
+        XCTAssertEqual(parts.count, 2)
+    }
+
     /// Inline rather than hosted. The alternative is uploading the user's screenshot
     /// somewhere to get a link for it, which is the opposite of what this app promises
     /// about where their data goes.

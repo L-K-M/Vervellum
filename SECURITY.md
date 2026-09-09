@@ -199,12 +199,19 @@ vouch for, and it is handled on those terms:
 - **Bounded.** Images are capped at 4 MB and refused above it rather than silently
   scaled; an attached file contributes a bounded amount of text, truncated with a
   visible marker so the model is never handed a fragment presented as a whole file.
-- **The file name is sanitised** before it is shown or put in the payload: control
-  characters and path separators out. Nothing builds a path from it — the store keys by
-  the attachment's id — and keeping it that way is easier than proving it is safe.
+- **The file name is sanitised** before it is shown or put in the payload: control and
+  format characters out — which covers the bidi overrides and zero-width marks that make
+  one name render as another — and path separators too. Nothing builds a path from it —
+  the store keys by the attachment's id — and keeping it that way is easier than proving
+  it is safe.
 - **A provider is shown images only if you said it can.** There is no way to ask an
   OpenAI-compatible endpoint whether it has eyes, and guessing wrong fails the turn
-  outright, so it is a per-provider setting that is off until set.
+  outright, so it is a per-provider setting that is off until set. The filter is applied
+  where the request is built rather than by each caller, so a provider you did not tick
+  cannot be sent a picture by a code path that forgot.
+- **An attachment that could not be sent says so.** Bytes that have gone missing, or text
+  that no longer decodes, raise a notice on the turn rather than leaving an answer that
+  ignores a file for no visible reason.
 
 ### Captured text
 

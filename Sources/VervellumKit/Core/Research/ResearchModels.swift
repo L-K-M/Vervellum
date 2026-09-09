@@ -214,6 +214,12 @@ enum TurnNotice: String, Codable, Equatable {
     /// because an answer that ignores the picture, with nothing explaining why, reads as
     /// a model that looked and did not understand.
     case imagesNotSent
+    /// Something was attached, but its bytes could not be read — a library copied
+    /// between machines without its attachments folder, or a file removed by hand — so
+    /// the model answered without it. A separate case from `imagesNotSent` because the
+    /// remedy is different: no setting turns this on, the attachment has to be attached
+    /// again.
+    case attachmentMissing
     /// A notice written by a newer build that this one does not know. Kept rather than
     /// failing the whole document: a `notices` array that refused to decode used to make
     /// an older build start from an empty library and overwrite the newer file.
@@ -269,6 +275,10 @@ enum TurnNotice: String, Codable, Equatable {
             return "A model provider failed, so the next one configured answered instead, "
                 + "and the rest of this turn used it too. The model named on this turn is "
                 + "the one that answered."
+        case .attachmentMissing:
+            return "Something attached to this question could not be read, so the answer "
+                + "was written without it. The file is listed above as a record of what "
+                + "was asked — attach it again to have the model look at it."
         case .imagesNotSent:
             return "An image was attached, but the model that answered is not set to be sent "
                 + "images, so it answered from the question's words alone. Turn on "

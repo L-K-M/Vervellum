@@ -61,8 +61,9 @@ Vervellum makes network requests in exactly five cases, each with a fixed purpos
   sent **only on the turn you attached it to**: later questions in the same thread carry
   the file's *name* so the model knows something was attached, and nothing more, so a
   follow-up never re-bills you for a picture you sent once. The bytes are kept beside
-  your threads in `attachments/`, written `0600`, and deleted when no thread refers to
-  them any more. A provider is shown images only if you ticked that box for it; a turn
+  your threads in `attachments/` — a `0700` directory, the files inside it `0600` — and
+  deleted once no thread refers to them any more, which also means an attachment you
+  attached moments ago is never swept out from under you. A provider is shown images only if you ticked that box for it; a turn
   whose image could not be sent says so. **Use a reader service** sends
   the addresses to the reader endpoint you configured instead, with that endpoint's
   key — the sites then see the service rather than you, and the service sees the

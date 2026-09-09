@@ -39,7 +39,8 @@ final class AttachmentTests: XCTestCase {
     /// A file called `diagram.png` whose bytes are text is text. The name loses.
     func testAMisnamedFileIsWhatItsBytesSay() throws {
         let result = Attachment.make(from: Data("plain, honest text".utf8), name: "diagram.png")
-        let (attachment, bytes) = try XCTUnwrap(try? result.get())
+        // Unwrapped directly: a failure here should report the refusal, not "nil".
+        let (attachment, bytes) = try result.get()
         XCTAssertEqual(attachment.kind, .text)
         XCTAssertEqual(attachment.mediaType, "text/plain")
         XCTAssertEqual(String(decoding: bytes, as: UTF8.self), "plain, honest text")
@@ -52,6 +53,26 @@ final class AttachmentTests: XCTestCase {
         XCTAssertNotNil(Attachment.text(from: Data("head\ttail\n".utf8)))
         // Invalid UTF-8 is not text either.
         XCTAssertNil(Attachment.text(from: Data([0xFF, 0xFE, 0x00, 0x01])))
+    }
+
+    /// A long text file is too *large*, not unsupported: it is exactly the sort of thing
+    /// that can be attached, and being told otherwise sends its owner looking for a
+    /// format problem that is not there.
+    func testAnOversizedTextFileIsRefusedForItsSizeRatherThanItsKind() {
+        let long = Data(String(repeating: "a", count: Attachment.maxImageBytes + 1).utf8)
+        guard case .failure(let reason) = Attachment.make(from: long, name: "huge.log") else {
+            return XCTFail("accepted an oversized file")
+        }
+        XCTAssertEqual(reason, .tooLarge(name: "huge.log", byteCount: long.count))
+    }
+
+    /// An empty file is refused rather than attached. It would otherwise be stored,
+    /// listed, and its name carried into every later turn — telling the model about a
+    /// file whose contents are nothing.
+    func testAnEmptyFileIsNotAnAttachment() {
+        guard case .failure = Attachment.make(from: Data(), name: "empty.txt") else {
+            return XCTFail("accepted an empty file")
+        }
     }
 
     func testAnUnsupportedFileIsRefusedByName() {
@@ -71,6 +92,7 @@ final class AttachmentTests: XCTestCase {
         guard case .failure(let reason) = Attachment.make(from: huge, name: "shot.png") else {
             return XCTFail("accepted an oversized image")
         }
+        XCTAssertEqual(reason, .tooLarge(name: "shot.png", byteCount: huge.count))
         XCTAssertTrue(reason.message.contains("shot.png"), reason.message)
         XCTAssertTrue(reason.message.contains("MB"), reason.message)
 
@@ -106,6 +128,21 @@ final class AttachmentTests: XCTestCase {
         XCTAssertEqual(Attachment.displayName(for: "   "), "attachment")
         XCTAssertEqual(Attachment.displayName(for: ""), "attachment")
         XCTAssertEqual(Attachment.displayName(for: String(repeating: "x", count: 300)).count, 120)
+    }
+
+    /// A name reaches both the panel and the model's payload, so the invisible
+    /// characters that make "photo.png" render as something else have to go with the
+    /// newlines. `CharacterSet.controlCharacters` is Cc *and* Cf, which is what covers
+    /// the bidi overrides and the zero-width marks — pinned here because that is a
+    /// property of Foundation this code relies on rather than one it states.
+    func testANameCannotCarryInvisibleReorderingMarks() {
+        let overridden = "photo\u{202E}gnp.txt"
+        XCTAssertFalse(Attachment.displayName(for: overridden).unicodeScalars
+            .contains { $0.value == 0x202E }, Attachment.displayName(for: overridden))
+        let zeroWidth = "sh\u{200B}ot.png"
+        XCTAssertEqual(Attachment.displayName(for: zeroWidth), "shot.png")
+        // A name that is nothing but invisible characters still comes back usable.
+        XCTAssertEqual(Attachment.displayName(for: "\u{202A}\u{2069}"), "attachment")
     }
 
     // MARK: Decoding

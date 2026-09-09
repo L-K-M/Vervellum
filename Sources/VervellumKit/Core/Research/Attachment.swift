@@ -148,14 +148,21 @@ struct Attachment: Codable, Equatable, Identifiable {
     /// without first being turned into a 40 MB `String`.
     static func make(from data: Data, name: String) -> Result<(Attachment, Data), Refusal> {
         let display = displayName(for: name)
+        // Size first, so both kinds are refused for the same reason in the same words: a
+        // 6 MB log told it is "not something Vervellum can attach" would send its owner
+        // looking for a format problem that is not there.
+        guard data.count <= maxImageBytes else {
+            return .failure(.tooLarge(name: display, byteCount: data.count))
+        }
         if let mediaType = imageMediaType(sniffing: data) {
-            guard data.count <= maxImageBytes else {
-                return .failure(.imageTooLarge(name: display, byteCount: data.count))
-            }
             return .success((Attachment(kind: .image, name: display, mediaType: mediaType,
                                         byteCount: data.count), data))
         }
-        guard data.count <= maxImageBytes, let text = text(from: data) else {
+        // An empty file is refused rather than attached. It would be stored, listed in
+        // the panel, and its name carried into every later turn's history — telling the
+        // model about a file whose contents are nothing, which is an invitation to
+        // explain the emptiness rather than answer the question.
+        guard let text = text(from: data), !text.isEmpty else {
             return .failure(.unsupported(name: display))
         }
         let kept = truncated(text)
@@ -166,15 +173,19 @@ struct Attachment: Codable, Equatable, Identifiable {
 
     /// Why an attachment was refused, in words a person can act on.
     enum Refusal: Error, Equatable {
-        case imageTooLarge(name: String, byteCount: Int)
+        /// Past the cap. One case for both kinds, because "too big" is the same fact
+        /// about a screenshot and a log file, and a text file refused as *unsupported*
+        /// would be told the wrong thing: it is exactly the sort of thing that can be
+        /// attached, just not at that size.
+        case tooLarge(name: String, byteCount: Int)
         case unsupported(name: String)
 
         var message: String {
             switch self {
-            case .imageTooLarge(let name, let byteCount):
+            case .tooLarge(let name, let byteCount):
                 let megabytes = Double(byteCount) / (1024 * 1024)
-                return String(format: "%@ is %.1f MB. Images have to be under %d MB — "
-                              + "scale it down and try again.",
+                return String(format: "%@ is %.1f MB. An attachment has to be under "
+                              + "%d MB — scale it down, or attach a shorter file.",
                               name, megabytes, Attachment.maxImageBytes / (1024 * 1024))
             case .unsupported(let name):
                 return "\(name) is not something Vervellum can attach. Images (PNG, JPEG, "

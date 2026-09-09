@@ -52,12 +52,12 @@ final class AttachmentStoreTests: XCTestCase {
         try store.write(Data([1]), for: live)
         try store.write(Data([2]), for: dead)
 
-        XCTAssertEqual(store.sweep(keeping: [live.id]), 1)
+        XCTAssertEqual(store.sweep(keeping: [live.id], writtenBefore: 0), 1)
         XCTAssertTrue(store.exists(live))
         XCTAssertFalse(store.exists(dead))
 
         // And it is idempotent: nothing is left to remove the second time.
-        XCTAssertEqual(store.sweep(keeping: [live.id]), 0)
+        XCTAssertEqual(store.sweep(keeping: [live.id], writtenBefore: 0), 0)
     }
 
     /// A file this store did not write is left alone. The directory belongs to Vervellum,
@@ -68,7 +68,7 @@ final class AttachmentStoreTests: XCTestCase {
         let stranger = directory.appendingPathComponent("notes.txt")
         try Data("hello".utf8).write(to: stranger)
 
-        XCTAssertEqual(store.sweep(keeping: []), 1)
+        XCTAssertEqual(store.sweep(keeping: [], writtenBefore: 0), 1)
         XCTAssertTrue(FileManager.default.fileExists(atPath: stranger.path))
     }
 
@@ -83,9 +83,47 @@ final class AttachmentStoreTests: XCTestCase {
         let attachment = record()
         try store.write(Data([1]), for: attachment)
 
-        store.removeAll()
+        try store.removeAll()
         XCTAssertFalse(store.exists(attachment))
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    /// Erasing a library that never had an attachment is not a failure — there is
+    /// nothing to remove — so the ordinary case does not make the caller handle an error.
+    func testErasingWhatWasNeverCreatedSucceeds() {
+        XCTAssertNoThrow(try AttachmentStore(directory: directory).removeAll())
+    }
+
+    /// The bytes are `0600` inside a `0700` directory, and the docs say so. Pinned here
+    /// so a regression widens who can read a screenshot loudly rather than silently.
+    func testWrittenBytesAndTheirDirectoryArePrivateToTheirOwner() throws {
+        let store = AttachmentStore(directory: directory)
+        let attachment = record()
+        try store.write(Data([1, 2, 3]), for: attachment)
+
+        let manager = FileManager.default
+        let file = try manager.attributesOfItem(
+            atPath: directory.appendingPathComponent(attachment.id.uuidString).path)
+        XCTAssertEqual(file[.posixPermissions] as? NSNumber, 0o600)
+        let folder = try manager.attributesOfItem(atPath: directory.path)
+        XCTAssertEqual(folder[.posixPermissions] as? NSNumber, 0o700)
+    }
+
+    /// The one way a sweep could destroy something: bytes written for a question that
+    /// has not been saved yet, so its id cannot be in the set the sweep is given. Another
+    /// process reading the library a moment earlier would see them as unreachable. Too
+    /// young to sweep means kept.
+    func testAJustWrittenFileSurvivesASweepThatCannotKnowAboutItYet() throws {
+        let store = AttachmentStore(directory: directory)
+        let attachment = record()
+        try store.write(Data([1]), for: attachment)
+
+        XCTAssertEqual(store.sweep(keeping: []), 0, "a file written moments ago was swept")
+        XCTAssertTrue(store.exists(attachment))
+
+        // And it is not immortal: the same sweep with no grace window removes it.
+        XCTAssertEqual(store.sweep(keeping: [], writtenBefore: 0), 1)
+        XCTAssertFalse(store.exists(attachment))
     }
 
     /// The bytes sit next to the thread file, so an attachment lives and dies with the

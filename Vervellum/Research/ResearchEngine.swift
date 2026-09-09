@@ -90,7 +90,9 @@ final class ResearchEngine: ObservableObject {
          secrets: SecretStore,
          logSink: LogSink = OSLogSink(),
          makeRunner: @escaping (ResearchRunner.Environment, ResearchTrace) -> ResearchRunning = {
-             ResearchRunner(environment: $0, trace: $1)
+             // Nothing can be attached on this front end yet; the composer comes in a
+             // later change, and this is the line it will come through.
+             ResearchRunner(environment: $0, trace: $1, attachmentBytes: { _ in nil })
          },
          deliver: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) },
          after: @escaping (TimeInterval, @escaping () -> Void) -> Void = {

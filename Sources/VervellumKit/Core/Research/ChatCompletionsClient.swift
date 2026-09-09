@@ -73,12 +73,25 @@ final class ChatCompletionsClient {
         var dataURL: String { "data:\(mediaType);base64,\(base64)" }
     }
 
+    /// The images this provider may actually be sent.
+    ///
+    /// Enforced here, where every request is built, rather than left to each caller. The
+    /// rule is one a caller could forget exactly once and lose a turn to: a text-only
+    /// endpoint handed an `image_url` part answers 400 and the whole question fails. A
+    /// caller may still filter earlier — `ResearchRunner` does, because it has to *know*
+    /// whether the pictures went in order to say so on the turn — and this makes the
+    /// guarantee structural rather than a matter of discipline.
+    private func allowed(_ images: [ImagePart]) -> [ImagePart] {
+        sendsImages ? images : []
+    }
+
     // MARK: Structured call
 
     /// Sends `system` plus a JSON-encoded `payload` and decodes the reply as a JSON
     /// object.
     func completeJSON(system: String, payload: Any, label: String,
                       images: [ImagePart] = []) async throws -> [String: Any] {
+        let images = allowed(images)
         guard let userContent = Self.encodeUserContent(payload)
         else { throw ResearchError.invalidContext }
 
@@ -115,6 +128,7 @@ final class ChatCompletionsClient {
                     label: String,
                     images: [ImagePart] = [],
                     onDelta: @escaping (String) -> Void) async throws -> String {
+        let images = allowed(images)
         guard let userContent = Self.encodeUserContent(payload)
         else { throw ResearchError.invalidContext }
 
