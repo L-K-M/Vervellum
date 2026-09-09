@@ -123,14 +123,22 @@ final class ResearchRunnerTests: XCTestCase {
     /// An assessment with one finding of the given verdict, for the revision tests.
     private static func assessment(verdict: String,
                                    claim: String = "Parallax is measured in arcseconds.",
-                                   sources: [Int] = [1]) -> [String: Any] {
-        let finding: [String: Any] = [
-            "claim": claim,
-            "verdict": verdict,
-            "reasoning": "What the evidence does and does not carry.",
-            "sources": sources,
-        ]
-        return ["findings": [finding], "limitations": "", "followups": []]
+                                   sources: [Int] = [1],
+                                   alongside: [(verdict: String, claim: String)] = [])
+        -> [String: Any] {
+        func finding(_ verdict: String, _ claim: String) -> [String: Any] {
+            [
+                "claim": claim,
+                "verdict": verdict,
+                "reasoning": "What the evidence does and does not carry.",
+                "sources": sources,
+            ]
+        }
+        // `alongside` exists so a fixture can carry a second verdict. Every one of these
+        // used to hold exactly one finding, which meant `isShownToReviser` was only ever
+        // asked what it returns and never what it *does*.
+        return ["findings": [finding(verdict, claim)] + alongside.map { finding($0.verdict, $0.claim) },
+                "limitations": "", "followups": []]
     }
 
     // MARK: A whole turn
@@ -655,6 +663,7 @@ final class ResearchRunnerTests: XCTestCase {
     /// fixture here is reached through `Self.` instead of captured.
     private func revisionTransport(verdict: String,
                                    claim: String = "Parallax is measured in arcseconds.",
+                                   alongside: [(verdict: String, claim: String)] = [],
                                    answer: [String],
                                    revision: StubTransport.Reply?) -> StubTransport {
         StubTransport { call in
@@ -663,7 +672,8 @@ final class ResearchRunnerTests: XCTestCase {
                 switch Self.stage(of: call) {
                 case .plan: return .completion(json: Self.plan("stellar parallax"))
                 case .assess:
-                    return .completion(json: Self.assessment(verdict: verdict, claim: claim))
+                    return .completion(json: Self.assessment(verdict: verdict, claim: claim,
+                                                            alongside: alongside))
                 default: return .unrouted
                 }
             case .json where call.url.path == "/search":
@@ -766,6 +776,33 @@ final class ResearchRunnerTests: XCTestCase {
             XCTAssertTrue(turn.notices.contains(.answerRevised),
                           "\(verdict) rewrote the answer without saying so")
         }
+    }
+
+    /// What the reviser is shown, as opposed to what wakes it.
+    ///
+    /// `isShownToReviser` had its return value pinned and its effect not. Every fixture
+    /// in this section carried exactly one finding, so a runner that woke on
+    /// `contradicted` and then poured the whole findings array into the prompt would
+    /// have passed all of them — the predicate would have been dead code with a green
+    /// suite beside it. An `insufficient` claim rides along; a `supported` one has
+    /// nothing to correct and must not be offered as though it did.
+    func testOnlyTheFindingsWorthShowingReachTheReviser() async throws {
+        let transport = revisionTransport(
+            verdict: "contradicted",
+            alongside: [("insufficient", "The distance is under ten parsecs."),
+                        ("supported", "Parallax is an angle.")],
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .stream(["Parallax is measured in arcseconds [1]."]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        let revise = try XCTUnwrap(transport.calls.first { Self.stage(of: $0) == .revise })
+        let sent = try XCTUnwrap(revise.userContent)
+        XCTAssertTrue(sent.contains("The distance is under ten parsecs."),
+                      "an unsettled claim rides along: \(sent)")
+        XCTAssertFalse(sent.contains("Parallax is an angle."),
+                       "a supported claim has nothing to correct: \(sent)")
     }
 
     /// The two switches, read directly. One decides whether a finding *wakes* the stage,
@@ -904,7 +941,7 @@ final class ResearchRunnerTests: XCTestCase {
     func testAnAnswerTheCheckDidNotFaultIsNeverSentBackForRevision() async throws {
         // Derived from the runner's own rule rather than listed here, so a sixth verdict
         // is covered the day it is added: whichever side of `warrantsRevision` it lands
-        // on, this loop or its mirror below takes it, and it cannot fall between them.
+        // on, this loop or its mirror above takes it, and it cannot fall between them.
         let accepted = Verdict.allCases
             .filter { !ResearchRunner.warrantsRevision($0) }
             .map(\.rawValue)

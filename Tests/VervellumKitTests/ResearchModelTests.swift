@@ -428,6 +428,13 @@ final class ResearchModelTests: XCTestCase {
             with: try encoder.encode(turn)) as? [String: Any])
         // The document as an older build wrote it: no such key at all, rather than null.
         object.removeValue(forKey: "draftAnswer")
+        // And a key no build writes, put there on purpose. `isRevising` is transient —
+        // it has no `CodingKeys` case — so asserting it decodes false out of a document
+        // this test encoded proves nothing: the encoder never wrote it either way. A
+        // document that *does* carry it is the only thing that can tell "never written"
+        // apart from "written and read back", and the second would strand a turn saved
+        // mid-revision on "Revising…" for the rest of its life.
+        object["isRevising"] = true
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -436,7 +443,7 @@ final class ResearchModelTests: XCTestCase {
 
         XCTAssertEqual(decoded.answer, "An answer [1].")
         XCTAssertNil(decoded.draftAnswer)
-        XCTAssertFalse(decoded.isRevising)
+        XCTAssertFalse(decoded.isRevising, "a persisted flag would outlive its request")
     }
 
     /// Retry has to know how a turn was asked, and the document does not store it: a
