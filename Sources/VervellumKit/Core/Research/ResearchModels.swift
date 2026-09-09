@@ -269,6 +269,10 @@ enum TurnNotice: String, Codable, Equatable {
             return "A model provider failed, so the next one configured answered instead, "
                 + "and the rest of this turn used it too. The model named on this turn is "
                 + "the one that answered."
+        case .imagesNotSent:
+            return "An image was attached, but the model that answered is not set to be sent "
+                + "images, so it answered from the question's words alone. Turn on "
+                + "\"Send images\" for that provider in Settings to have it look."
         case .unknown:
             return "This turn carries a note recorded by a newer version of Vervellum."
         }

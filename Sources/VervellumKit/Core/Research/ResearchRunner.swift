@@ -523,7 +523,12 @@ final class ResearchRunner: ResearchRunning {
             let object = try await chat.completeJSON(
                 system: ResearchPrompts.plan(maxSearches: Self.maxSearches, today: today,
                                              hasLinkedPages: !linked.isEmpty,
-                                             hasAttachments: !planImages.isEmpty
+                                             // `images`, not `planImages`: a provider
+                                             // without eyes is not sent the picture, so
+                                             // telling it one is attached to this message
+                                             // would be a sentence about something that
+                                             // is not there.
+                                             hasAttachments: !images.isEmpty
                                                  || !attachments.payload.isEmpty),
                 payload: planContext.payload, label: "Plan", images: images)
             return try PlanParser.parse(object, maxSearches: Self.maxSearches)

@@ -165,7 +165,7 @@ struct Attachment: Codable, Equatable, Identifiable {
     }
 
     /// Why an attachment was refused, in words a person can act on.
-    enum Refusal: Equatable {
+    enum Refusal: Error, Equatable {
         case imageTooLarge(name: String, byteCount: Int)
         case unsupported(name: String)
 

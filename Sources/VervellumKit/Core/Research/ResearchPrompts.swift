@@ -42,7 +42,6 @@ enum ResearchPrompts {
         "[…]" and says nothing about what followed.
         """
 
-    /// Appended to the calls whose reply is parsed as JSON.
     /// What to do with something the user attached.
     ///
     /// Its own clause because an attachment breaks the assumption every other rule here
@@ -55,9 +54,17 @@ enum ResearchPrompts {
     /// The citation rule is untouched: no URLs, no invented numbers. This adds one
     /// permitted way to refer to something, by the name it was attached under.
     static let attachments = """
-        ATTACHMENTS. The user may attach images or files to a question. These are not         numbered evidence and have no citation number: they came from the user, not         from a search. Refer to one by its name — "in diagram.png" — or simply as what         it is. Never give an attachment a bracketed number, and never treat the absence         of a number as a reason not to use it. An attached file's text appears in the         payload under "attachments"; an attached image is supplied with this message.         If the user refers to an attachment that is not present in this turn, say so         and ask them to attach it again rather than guessing at its contents.
+        ATTACHMENTS. The user may attach images or files to a question. These are not \
+        numbered evidence and have no citation number: they came from the user, not from \
+        a search. Refer to one by its name — "in diagram.png" — or simply as what it is. \
+        Never give an attachment a bracketed number, and never treat the absence of a \
+        number as a reason not to use it. An attached file's text appears in the payload \
+        under "attachments"; an attached image is supplied with this message. If the user \
+        refers to an attachment that is not present in this turn, say so and ask them to \
+        attach it again rather than guessing at its contents.
         """
 
+    /// Appended to the calls whose reply is parsed as JSON.
     static let jsonOnly = """
 
         Return only a single JSON object. No markdown fences, no commentary before or \

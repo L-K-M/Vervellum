@@ -50,4 +50,28 @@ final class ResearchPromptsTests: XCTestCase {
     func testTheCitationRuleStillForbidsURLs() {
         XCTAssertTrue(ResearchPrompts.answer.contains("may not write a URL"))
     }
+
+    /// An attachment has no citation number and cannot get one, so the prompts that
+    /// enforce numbering have to say what to do with it. Without this clause a model
+    /// told "every statement resting on a source must carry that source's number" either
+    /// invents a number for the picture or declines to mention it.
+    func testTheAnswerAndDirectPromptsSayWhatToDoWithAnAttachment() {
+        for prompt in [ResearchPrompts.answer, ResearchPrompts.direct] {
+            XCTAssertTrue(prompt.contains(ResearchPrompts.attachments))
+        }
+        // And it does not reopen the citation rule it sits next to.
+        XCTAssertTrue(ResearchPrompts.attachments.contains("no citation number"))
+        XCTAssertFalse(ResearchPrompts.attachments.contains("http"))
+    }
+
+    /// Conditional, because a standing sentence about attachments on a turn with none is
+    /// a standing invitation to plan searches about a file nobody sent.
+    func testThePlanMentionsAttachmentsOnlyWhenThereAreSome() {
+        let without = ResearchPrompts.plan(maxSearches: 4, today: "2026-09-06")
+        XCTAssertFalse(without.lowercased().contains("attach"))
+
+        let with = ResearchPrompts.plan(maxSearches: 4, today: "2026-09-06",
+                                        hasAttachments: true)
+        XCTAssertTrue(with.contains("attached something to this question"))
+    }
 }
