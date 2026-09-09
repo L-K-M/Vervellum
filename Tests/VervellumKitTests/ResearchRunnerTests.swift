@@ -762,9 +762,14 @@ final class ResearchRunnerTests: XCTestCase {
     /// be decided about twice. This is what notices if one of them quietly grows a
     /// `default`.
     func testWhichVerdictsWakeTheReviserAndWhichAreMerelyShownToIt() {
-        XCTAssertEqual(Verdict.allCases.filter(ResearchRunner.warrantsRevision),
+        // As sets: which verdicts are in each answer is the contract, and the order
+        // `allCases` happens to list them in is not. Compared as arrays, renaming or
+        // reordering a case in `Verdict` — a change with no behaviour in it — turned this
+        // red as though a switch had grown a `default`. A sixth verdict still breaks it,
+        // which is the property worth keeping.
+        XCTAssertEqual(Set(Verdict.allCases.filter(ResearchRunner.warrantsRevision)),
                        [.contradicted, .mixed])
-        XCTAssertEqual(Verdict.allCases.filter(ResearchRunner.isShownToReviser),
+        XCTAssertEqual(Set(Verdict.allCases.filter(ResearchRunner.isShownToReviser)),
                        [.contradicted, .mixed, .insufficient])
     }
 
@@ -795,6 +800,38 @@ final class ResearchRunnerTests: XCTestCase {
         // the draft, and cited nothing for the validator to object to — so it cleared
         // every check and replaced a read answer with two rows of backticks.
         XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("```\n```"), "")
+
+        // Four backticks, which is what a model reaches for when the prose it is
+        // wrapping has its own three-tick block in it — the likeliest shape of all for a
+        // correction, and the one a three-tick-only reading let straight through.
+        XCTAssertEqual(
+            ResearchRunner.unwrappingWholeAnswerFence(
+                "````markdown\nText [1].\n\n```swift\nlet x = 1\n```\n````"),
+            "Text [1].\n\n```swift\nlet x = 1\n```",
+            "the inner block is content, not fence")
+        // A closer shorter than its opener does not close anything — it sits inside the
+        // fence, which is the whole reason for opening a longer one.
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("````\nText.\n```"),
+                       "````\nText.\n```")
+    }
+
+    /// The unwrapper is pinned above; this pins that the revision path still calls it.
+    /// A disconnected call site would either drop a wall of monospace on the reader or
+    /// discard a good rewrite, and every other test in this section would stay green —
+    /// the fenced replies they use are degenerate ones that fail the emptiness guard
+    /// whether they were unwrapped or not.
+    func testAFencedValidRevisionIsUnwrappedAndAccepted() async {
+        let transport = revisionTransport(
+            verdict: "contradicted",
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .stream(["```markdown\nParallax is measured in arcseconds [1].\n```"]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "Parallax is measured in arcseconds [1].")
+        XCTAssertEqual(turn.draftAnswer, "Parallax is measured in degrees [1].")
+        XCTAssertTrue(turn.notices.contains(.answerRevised), "\(turn.notices)")
     }
 
     /// The one-line spelling of the same degenerate reply, which unwrapping cannot see —

@@ -850,12 +850,26 @@ final class ResearchRunner: ResearchRunning {
     /// spelling this cannot.
     static func unwrappingWholeAnswerFence(_ answer: String) -> String {
         let lines = answer.split(separator: "\n", omittingEmptySubsequences: false)
-        guard lines.count >= 2,
-              let first = lines.first, let last = lines.last,
-              first.hasPrefix("```"), last.trimmingCharacters(in: .whitespaces) == "```"
+        guard lines.count >= 2, let first = lines.first, let last = lines.last
         else { return answer }
-        let label = first.dropFirst(3).trimmingCharacters(in: .whitespaces).lowercased()
+        // A fence is a *run* of three or more backticks, not exactly three — and reading
+        // only the three-tick spelling left the hole open exactly where it was widest.
+        // A model reaches for the longer form when the thing it is wrapping contains its
+        // own ``` block, which is the likeliest shape for a correction to arrive in and
+        // the one reason it would think to fence the answer at all.
+        let opener = first.trimmingCharacters(in: .whitespaces)
+        let openingTicks = opener.prefix(while: { $0 == "`" }).count
+        guard openingTicks >= 3 else { return answer }
+        let label = opener.dropFirst(openingTicks)
+            .trimmingCharacters(in: .whitespaces).lowercased()
         guard label.isEmpty || label == "markdown" || label == "md" else { return answer }
+        // The closer is backticks and nothing else, and at least as long as the opener.
+        // A shorter run does not close the fence — it sits inside it, which is the whole
+        // point of opening a longer one.
+        let closer = last.trimmingCharacters(in: .whitespaces)
+        let closingTicks = closer.prefix(while: { $0 == "`" }).count
+        guard closingTicks >= openingTicks, closingTicks == closer.count
+        else { return answer }
         return lines.dropFirst().dropLast().joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -950,19 +964,23 @@ final class ResearchRunner: ResearchRunning {
         // The reply arrived; a Stop may have arrived with it. Everything below mutates
         // the turn, and the catch above only covers a cancellation thrown *by* the call.
         try Task.checkCancellation()
-        let trimmed = Self.unwrappingWholeAnswerFence(
+        // `corrected`, not `trimmed`: the two lines that matter in this function read
+        // `turn.draftAnswer = answer` and `turn.answer = corrected`, and under the old
+        // name a skimming reader had to work out which of the two was the rewrite — at
+        // the one assignment where getting it backwards silently discards the correction.
+        let corrected = Self.unwrappingWholeAnswerFence(
             revised.trimmingCharacters(in: .whitespacesAndNewlines))
         // Nothing in it, or nothing in it but fence. A reply of a lone ``` is not caught
         // by unwrapping — there is no closing line to pair it with — and would otherwise
         // read as a perfectly valid revision: non-empty, different from the draft, and
         // citing nothing for the validator to object to.
-        guard trimmed.contains(where: { !$0.isWhitespace && $0 != "`" }) else {
+        guard corrected.contains(where: { !$0.isWhitespace && $0 != "`" }) else {
             // A reply with no content in it is a call that failed and happened to return.
             trace.warn("Revision unavailable: the reply was empty")
             update { $0.addNotice(.revisionUnavailable) }
             return
         }
-        guard trimmed != answer.trimmingCharacters(in: .whitespacesAndNewlines) else {
+        guard corrected != answer.trimmingCharacters(in: .whitespacesAndNewlines) else {
             // The reviser read the findings and judged that none of them warranted a
             // change, which is a real answer and not a failure — and not a revision
             // either. Nothing is said, because nothing happened.
@@ -974,7 +992,7 @@ final class ResearchRunner: ResearchRunning {
         // answer than the one it replaces — and it would arrive *after* the validation
         // the reader's trust in these numbers rests on. So it is checked before it is
         // accepted, and dropped whole rather than swapped in and annotated.
-        let validation = CitationValidator.validate(answer: trimmed, sourceCount: sources.count)
+        let validation = CitationValidator.validate(answer: corrected, sourceCount: sources.count)
         // Un-citing is the quiet half of the same failure. A reviser that hedges a claim
         // by dropping its `[n]` rather than weakening its words hands back prose that
         // reads as confident and rests on nothing — and every check above would pass it,
@@ -983,9 +1001,10 @@ final class ResearchRunner: ResearchRunning {
         let draftCitedSomething = !CitationValidator
             .validate(answer: answer, sourceCount: sources.count)
             .citedSourceIndices.isEmpty
+        let revisionCitedSomething = !validation.citedSourceIndices.isEmpty
         guard validation.outOfRangeCitations.isEmpty,
               validation.literalURLs.isEmpty,
-              !draftCitedSomething || !validation.citedSourceIndices.isEmpty
+              !draftCitedSomething || revisionCitedSomething
         else {
             // Which clause fired, because the three are different stories. Two are a
             // reviser breaking a rule it was given; the third is the un-citing guard,
@@ -1002,7 +1021,7 @@ final class ResearchRunner: ResearchRunning {
         }
         update { turn in
             turn.draftAnswer = answer
-            turn.answer = trimmed
+            turn.answer = corrected
             turn.addNotice(.answerRevised)
         }
         trace.log("Revised the answer in " + String(format: "%.1fs", trace.elapsed - began))
