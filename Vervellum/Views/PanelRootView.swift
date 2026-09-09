@@ -79,6 +79,16 @@ struct PanelRootView: View {
     /// finished `/new` would mean Return filled the field instead of starting a thread.
     /// A row the reader walks or hovers to is theirs either way — choosing `models` from
     /// under a typed `/model` is a choice, not an accident.
+    ///
+    /// The offer itself is not announced, and that is a decision rather than an
+    /// oversight. It appears at `/d` and stays through `/de` and `/dee`, while the row
+    /// it points at changes under it as the list narrows — so a once-per-word
+    /// announcement would name a command the reader has already typed past, and a
+    /// per-keystroke one would talk over the character echo. What Return will take is
+    /// spoken by `announceSelection` the moment the reader arrows to a row, and by the
+    /// row's own `.isSelected` trait when the VoiceOver cursor reaches it. Leaving the
+    /// list *is* announced, because that is the change a reader makes on purpose and
+    /// can otherwise make by accident.
     private var effectiveCompletionIndex: Int? {
         if let explicit = explicitCompletionIndex { return explicit }
         guard !completionDismissed, ComposerCommand.isHalfTypedCommand(draft),
@@ -337,8 +347,9 @@ struct PanelRootView: View {
                              // and otherwise asks. The send button below never takes a
                              // highlighted row — clicking is not a way to pick from a
                              // list — so on a half-typed command the two now differ on
-                             // purpose: Return finishes the word, the button says to
-                             // finish it. The button is the gesture with no list in it.
+                             // purpose: Return finishes the word; the button declines
+                             // it and asks for the rest. The button is the gesture with
+                             // no list in it.
                              //
                              // `onSubmit` is the user's submit gesture, not the Return
                              // key: with submit-on-Return off, `ComposerView` routes

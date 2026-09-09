@@ -60,6 +60,13 @@ struct SourcesView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(isExpanded ? "Hide the sources" : "Show the sources")
+        // The count, spoken. An explicit label on a button replaces the one SwiftUI
+        // would have built from its children, so naming the gesture silently took
+        // "8 of 24 cited" away from the readers who cannot see it — and now that the
+        // rows are closed by default, there is nothing left for them to count.
+        // `countText` is nil only for a turn with no sources at all, which is a
+        // section that does not appear.
+        .accessibilityValue(countText ?? "")
     }
 
     @ViewBuilder
