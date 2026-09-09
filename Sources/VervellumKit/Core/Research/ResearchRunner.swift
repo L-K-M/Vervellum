@@ -354,10 +354,14 @@ final class ResearchRunner: ResearchRunning {
 
         var payload: [[String: String]] = []
         var images: [ChatCompletionsClient.ImagePart] = []
-        var lost = 0
+        var lost: [String] = []
         for attachment in attachments {
-            guard let data = attachmentBytes(attachment) else {
-                lost += 1
+            // Empty bytes are no more readable than bytes that are gone, and an image
+            // part carrying an empty `data:` URL is a thing no provider can do anything
+            // with. `Attachment.make` refuses an empty file, so this is storage that was
+            // truncated rather than anything a user chose.
+            guard let data = attachmentBytes(attachment), !data.isEmpty else {
+                lost.append(attachment.name)
                 continue
             }
             switch attachment.kind {
@@ -372,17 +376,24 @@ final class ResearchRunner: ResearchRunning {
                 if let text = Attachment.text(from: data) {
                     payload.append(["name": attachment.name, "text": text])
                 } else {
-                    lost += 1
+                    lost.append(attachment.name)
                 }
             case .other:
                 // A kind a later build wrote. Nothing here knows how to send it, which
                 // is a thing the reader has to be told rather than a thing to guess at.
-                lost += 1
+                lost.append(attachment.name)
             }
         }
-        trace.log("Attachments: \(images.count) image(s), \(payload.count) text file(s)"
-                  + (lost > 0 ? ", \(lost) that could not be sent" : ""))
-        if lost > 0 { update { $0.addNotice(.attachmentMissing) } }
+        // The model is told which names did not make it, not only the reader. Without
+        // this it sees one of two attachments and has no idea the other existed, and the
+        // answer prompt's rule about an attachment that is not present has nothing to
+        // fire on. `unavailable` rather than an absent entry, because "there was a file
+        // called this and you cannot see it" is the fact worth carrying.
+        for name in lost { payload.append(["name": name, "unavailable": "yes"]) }
+        trace.log("Attachments: \(images.count) image(s), "
+                  + "\(payload.count - lost.count) text file(s)"
+                  + (lost.isEmpty ? "" : ", \(lost.count) that could not be sent"))
+        if !lost.isEmpty { update { $0.addNotice(.attachmentMissing) } }
         return (payload, images)
     }
 

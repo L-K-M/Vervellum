@@ -276,9 +276,11 @@ enum TurnNotice: String, Codable, Equatable {
                 + "and the rest of this turn used it too. The model named on this turn is "
                 + "the one that answered."
         case .attachmentMissing:
-            return "Something attached to this question could not be read, so the answer "
+            return "Something attached to this question could not be sent, so the answer "
                 + "was written without it. The file is listed above as a record of what "
-                + "was asked — attach it again to have the model look at it."
+                + "was asked. Attach it again to have the model look at it; if it is "
+                + "still not sent, this version of Vervellum cannot send a file of that "
+                + "kind."
         case .imagesNotSent:
             return "An image was attached, but the model that answered is not set to be sent "
                 + "images, so it answered from the question's words alone. Turn on "

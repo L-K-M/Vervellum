@@ -22,10 +22,17 @@ import Foundation
 /// and bytes written after that snapshot was taken are, through no fault of their own,
 /// not in it. Within one process the two happen on the same thread; across processes —
 /// a `vervellum --ask` launched while the panel is mid-question, two copies of the app
-/// over one library — they do not. `sweep(keeping:writtenBefore:)` is what closes that:
-/// a file too young to have been in the snapshot is left for the next sweep. The cost of
-/// being wrong in that direction is a stale file for an hour; the cost in the other
-/// direction is a screenshot the user just attached, deleted while they were typing.
+/// over one library — they do not. `sweep(keeping:sparingFilesNewerThan:)` is what
+/// closes that: a file young enough that the caller's snapshot could not have mentioned
+/// it is left for the next sweep.
+///
+/// The window is measured from *now* rather than from when the snapshot was read, which
+/// is exact only because every caller reads the library and sweeps in the same breath —
+/// the two are microseconds apart, and the window is margin for the *other* process's
+/// write, not for its own staleness. A caller that held a snapshot for minutes before
+/// sweeping would need to be given the snapshot's time instead. The cost of being wrong
+/// in this direction is a stale file until the next sweep; in the other, it is a
+/// screenshot the user just attached, deleted while they were still typing.
 ///
 /// A store that allowed editing in place would need a queue, the way `ThreadArchive`
 /// does.
@@ -103,7 +110,7 @@ final class AttachmentStore {
     /// sweep; getting it wrong in the other direction would delete a live attachment, so
     /// the caller passes what it *kept*, never what it dropped.
     @discardableResult
-    func sweep(keeping live: Set<UUID>, writtenBefore grace: TimeInterval = 300) -> Int {
+    func sweep(keeping live: Set<UUID>, sparingFilesNewerThan grace: TimeInterval = 300) -> Int {
         guard let names = try? fileManager.contentsOfDirectory(atPath: directory.path) else {
             return 0
         }

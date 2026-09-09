@@ -126,12 +126,24 @@ struct Attachment: Codable, Equatable, Identifiable {
     /// A file name fit to show and to put in a JSON payload.
     ///
     /// Control characters out — a name carrying a newline would break the panel's layout
-    /// and could forge a line in the payload the model reads. Path separators out too:
-    /// nothing here uses the name as a path, because the store keys by `id`, and keeping
-    /// it that way is easier than remembering why it is safe.
+    /// and could forge a line in the payload the model reads. That set is Unicode
+    /// categories **Cc and Cf**, not Cc alone, so the bidi overrides and the zero-width
+    /// marks — the characters that make one name render as another — go with them.
+    /// `AttachmentTests` pins that, because it is a property of Foundation this relies
+    /// on rather than one this code states.
+    ///
+    /// The line and paragraph separators are added by hand: U+2028 and U+2029 are
+    /// categories Zl and Zp, so neither set above catches them, and both break a layout
+    /// exactly the way a newline would. This app has met U+2028 before — `ComposerView`
+    /// documents `insertLineBreak:` inserting one where a newline was meant.
+    ///
+    /// Path separators out too: nothing here uses the name as a path, because the store
+    /// keys by `id`, and keeping it that way is easier than remembering why it is safe.
     static func displayName(for raw: String, fallback: String = "attachment") -> String {
+        let invisible = CharacterSet.controlCharacters
+            .union(CharacterSet(charactersIn: "\u{2028}\u{2029}"))
         let cleaned = raw
-            .components(separatedBy: CharacterSet.controlCharacters).joined()
+            .components(separatedBy: invisible).joined()
             .components(separatedBy: CharacterSet(charactersIn: "/\\")).joined(separator: "_")
             .trimmingCharacters(in: .whitespaces)
         guard !cleaned.isEmpty else { return fallback }
@@ -185,11 +197,15 @@ struct Attachment: Codable, Equatable, Identifiable {
             case .tooLarge(let name, let byteCount):
                 let megabytes = Double(byteCount) / (1024 * 1024)
                 return String(format: "%@ is %.1f MB. An attachment has to be under "
-                              + "%d MB — scale it down, or attach a shorter file.",
+                              + "%ld MB — scale it down, or attach a shorter file.",
                               name, megabytes, Attachment.maxImageBytes / (1024 * 1024))
             case .unsupported(let name):
+                // "UTF-8", because that is what `text(from:)` accepts. A Latin-1 file
+                // refused as simply "not something Vervellum can attach" sends its owner
+                // looking for the wrong problem — and the encoding is the thing they can
+                // actually change.
                 return "\(name) is not something Vervellum can attach. Images (PNG, JPEG, "
-                    + "GIF, WebP) and text files are."
+                    + "GIF, WebP) and UTF-8 text files are."
             }
         }
     }

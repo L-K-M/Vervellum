@@ -56,8 +56,10 @@ final class ResearchPromptsTests: XCTestCase {
     /// told "every statement resting on a source must carry that source's number" either
     /// invents a number for the picture or declines to mention it.
     func testTheAnswerAndDirectPromptsSayWhatToDoWithAnAttachment() {
-        for prompt in [ResearchPrompts.answer, ResearchPrompts.direct] {
-            XCTAssertTrue(prompt.contains(ResearchPrompts.attachments))
+        for (label, prompt) in [("answer", ResearchPrompts.answer),
+                                ("direct", ResearchPrompts.direct)] {
+            XCTAssertTrue(prompt.contains(ResearchPrompts.attachments),
+                          "the \(label) prompt is missing the attachment clause")
         }
         // And it does not reopen the citation rule it sits next to.
         XCTAssertTrue(ResearchPrompts.attachments.contains("no citation number"))

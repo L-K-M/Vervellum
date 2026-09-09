@@ -201,7 +201,8 @@ vouch for, and it is handled on those terms:
   visible marker so the model is never handed a fragment presented as a whole file.
 - **The file name is sanitised** before it is shown or put in the payload: control and
   format characters out — which covers the bidi overrides and zero-width marks that make
-  one name render as another — and path separators too. Nothing builds a path from it —
+  one name render as another — the line and paragraph separators with them, and path
+  separators too. Nothing builds a path from it —
   the store keys by the attachment's id — and keeping it that way is easier than proving
   it is safe.
 - **A provider is shown images only if you said it can.** There is no way to ask an

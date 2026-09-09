@@ -99,15 +99,16 @@ final class AttachmentTests: XCTestCase {
         // And the byte below the cap is fine, so the boundary is the documented one.
         let exact = png(Attachment.maxImageBytes - 8)
         XCTAssertEqual(exact.count, Attachment.maxImageBytes)
-        XCTAssertNotNil(try? Attachment.make(from: exact, name: "shot.png").get())
+        XCTAssertNoThrow(try Attachment.make(from: exact, name: "shot.png").get())
     }
 
     /// A long file is truncated with the same visible marker a truncated page carries.
     /// Nobody is told the model saw more than it did.
     func testLongTextIsTruncatedVisibly() throws {
         let long = String(repeating: "a", count: Attachment.maxTextCharacters + 500)
-        let (attachment, bytes) = try XCTUnwrap(
-            try? Attachment.make(from: Data(long.utf8), name: "notes.txt").get())
+        // Unwrapped directly, like the test above: a refusal here should say which one.
+        let (attachment, bytes) = try Attachment.make(from: Data(long.utf8),
+                                                      name: "notes.txt").get()
         let text = String(decoding: bytes, as: UTF8.self)
 
         XCTAssertEqual(attachment.kind, .text)
@@ -143,6 +144,11 @@ final class AttachmentTests: XCTestCase {
         XCTAssertEqual(Attachment.displayName(for: zeroWidth), "shot.png")
         // A name that is nothing but invisible characters still comes back usable.
         XCTAssertEqual(Attachment.displayName(for: "\u{202A}\u{2069}"), "attachment")
+
+        // U+2028 and U+2029 are Zl and Zp, so `controlCharacters` does not catch them —
+        // and both break a layout exactly the way a newline does.
+        XCTAssertEqual(Attachment.displayName(for: "sh\u{2028}ot.png"), "shot.png")
+        XCTAssertEqual(Attachment.displayName(for: "sh\u{2029}ot.png"), "shot.png")
     }
 
     // MARK: Decoding

@@ -52,12 +52,12 @@ final class AttachmentStoreTests: XCTestCase {
         try store.write(Data([1]), for: live)
         try store.write(Data([2]), for: dead)
 
-        XCTAssertEqual(store.sweep(keeping: [live.id], writtenBefore: 0), 1)
+        XCTAssertEqual(store.sweep(keeping: [live.id], sparingFilesNewerThan: 0), 1)
         XCTAssertTrue(store.exists(live))
         XCTAssertFalse(store.exists(dead))
 
         // And it is idempotent: nothing is left to remove the second time.
-        XCTAssertEqual(store.sweep(keeping: [live.id], writtenBefore: 0), 0)
+        XCTAssertEqual(store.sweep(keeping: [live.id], sparingFilesNewerThan: 0), 0)
     }
 
     /// A file this store did not write is left alone. The directory belongs to Vervellum,
@@ -68,7 +68,7 @@ final class AttachmentStoreTests: XCTestCase {
         let stranger = directory.appendingPathComponent("notes.txt")
         try Data("hello".utf8).write(to: stranger)
 
-        XCTAssertEqual(store.sweep(keeping: [], writtenBefore: 0), 1)
+        XCTAssertEqual(store.sweep(keeping: [], sparingFilesNewerThan: 0), 1)
         XCTAssertTrue(FileManager.default.fileExists(atPath: stranger.path))
     }
 
@@ -122,7 +122,7 @@ final class AttachmentStoreTests: XCTestCase {
         XCTAssertTrue(store.exists(attachment))
 
         // And it is not immortal: the same sweep with no grace window removes it.
-        XCTAssertEqual(store.sweep(keeping: [], writtenBefore: 0), 1)
+        XCTAssertEqual(store.sweep(keeping: [], sparingFilesNewerThan: 0), 1)
         XCTAssertFalse(store.exists(attachment))
     }
 
@@ -132,5 +132,18 @@ final class AttachmentStoreTests: XCTestCase {
         let threads = URL(fileURLWithPath: "/tmp/vervellum/threads.json")
         XCTAssertEqual(AttachmentStore.directory(besideThreadFile: threads).path,
                        "/tmp/vervellum/attachments")
+    }
+
+    /// An erase is not the end of the store. The next write recreates the directory,
+    /// which is what lets a panel keep taking screenshots after "erase stored threads" —
+    /// a transition a user can reach twice in one session.
+    func testTheStoreKeepsWorkingAfterAnErase() throws {
+        let store = AttachmentStore(directory: directory)
+        try store.write(Data([1]), for: record())
+        try store.removeAll()
+
+        let fresh = record()
+        try store.write(Data([2]), for: fresh)
+        XCTAssertEqual(store.data(for: fresh), Data([2]))
     }
 }

@@ -414,6 +414,10 @@ final class ResearchRunnerTests: XCTestCase {
         // every part.
         XCTAssertEqual(parts.count, 2, "unexpected parts: \(parts)")
         XCTAssertEqual(parts.first?["type"] as? String, "text")
+        // The question itself, not just a text part: an image that arrived in place of
+        // the words would be the most visible bug this feature could have.
+        let text = try XCTUnwrap(parts.first?["text"] as? String)
+        XCTAssertTrue(text.contains("What is this?"), text)
         XCTAssertEqual((parts.last?["image_url"] as? [String: Any])?["url"] as? String,
                        "data:image/png;base64,iVBORw==")
     }
@@ -482,6 +486,31 @@ final class ResearchRunnerTests: XCTestCase {
         let body = try XCTUnwrap(transport.calls.first?.body)
         let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
         XCTAssertNotNil(messages.last?["content"] as? String)
+        // And the model is told which file it is not seeing, so it can say so instead of
+        // answering as though nothing had been attached.
+        let content = try XCTUnwrap(transport.calls.first?.userContent)
+        XCTAssertTrue(content.contains("shot.png"), content)
+        XCTAssertTrue(content.contains("unavailable"), content)
+    }
+
+    /// Zero bytes are no more readable than bytes that are gone, and an empty `data:`
+    /// URL is a thing no provider can use. `Attachment.make` refuses an empty file, so
+    /// this is storage that was truncated rather than anything a user chose.
+    func testAnEmptyAttachmentIsReportedAsMissing() async throws {
+        let transport = StubTransport { call in
+            call.kind == .stream ? .stream(["Answering from the words alone."]) : .unrouted
+        }
+
+        let turn = await run("What is this?", mode: .direct, transport: transport,
+                             sendsImages: true, attachments: [Self.image],
+                             attachmentBytes: { _ in Data() })
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertTrue(turn.notices.contains(.attachmentMissing), "notices: \(turn.notices)")
+        let body = try XCTUnwrap(transport.calls.first?.body)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        XCTAssertNotNil(messages.last?["content"] as? String,
+                        "an empty image must not become an empty image part")
     }
 
     /// A picture and a log on the same question. The image rides only because this
@@ -510,6 +539,7 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(parts.count, 2, "unexpected parts: \(parts)")
         // The text file rides inside the question payload, which is the text part.
         let text = try XCTUnwrap(parts.first?["text"] as? String)
+        XCTAssertTrue(text.contains("What failed?"), text)
         XCTAssertTrue(text.contains("read timeout"), text)
         XCTAssertTrue(text.contains("log.txt"), text)
         XCTAssertEqual((parts.last?["image_url"] as? [String: Any])?["url"] as? String,

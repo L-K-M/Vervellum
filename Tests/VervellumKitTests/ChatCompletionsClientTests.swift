@@ -214,6 +214,17 @@ final class ChatCompletionsClientTests: XCTestCase {
         XCTAssertEqual(messages.last?["content"] as? String, "u")
     }
 
+    /// The same, with the empty list spelled out rather than defaulted: a caller that
+    /// maps "no attachments" to `images: []` must get the string form too, which is the
+    /// whole compatibility promise of this shape.
+    func testAnExplicitlyEmptyImageListAlsoKeepsAPlainStringContent() throws {
+        let body = ChatCompletionsClient.requestBody(model: "m", system: "s", userContent: "u",
+                                                     images: [], stream: false,
+                                                     optionalParameters: false)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.last?["content"] as? String, "u")
+    }
+
     /// With images the newer parts shape is used, text first: the question is what the
     /// pictures are *for*, and a model reading parts in order should have it before them.
     func testImagesBecomePartsWithTheTextFirst() throws {
@@ -253,8 +264,10 @@ final class ChatCompletionsClientTests: XCTestCase {
                                           images: images)
         let body = try XCTUnwrap(transport.calls.first?.body)
         let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
-        XCTAssertNotNil(messages.last?["content"] as? String,
-                        "an image reached a provider that was never configured for one")
+        // The text as well as the absence of the image: a rebuild that filtered the
+        // picture and lost the question with it would pass a nil check.
+        XCTAssertEqual(messages.last?["content"] as? String, "u",
+                       "the question was lost, or an image reached a provider without eyes")
     }
 
     /// And the same client with the flag on sends it, so the guard above is a filter
