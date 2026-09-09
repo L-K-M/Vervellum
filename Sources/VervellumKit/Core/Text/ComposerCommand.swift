@@ -270,10 +270,15 @@ enum ComposerCommand: Equatable {
     /// `submitFromComposer` with `indices.contains`, the arrow handler by mapping an
     /// out-of-range index to nil before it moves — so the belt and the braces are both
     /// on. Bounds-checking here as well would only add a third place for the rule to be
-    /// stated and a third place for it to drift. A negative passes through too, which is
-    /// worth saying out loud: both guards happen to reject one, but only because they
-    /// ask `indices.contains` rather than compare against a count, and a caller that
-    /// compared against a count would subscript with it.
+    /// stated and a third place for it to drift.
+    ///
+    /// A *negative* is the exception, and it is not the same kind of check. Bounds need
+    /// `completions` — that is what makes checking them here a second reading of the
+    /// callers' rule. "Below zero is not a row" needs nothing: it is true of every list
+    /// there will ever be, so it can be settled at the one place that owns the contract
+    /// rather than left to both guards happening to ask `indices.contains` (which
+    /// rejects a negative) instead of comparing against a count (which does not). A
+    /// negative is treated as no choice at all, so the offer rules answer instead.
     ///
     /// The same goes for a choice under `isDismissed`. Escape clears the choice as it
     /// sets the flag, so the two are not live together by that route — but the pointer
@@ -291,7 +296,7 @@ enum ComposerCommand: Equatable {
                                 isDismissed: Bool,
                                 draft: String,
                                 completions: [Entry]?) -> Int? {
-        if let explicit { return explicit }
+        if let explicit, explicit >= 0 { return explicit }
         guard !isDismissed, isHalfTypedCommand(draft),
               let completions, !completions.isEmpty else { return nil }
         return 0

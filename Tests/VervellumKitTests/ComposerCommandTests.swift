@@ -430,6 +430,18 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: 0, isDismissed: true,
                                                        draft: "", completions: nil), 0,
                        "every condition on the offer at once, and the choice still wins")
+
+        // Except a negative, which is no row in any list and so is no choice either.
+        // The offer rules answer instead — here, row 0 under a half-typed word.
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: -1, isDismissed: false,
+                                                       draft: "/h",
+                                                       completions: ComposerCommand.completions(for: "/h")),
+                       0,
+                       "a negative choice is no choice; the offer answers")
+        XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: -1, isDismissed: true,
+                                                     draft: "/h",
+                                                     completions: ComposerCommand.completions(for: "/h")),
+                     "and with nothing to fall back to, nothing is offered")
     }
 
 }
