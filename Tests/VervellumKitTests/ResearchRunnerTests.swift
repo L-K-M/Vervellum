@@ -781,8 +781,9 @@ final class ResearchRunnerTests: XCTestCase {
 
         let turn = await run("How is stellar parallax measured?", transport: transport)
 
-        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded",
-                       "a failed revision must not fail the turn")
+        XCTAssertEqual(turn.stage, .complete,
+                       "a failed revision must not fail the turn: "
+                        + (turn.failure ?? "no failure recorded"))
         XCTAssertEqual(turn.answer, "Parallax is measured in degrees [1].")
         XCTAssertNil(turn.draftAnswer)
         XCTAssertTrue(turn.notices.contains(.revisionUnavailable), "\(turn.notices)")
