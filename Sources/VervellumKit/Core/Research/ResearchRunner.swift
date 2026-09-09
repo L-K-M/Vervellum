@@ -548,6 +548,13 @@ final class ResearchRunner: ResearchRunning {
         let planContext = ResearchContext.assemble(
             question: question, history: history, today: today, extra: planExtra)
         if planContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
+
+        // Parsed *inside* the chain, not after it. A provider that answers with valid
+        // JSON in the wrong shape has failed at the same job as one that answers with
+        // no JSON at all, and only the second was worth another provider while the
+        // first killed the turn. `PlanParser`'s own messages give the game away — "Try
+        // again or choose another model" is the advice the chain exists to take.
+        let planImages = attachments.images
         // The second payload for a planner with no eyes, built exactly as the answer
         // stage builds its own. This used to argue the other way — that naming a picture
         // the provider was not sent would be "a sentence about something that is not
@@ -561,13 +568,6 @@ final class ResearchRunner: ResearchRunning {
                 "attachments": attachments.payload
                     + attachments.imageNames.map { ["name": $0, "unavailable": "yes"] },
             ]) { _, new in new })
-
-        // Parsed *inside* the chain, not after it. A provider that answers with valid
-        // JSON in the wrong shape has failed at the same job as one that answers with
-        // no JSON at all, and only the second was worth another provider while the
-        // first killed the turn. `PlanParser`'s own messages give the game away — "Try
-        // again or choose another model" is the advice the chain exists to take.
-        let planImages = attachments.images
         // Recorded, not logged, inside the closure: the closure runs once per provider
         // attempt, so a chain falling back through two providers without eyes wrote the
         // line twice and made one decision look like two. Same shape as the answer
