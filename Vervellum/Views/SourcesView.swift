@@ -40,7 +40,12 @@ struct SourcesView: View {
                     }
                 }
                 .transition(PanelTheme.Motion.disclosureTransition(reduceMotion))
+                // The same transition as the rows above it. The two are one section, and
+                // leaving this on SwiftUI's default fade meant they came and went by
+                // different routes — which is the opposite of the reason this was
+                // declined last round.
                 uncitedToggle
+                    .transition(PanelTheme.Motion.disclosureTransition(reduceMotion))
             }
         }
     }
@@ -50,7 +55,9 @@ struct SourcesView: View {
     /// should be the sentence they are reading.
     private var header: some View {
         Button {
-            withAnimation(PanelTheme.Motion.disclosure) { isExpanded.toggle() }
+            withAnimation(PanelTheme.Motion.disclosureAnimation(reduceMotion)) {
+                isExpanded.toggle()
+            }
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
                 SectionLabel(text: "Sources", trailing: countText)
@@ -80,7 +87,9 @@ struct SourcesView: View {
     private var uncitedToggle: some View {
         if !uncited.isEmpty {
             Button {
-                withAnimation(PanelTheme.Motion.disclosure) { showsAll.toggle() }
+                withAnimation(PanelTheme.Motion.disclosureAnimation(reduceMotion)) {
+                    showsAll.toggle()
+                }
             } label: {
                 Text(showsAll
                      ? "Hide the \(uncited.count) uncited"

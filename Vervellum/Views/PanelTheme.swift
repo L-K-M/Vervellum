@@ -182,6 +182,23 @@ enum PanelTheme {
         static let stage: Animation = .easeOut(duration: 0.18)
         static let disclosure: Animation = .easeInOut(duration: 0.16)
 
+        /// How a disclosed section's *change* is animated, or nil for not at all.
+        ///
+        /// The companion to `disclosureTransition`, and needed for the same reason:
+        /// gating only the transition left the setting half-wired, because the
+        /// transaction still animated the container's height — everything below the
+        /// section sliding up or down — and the chevron's rotation. Those are the motion,
+        /// as much as the rows arriving are. `withAnimation` takes an `Animation?`, so
+        /// nil is the whole of "do it instantly".
+        ///
+        /// Paired with the transition rather than folded into it because SwiftUI needs
+        /// them at two different places: one wraps the state change, the other decorates
+        /// the view. Two functions with one argument each is what stops the next reader
+        /// from gating one and not the other, which is the mistake this replaces.
+        static func disclosureAnimation(_ reduceMotion: Bool) -> Animation? {
+            reduceMotion ? nil : disclosure
+        }
+
         /// How a disclosed section arrives.
         ///
         /// A list that slides in from above is the shape Reduce Motion exists to

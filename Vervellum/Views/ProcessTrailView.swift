@@ -47,7 +47,9 @@ struct ProcessTrailView: View {
 
     private var header: some View {
         Button {
-            withAnimation(PanelTheme.Motion.disclosure) { isExpanded.toggle() }
+            withAnimation(PanelTheme.Motion.disclosureAnimation(reduceMotion)) {
+                isExpanded.toggle()
+            }
         } label: {
             HStack(spacing: PanelTheme.Space.small) {
                 stageGlyph
