@@ -839,7 +839,11 @@ final class ResearchRunner: ResearchRunning {
     /// Only an *undecorated* opening fence is unwrapped: ``` or one labelled `markdown`
     /// or `md`. A fence naming a code language is a real code block, and an answer that
     /// is genuinely nothing but one — rare, but the reviser is told to preserve what it
-    /// was given — must survive this untouched.
+    /// was given — must survive this untouched. An *unlabeled* fence is always read as
+    /// decoration, even when what it wraps is code: the bare ``` wrap is the commonest
+    /// thing this has to undo, and requiring a label to unwrap would give that up to
+    /// protect a shape — an unlabeled whole-answer code block — that the un-citing guard
+    /// downstream would refuse anyway.
     ///
     /// Two lines are enough, not three. A reply of nothing but an opening and closing
     /// fence unwraps to the empty string and is caught by the emptiness guard in
@@ -857,7 +861,13 @@ final class ResearchRunner: ResearchRunning {
         // A model reaches for the longer form when the thing it is wrapping contains its
         // own ``` block, which is the likeliest shape for a correction to arrive in and
         // the one reason it would think to fence the answer at all.
-        let opener = first.trimmingCharacters(in: .whitespaces)
+        // `whitespacesAndNewlines`, not `whitespaces`: the split above is on "\n"
+        // alone, so a CRLF reply leaves a carriage return on the end of every line, and
+        // `.whitespaces` is space and tab. The label read as "markdown\r" and the closer
+        // as four characters of which three were backticks — both guards failed, and the
+        // one function whose whole job is catching a fenced answer switched itself off
+        // for any provider or proxy that speaks CRLF.
+        let opener = first.trimmingCharacters(in: .whitespacesAndNewlines)
         let openingTicks = opener.prefix(while: { $0 == "`" }).count
         guard openingTicks >= 3 else { return answer }
         let label = opener.dropFirst(openingTicks)
@@ -866,7 +876,7 @@ final class ResearchRunner: ResearchRunning {
         // The closer is backticks and nothing else, and at least as long as the opener.
         // A shorter run does not close the fence — it sits inside it, which is the whole
         // point of opening a longer one.
-        let closer = last.trimmingCharacters(in: .whitespaces)
+        let closer = last.trimmingCharacters(in: .whitespacesAndNewlines)
         let closingTicks = closer.prefix(while: { $0 == "`" }).count
         guard closingTicks >= openingTicks, closingTicks == closer.count
         else { return answer }

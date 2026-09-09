@@ -698,6 +698,11 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(turn.draftAnswer, "Parallax is measured in degrees [1].")
         XCTAssertTrue(turn.notices.contains(.answerRevised), "\(turn.notices)")
         XCTAssertFalse(turn.isRevising, "the label outlived the request")
+        // The findings outlive the rewrite they caused, which is the whole reason the
+        // draft is kept: they grade the draft, and a table with nothing in it under a
+        // notice saying the answer was corrected explains nothing.
+        XCTAssertEqual(turn.findings.count, 1,
+                       "the grading table should outlive the rewrite it caused")
 
         // What the reviser was actually sent, because a stage that ran on the wrong
         // material would pass every assertion above.
@@ -753,6 +758,13 @@ final class ResearchRunnerTests: XCTestCase {
             XCTAssertTrue(transport.calls.contains { Self.stage(of: $0) == .revise },
                           "\(verdict) never sent the answer back")
             XCTAssertEqual(turn.draftAnswer, "Parallax is measured in degrees [1].", verdict)
+            // And that the rewrite was *taken*, not merely asked for. This loop is the
+            // only cover a sixth verdict would have, and a runner that woke the stage,
+            // kept the draft and then discarded every result would have passed it while
+            // leaving the contradicted prose on screen.
+            XCTAssertEqual(turn.answer, "Parallax is measured in arcseconds [1].", verdict)
+            XCTAssertTrue(turn.notices.contains(.answerRevised),
+                          "\(verdict) rewrote the answer without saying so")
         }
     }
 
@@ -813,6 +825,18 @@ final class ResearchRunnerTests: XCTestCase {
         // fence, which is the whole reason for opening a longer one.
         XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("````\nText.\n```"),
                        "````\nText.\n```")
+
+        // CRLF, which switched the whole function off. The split is on "\n" alone, so
+        // every line kept its carriage return, and the trim was `.whitespaces` — space
+        // and tab. The label read as "markdown\r" and the closer as four characters of
+        // which three were backticks.
+        XCTAssertEqual(
+            ResearchRunner.unwrappingWholeAnswerFence("```markdown\r\nText [1].\r\n```\r"),
+            "Text [1].")
+        XCTAssertEqual(
+            ResearchRunner.unwrappingWholeAnswerFence("```swift\r\nlet x = 1\r\n```\r"),
+            "```swift\r\nlet x = 1\r\n```",
+            "a code fence survives, CRLF or not")
     }
 
     /// The unwrapper is pinned above; this pins that the revision path still calls it.
