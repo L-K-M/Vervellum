@@ -32,7 +32,9 @@ Vervellum makes network requests in exactly five cases, each with a fixed purpos
   answer arrives. With **Kagi CLI** selected the query reaches Kagi through that tool,
   under the credential you gave it with `kagi auth` rather than one held here, so the
   search is attributed to your Kagi account exactly as a search you typed there would
-  be. Vervellum runs the program; it does not see the credential.
+  be. Vervellum runs the program, and normally never sees the credential — unless you
+  store a key against this provider yourself, in which case it is handed to the command
+  as `KAGI_API_KEY` and nothing else changes.
 - **Reading pages.** Only while page reading is on, and only for two kinds of address:
   one a search just returned, and one you pasted into the question yourself. A link in
   your question is read *before* the searches are planned, so the plan can account for

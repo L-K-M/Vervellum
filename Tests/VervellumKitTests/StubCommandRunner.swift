@@ -40,7 +40,11 @@ final class StubCommandRunner: CommandRunning, @unchecked Sendable {
     }
 
     /// What a command is answered with.
-    enum Reply: @unchecked Sendable {
+    ///
+    /// Checked `Sendable` like `Call`, and for the same reason: `ResearchError` is a
+    /// struct holding one `String`, so every payload here is already provably sendable
+    /// and there is nothing to promise on the compiler's behalf.
+    enum Reply: Sendable {
         /// It ran and printed this on standard output.
         case output(status: Int32, text: String)
         /// It could not be run at all — the shape of a timeout, a cancellation, or a

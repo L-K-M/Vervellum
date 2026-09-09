@@ -160,8 +160,16 @@ final class KagiCLIClient: SearchBackend {
                 + "`kagi search \"test\"` in a terminal to see what it says; if it asks "
                 + "for credentials, run `kagi auth`.")
         }
-        guard !output.isEmpty,
-              let parsed = try? JSONSerialization.jsonObject(with: output) else {
+        // Two different failures, told apart. A tool that printed nothing and one that
+        // printed the wrong thing are fixed in different places, and the `--format` hint
+        // leads nowhere for the first.
+        guard !output.isEmpty else {
+            throw ResearchError(
+                "The Kagi command-line tool exited without printing anything. Run "
+                + "`kagi search \"test\"` in a terminal to see what it does with a "
+                + "simple query.")
+        }
+        guard let parsed = try? JSONSerialization.jsonObject(with: output) else {
             throw ResearchError(
                 "The Kagi command-line tool did not return JSON. Check that `kagi search` "
                 + "prints JSON in a terminal — it is the default, and `--format` in a "
@@ -195,17 +203,24 @@ final class KagiCLIClient: SearchBackend {
                 + "bytes). A query is a handful of words; try another model.")
         }
 
+        // These flag names are a contract with the `kagi` tool, not with Kagi: they were
+        // checked against kagi-cli's documented `search` command, and a major version of
+        // it is a reason to check them again.
         var argv = ["search", "--format", "json"]
         var dropped: [String] = []
 
-        if let time = arguments["time_range"] as? String, !time.isEmpty {
+        // No `!isEmpty` guard on either value below. An empty string is a legal
+        // `type: string` and reaches here like any other, and skipping it silently would
+        // hide the one slip that is hardest to see in a trace: the argument the model
+        // sent, that did nothing, and that nothing said anything about.
+        if let time = arguments["time_range"] as? String {
             if timeRanges.contains(time.lowercased()) {
                 argv += ["--time", time.lowercased()]
             } else {
                 dropped.append("time_range")
             }
         }
-        if let region = arguments["region"] as? String, !region.isEmpty {
+        if let region = arguments["region"] as? String {
             // Two ASCII letters, which is every region code Kagi takes. Checked rather
             // than trusted because this becomes an argument: a value that began with a
             // dash would be a flag to any parser that read it before its own `--`.

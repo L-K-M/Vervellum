@@ -1,5 +1,15 @@
 import Dispatch
 import Foundation
+// The one platform import under `Core/`, and it is the C library rather than a
+// framework: `kill(2)` exists on both platforms and Foundation's `Process` exposes only
+// `terminate()`, which sends a signal a program may ignore. See `terminationGrace` for
+// what goes wrong without it. Nothing else in this directory imports either module, and
+// nothing here uses them for anything but the escalation below.
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Finding a program on this machine and running it.
 ///
@@ -82,21 +92,20 @@ final class CommandRunner: CommandRunning {
     /// that the output has grown past `limit` until it has already read all of it.
     private static let chunkSize = 64 * 1024
 
-    /// How long a child gets to honour the signal that asks it to stop, before this call
-    /// stops waiting for it.
+    /// How long a child gets to honour the signal that asks it to stop, before it is
+    /// killed.
     ///
-    /// `Process.terminate()` sends `SIGTERM`, which is a *request*: a program is entitled
-    /// to catch it, and a wedged one cannot answer at all. There is no `SIGKILL` from
-    /// here — that needs `kill(2)` from a platform module, and nothing under `Core/` may
-    /// import one — so the deadline is enforced on this side of the pipe instead. When
-    /// the grace period passes, the caller is given its error and the turn moves on,
-    /// whatever the child is doing.
+    /// `Process.terminate()` sends `SIGTERM`, which is a *request*: a program may catch
+    /// it, and a wedged one cannot answer at all. Two things then go wrong, and only one
+    /// of them is the caller's. The call itself is answered either way — the grace timer
+    /// resumes it — but the child would keep running, still holding the pipe, still
+    /// spending the user's search quota, with one dispatch thread parked on a read that
+    /// can never end. Dispatch's pool is bounded, so enough of those would eventually
+    /// starve the very timers this queue exists to keep free.
     ///
-    /// The cost is real and bounded: one dispatch thread stays parked on a read that will
-    /// never end, for as long as that child lives. A hung search that ends the turn with
-    /// an error beats one that never ends at all — without this, a child that ignored
-    /// `SIGTERM` left the continuation unresumed and the research turn simply stopped,
-    /// with nothing on screen to say why.
+    /// So the grace period ends in `SIGKILL`, which cannot be caught. That closes the
+    /// pipe, unblocks the read, lets `waitUntilExit` reap the child, and returns the
+    /// thread — the leak is ended rather than moved somewhere quieter.
     static let terminationGrace: TimeInterval = 2
 
     // MARK: Resolving
@@ -361,14 +370,20 @@ final class CommandRunner: CommandRunning {
             if live { signal(because: reason) }
         }
 
-        /// Asks the child to stop, and makes sure the caller is answered whether or not it
-        /// agrees to. See `CommandRunner.terminationGrace`.
+        /// Asks the child to stop, insists if it will not, and answers the caller either
+        /// way. See `CommandRunner.terminationGrace`.
         private func signal(because reason: Reason) {
             process.terminate()
             CommandRunner.queue.asyncAfter(
                 deadline: .now() + CommandRunner.terminationGrace
             ) { [weak self] in
                 guard let self else { return }
+                // `isRunning` first, so a child already reaped by `waitUntilExit` is not
+                // signalled — which is also what keeps this off a pid the system has
+                // since handed to somebody else.
+                if self.process.isRunning {
+                    kill(self.process.processIdentifier, SIGKILL)
+                }
                 self.finish(throwing: self.failure(reason))
             }
         }

@@ -73,14 +73,16 @@ final class KagiCLIClientTests: XCTestCase {
         let upper = try KagiCLIClient.command(for: ["q": "q", "time_range": "DAY"])
         XCTAssertEqual(upper.arguments, ["search", "--format", "json", "--time", "day", "--", "q"])
 
+        // Every rejected value is also *recorded* as dropped — the empty string included,
+        // which is the one that used to vanish without a word. Dropped by name only; the
+        // search is still worth running.
         for invented in ["recent", "hour", "--follow 5", ""] {
             let command = try KagiCLIClient.command(for: ["q": "q", "time_range": invented])
             XCTAssertEqual(command.arguments, ["search", "--format", "json", "--", "q"],
                            "\(invented) reached the command line")
+            XCTAssertEqual(command.dropped, ["time_range"],
+                           "\(invented) was ignored without being recorded")
         }
-        // Dropped, and said so — but only by name. The search is still worth running.
-        XCTAssertEqual(try KagiCLIClient.command(for: ["q": "q", "time_range": "recent"]).dropped,
-                       ["time_range"])
     }
 
     /// The schema the model is shown and the set its answer is checked against are one
@@ -89,7 +91,7 @@ final class KagiCLIClientTests: XCTestCase {
     func testTheAdvertisedWindowsAreTheOnesEnforced() throws {
         let properties = try XCTUnwrap(KagiCLIClient.inputSchema["properties"] as? [String: Any])
         let window = try XCTUnwrap(properties["time_range"] as? [String: Any])
-        XCTAssertEqual(window["enum"] as? [String], KagiCLIClient.timeRanges)
+        XCTAssertEqual(try XCTUnwrap(window["enum"] as? [String]), KagiCLIClient.timeRanges)
         for advertised in KagiCLIClient.timeRanges {
             XCTAssertEqual(try KagiCLIClient.command(for: ["q": "q", "time_range": advertised])
                             .dropped, [], advertised)
@@ -100,7 +102,7 @@ final class KagiCLIClientTests: XCTestCase {
         let valid = try KagiCLIClient.command(for: ["q": "q", "region": "CH"])
         XCTAssertEqual(valid.arguments, ["search", "--format", "json", "--region", "ch", "--", "q"])
 
-        for invalid in ["switzerland", "c", "-c", "--region", "c h"] {
+        for invalid in ["switzerland", "c", "-c", "--region", "c h", ""] {
             let command = try KagiCLIClient.command(for: ["q": "q", "region": invalid])
             XCTAssertEqual(command.arguments, ["search", "--format", "json", "--", "q"],
                            "\(invalid) reached the command line")
@@ -171,6 +173,9 @@ final class KagiCLIClientTests: XCTestCase {
 
         XCTAssertEqual(environment["PATH"], "/usr/bin")
         XCTAssertEqual(environment["HOME"], "/home/tester")
+        // Asserted by value, not merely counted: an allow-list rebuilt from key names
+        // with empty values would pass a subset check and break the tool's output.
+        XCTAssertEqual(environment["LANG"], "en_US.UTF-8")
         XCTAssertEqual(environment["XDG_CONFIG_HOME"], "/home/tester/.config")
         // The user's own Kagi credential still reaches the tool, or launching Vervellum
         // from a shell that exports it would look like the tool being broken.
@@ -236,6 +241,9 @@ final class KagiCLIClientTests: XCTestCase {
         XCTAssertEqual(sources.map(\.number), [1, 2])
         XCTAssertEqual(runner.calls.count, 1)
         XCTAssertEqual(runner.calls.first?.executable, executable)
+        // The query reached the command. Obvious, and unasserted until now: a client
+        // that dropped every argument would still have returned these results.
+        XCTAssertEqual(runner.calls.first?.arguments.last, "parallax")
         // The bounds travel with the call rather than living inside the runner, so a
         // command that hangs or floods is stopped by the caller that knows what is
         // reasonable.
@@ -261,7 +269,9 @@ final class KagiCLIClientTests: XCTestCase {
             XCTAssertTrue(
                 error.message.hasPrefix("The Kagi command-line tool exited with status 2."),
                 error.message)
-            XCTAssertFalse(error.message.contains("secret-value"), error.message)
+            // No failure description on this one: it would print the very text the
+            // assertion exists to keep out of a log.
+            XCTAssertFalse(error.message.contains("secret-value"))
         } catch {
             XCTFail("unexpected error: \(error)")
         }
@@ -273,17 +283,33 @@ final class KagiCLIClientTests: XCTestCase {
     /// travel in the error. Standard output is not safer than standard error just because
     /// it parsed badly — it is a page's text, a URL, whatever the tool had to say.
     func testOutputThatIsNotJSONIsAFailureThatQuotesNothing() async {
-        for text in ["", "1. Rust — https://rust-lang.org", "<html>secret-value</html>"] {
+        for text in ["1. Rust — https://rust-lang.org", "<html>secret-value</html>"] {
             let runner = StubCommandRunner { _ in .output(status: 0, text: text) }
             do {
                 _ = try await client(runner).search(arguments: ["q": "q"])
                 XCTFail("non-JSON output was accepted: \(text)")
             } catch let error as ResearchError {
                 XCTAssertFalse(error.message.contains("rust-lang.org"), error.message)
-                XCTAssertFalse(error.message.contains("secret-value"), error.message)
+                // No failure description on this one: it would print the very text the
+            // assertion exists to keep out of a log.
+            XCTAssertFalse(error.message.contains("secret-value"))
             } catch {
                 XCTFail("unexpected error: \(error)")
             }
+        }
+    }
+
+    /// A tool that printed nothing is a different problem from one that printed the
+    /// wrong thing, and the `--format` hint leads nowhere for the first.
+    func testNoOutputAtAllIsItsOwnFailure() async {
+        let runner = StubCommandRunner { _ in .output(status: 0, text: "") }
+        do {
+            _ = try await client(runner).search(arguments: ["q": "q"])
+            XCTFail("empty output was accepted")
+        } catch let error as ResearchError {
+            XCTAssertTrue(error.message.contains("without printing anything"), error.message)
+        } catch {
+            XCTFail("unexpected error: \(error)")
         }
     }
 
@@ -309,6 +335,8 @@ final class KagiCLIClientTests: XCTestCase {
         XCTAssertEqual(sources.map(\.title), ["Rust Programming Language", "The Rust Book"])
         XCTAssertEqual(sources.map(\.number), [1, 2])
         XCTAssertEqual(sources.last?.publishedAt, "2026-01-02")
+        // And the fixture's `"published":null` is an absence rather than a placeholder.
+        XCTAssertNil(sources.first?.publishedAt)
     }
 
     // MARK: Finding the program

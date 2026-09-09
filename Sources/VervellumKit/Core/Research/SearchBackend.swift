@@ -95,12 +95,20 @@ enum SearchBackendFactory {
             // common self-hosted setup.
             return SearXNGClient(searchURL: url, apiKey: apiKey, trace: trace, transport: transport)
         case .kagiCLI:
+            // `profile.endpoint` is not a URL for this kind: it holds a command, either a
+            // bare name to look for or a full path to one. The field's meaning follows
+            // the kind, which is why the settings pane puts the picker above it.
+            //
             // Resolved here, so "you have not installed it" is reported with the rest of
             // the configuration problems and before the turn's first billable call —
             // rather than surfacing as a failed search a minute into a run.
             guard let executable = commandRunner.resolve(command: profile.endpoint) else {
+                // Naming what was looked for is most of the message: `kagi-cli` typed
+                // where `kagi` was meant is indistinguishable from a missing install
+                // otherwise, and both are one edit away from working.
                 throw ResearchError(
-                    "Vervellum could not find the Kagi command-line tool. Install it from "
+                    "Vervellum could not find the Kagi command-line tool "
+                    + "\"\(profile.endpoint)\". Install it from "
                     + "https://github.com/Microck/kagi-cli, or put its full path in the "
                     + "provider settings.")
             }

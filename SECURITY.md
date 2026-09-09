@@ -112,24 +112,30 @@ rules are about the argument vector:
   A value that is neither is dropped and the search still runs. This check lives in the
   client, not in the schema: an `enum` in a JSON Schema describes what a model *should*
   write, and the shared argument validation checks names rather than values.
-- **The child gets a built environment, not this one.** `PATH`, `HOME`,
-  `XDG_CONFIG_HOME`, `LANG`, `TMPDIR`, the standard proxy variables and Kagi's own
-  credential variables — nothing else. A third-party binary is not handed the model key
-  or the reader key. (The proxy variables are there so a search behind a corporate proxy
-  works the way the same command works in your terminal.)
-- **Bounded, and never quoted back.** Standard output is capped. The command is asked to
-  stop on a timeout — `SIGTERM` is a request, and a program is entitled to catch it, so
-  the deadline is enforced on Vervellum's side as well: when the grace period passes the
-  search ends with an error whether or not the command has. Standard error is attached to
-  the null device and never read, so a diagnostic that echoes a credential cannot reach a
-  log line or the panel; a failure is reported as an exit status and nothing more, and
-  the same holds for output that could not be parsed.
+- **The child gets a built environment, not this one.** Exactly `PATH`, `HOME`,
+  `XDG_CONFIG_HOME`, `LANG`, `TMPDIR`, `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`,
+  `NO_PROXY` and their lowercase spellings, and `KAGI_SESSION_TOKEN`, `KAGI_API_KEY`,
+  `KAGI_API_TOKEN` — nothing else. A third-party binary is not handed the model key or
+  the reader key. (The proxy variables are listed so that a search behind a corporate
+  proxy works the way the same command works in your terminal.)
+- **Bounded, and the command is not left running.** Standard output is capped, and going
+  over it fails the search rather than parsing a truncated document. On a timeout the
+  command is asked to stop with `SIGTERM`, which a program may catch; two seconds later
+  it is killed with `SIGKILL`, which it cannot. The search ends with an error either way.
+  Standard error is attached to the null device and never read, so a diagnostic that
+  echoes a credential cannot reach a log line or the panel; a failure is reported as an
+  exit status and nothing more, and the same holds for output that could not be parsed.
 
 The credential belongs to the tool. `kagi auth` stores it where the user's own terminal
 already reads it, and Vervellum neither asks for it nor keeps a copy — a key stored in
 Vervellum anyway is passed to the child as `KAGI_API_KEY`. Which program runs is the
-command in the provider settings: a bare name is resolved against `PATH` and the
-directories CLIs install into, and an absolute path is taken as written.
+command in the provider settings: a bare name is resolved against `PATH` **first** and
+then against the directories CLIs install into (`/opt/homebrew/bin`, `/usr/local/bin`,
+`/home/linuxbrew/.linuxbrew/bin`, `~/.local/bin`, `~/.cargo/bin`, `~/.bun/bin`,
+`/usr/bin`, `/bin`), because a menu-bar agent's `PATH` contains none of them. An
+absolute path is taken as written, and is the way to be certain which program runs. A
+relative path is refused rather than resolved against a working directory the app did
+not choose.
 
 Setting **Reading the page** to *Use a reader service* moves the fetch to an MCP reader
 endpoint; setting it to *Snippets only* is the behaviour of every build before this one.
