@@ -153,9 +153,13 @@ enum ComposerCommand: Equatable {
     /// Pure and here rather than in the view so the edges are testable on both platforms,
     /// because the edges are the whole design:
     ///
-    /// * **Nothing is highlighted to begin with.** Return *accepts* a highlighted row, so
-    ///   preselecting the first would mean typing `/new` and pressing Return filled the
-    ///   field instead of starting a thread.
+    /// * **Nothing is highlighted to begin with**, as far as this function is concerned:
+    ///   it is told the current row and answers with the next one, and "no row" is a
+    ///   state it both accepts and returns. Whether a list *offers* a row unasked is
+    ///   `offeredRowIndex`'s question, not this one — and the answer there is the same
+    ///   rule read from the other end, since Return accepts a highlighted row and
+    ///   preselecting under a finished `/new` would fill the field instead of starting
+    ///   a thread.
     /// * **↓ enters at the top, ↑ enters at the bottom**, the way a menu opened upward
     ///   behaves.
     /// * **↑ off the top returns to nothing highlighted** rather than wrapping. Wrapping
@@ -231,6 +235,41 @@ enum ComposerCommand: Equatable {
         guard let command = parse(input) else { return false }
         if case .ask = command { return true }
         return false
+    }
+
+    /// Which row a command list highlights, given what the reader has chosen and what
+    /// they have typed.
+    ///
+    /// The whole "what will Return do" contract, in one place. A highlighted row is one
+    /// the submit gesture *takes*, so the list may only offer a row when taking it is
+    /// the useful answer:
+    ///
+    /// * **An explicit choice always wins**, finished word or not. A reader who has
+    ///   typed `/new` in full and then arrowed onto the `new` row has asked for the row,
+    ///   and Return fills the field rather than starting a thread — which is the answer
+    ///   to the gesture they actually made. The offer below is what happens in the
+    ///   *absence* of a choice, never a filter over one.
+    /// * **Otherwise row 0 is offered while the word is unfinished.** `/dee` and Return
+    ///   finishes the word rather than answering "Finish the command name" — the thing
+    ///   that made the list look broken, because it was plainly *showing* the answer.
+    /// * **Never under a finished command.** Offering a row under `/new` would mean
+    ///   Return filled the field instead of starting a thread.
+    /// * **Never after the reader leaves.** ↑ off the top and Escape are ways out, and
+    ///   an offer that re-highlighted row 0 on the way out would make the exit invisible.
+    ///
+    /// Pure and here rather than in the view for the same reason as `moveSelection` and
+    /// `isHalfTypedCommand`: the rule is the interesting part, the regressions it guards
+    /// against are ones only manual poking would find, and the GTK panel has no command
+    /// list yet — when it grows one, this is the rule it should grow, not a second
+    /// reading of it.
+    static func offeredRowIndex(explicit: Int?,
+                                isDismissed: Bool,
+                                draft: String,
+                                completions: [Entry]?) -> Int? {
+        if let explicit { return explicit }
+        guard !isDismissed, isHalfTypedCommand(draft),
+              let completions, !completions.isEmpty else { return nil }
+        return 0
     }
 
     /// The configured model providers as markdown, for a bare `/model`.

@@ -364,6 +364,64 @@ final class ComposerCommandTests: XCTestCase {
             XCTAssertFalse(ComposerCommand.isHalfTypedCommand(finished),
                            "\(finished) would be completed instead of run")
         }
+        // The edges either side of a command word, which is where a later tweak to the
+        // trimming or the matching would show up first. A trailing space is trimmed, so
+        // `/model ` is still the bare command and false for the same reason `/model` is;
+        // the first character of an argument stops it being a command word at all; and
+        // an empty field has no word to finish.
+        for notOffered in ["", "/model ", "/model deep"] {
+            XCTAssertFalse(ComposerCommand.isHalfTypedCommand(notOffered),
+                           "\(notOffered) should not read as an unfinished word")
+        }
+        // A bare slash *is* one, and is the input most likely to be mistaken for the
+        // empty case above: `parse` reads it as a question, and Return sending "/" to a
+        // model is the spend this predicate exists to prevent.
+        XCTAssertTrue(ComposerCommand.isHalfTypedCommand("/"))
+    }
+
+    /// The whole "what will Return do" contract, which used to live in the view where
+    /// nothing could reach it.
+    func testTheListOffersItsFirstRowOnlyWhenTakingItWouldHelp() {
+        let rows = ComposerCommand.completions(for: "/h")
+        XCTAssertNotNil(rows)
+
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
+                                                       draft: "/h", completions: rows), 0,
+                       "an unfinished word is what the offer exists for")
+        XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: true,
+                                                     draft: "/h", completions: rows),
+                     "leaving the list has to stay left, or the exit is invisible")
+        XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
+                                                     draft: "/new",
+                                                     completions: ComposerCommand.completions(for: "/new")),
+                     "offering a row under a finished command would fill the field "
+                        + "instead of starting a thread")
+        XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
+                                                     draft: "/h", completions: nil))
+        XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
+                                                     draft: "/h", completions: []),
+                     "an empty list has no row to offer, whatever the word looks like")
+    }
+
+    /// A row the reader walked or hovered to is theirs, and none of the conditions on
+    /// the *offer* may take it away — the offer is what happens in the absence of a
+    /// choice, not a filter over one.
+    func testAChosenRowSurvivesEveryConditionOnTheOffer() {
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: 0, isDismissed: false,
+                                                       draft: "/new",
+                                                       completions: ComposerCommand.completions(for: "/new")),
+                       0,
+                       "arrowing onto the row under a finished /new is a gesture that "
+                        + "deserves its own answer, even though the offer declines to "
+                        + "make it unasked")
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: 1, isDismissed: true,
+                                                       draft: "/h",
+                                                       completions: ComposerCommand.completions(for: "/h")),
+                       1,
+                       "a row the reader walked to outlives the exit that cleared the offer")
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: 0, isDismissed: true,
+                                                       draft: "", completions: nil), 0,
+                       "every condition on the offer at once, and the choice still wins")
     }
 
 }

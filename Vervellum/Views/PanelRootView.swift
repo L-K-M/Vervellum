@@ -68,17 +68,10 @@ struct PanelRootView: View {
     /// nothing — which is not the same as nothing being highlighted.
     private var explicitCompletionIndex: Int? { hoverIndex ?? completionIndex }
 
-    /// What is highlighted.
-    ///
-    /// The list highlights its first row without being asked, so `/dee` and Return
-    /// finishes the word rather than answering "Finish the command name" — the thing
-    /// that made the list look broken, because it was plainly *showing* the answer.
-    ///
-    /// It offers that row only while the word is **unfinished**, which is what makes the
-    /// highlight honest: a highlighted row is one Return takes, and preselecting under a
-    /// finished `/new` would mean Return filled the field instead of starting a thread.
-    /// A row the reader walks or hovers to is theirs either way — choosing `models` from
-    /// under a typed `/model` is a choice, not an accident.
+    /// What is highlighted: the reader's own choice, or the row the list offers when
+    /// they have not made one. The rule is `ComposerCommand.offeredRowIndex`, which
+    /// holds the reasoning and the tests; this is the view's three pieces of state
+    /// handed to it.
     ///
     /// The offer itself is not announced, and that is a decision rather than an
     /// oversight. It appears at `/d` and stays through `/de` and `/dee`, while the row
@@ -86,14 +79,15 @@ struct PanelRootView: View {
     /// announcement would name a command the reader has already typed past, and a
     /// per-keystroke one would talk over the character echo. What Return will take is
     /// spoken by `announceSelection` the moment the reader arrows to a row, and by the
-    /// row's own `.isSelected` trait when the VoiceOver cursor reaches it. Leaving the
-    /// list *is* announced, because that is the change a reader makes on purpose and
-    /// can otherwise make by accident.
+    /// row's own `.isSelected` trait when the VoiceOver cursor reaches it. The two
+    /// moments that *do* change what Return means are both spoken already: leaving the
+    /// list, and taking a row — `submitFromComposer` says "Selected /deep-research"
+    /// after Return fills the field, so the completion is never the silent step.
     private var effectiveCompletionIndex: Int? {
-        if let explicit = explicitCompletionIndex { return explicit }
-        guard !completionDismissed, ComposerCommand.isHalfTypedCommand(draft),
-              let completions = visibleCompletions, !completions.isEmpty else { return nil }
-        return 0
+        ComposerCommand.offeredRowIndex(explicit: explicitCompletionIndex,
+                                        isDismissed: completionDismissed,
+                                        draft: draft,
+                                        completions: visibleCompletions)
     }
 
     /// Whether the thread is scrolled to its end. Streams auto-scroll only while
@@ -265,11 +259,9 @@ struct PanelRootView: View {
                 // been typed, so an index kept across a keystroke could point past the
                 // end of the shorter list, or at a command the user has just filtered out.
                 // Both of them: the pointer's row is an index into the same list.
-                completionIndex = nil
-                hoverIndex = nil
                 // And the list is a new list, so leaving the old one says nothing about
                 // this one.
-                completionDismissed = false
+                clearCompletionChoices(dismissed: false)
             }
             .onChange(of: engine.thread.turns.count) { _, _ in
                 scrollToBottom(proxy)
@@ -744,9 +736,7 @@ struct PanelRootView: View {
             // alone left Escape doing nothing visible on a row the *pointer* had
             // highlighted, and the next Return still accepted it. Splitting the two
             // indices is what made that possible, so this is the other half of it.
-            completionIndex = nil
-            hoverIndex = nil
-            completionDismissed = true
+            clearCompletionChoices(dismissed: true)
             // Leaving the list changes what Return does, exactly as entering it did, and
             // a change of meaning nobody is told about is the thing the announcements on
             // the way in exist to prevent.
@@ -828,6 +818,23 @@ struct PanelRootView: View {
         ComposerCommand.completions(for: draft)
     }
 
+    /// Forgets both chosen rows at once, and says whether the reader *left* the list or
+    /// the list simply changed underneath them.
+    ///
+    /// One writer for three pieces of state that only make sense together. Escape and
+    /// the draft-change handler were each clearing the same pair and then disagreeing
+    /// about the flag in a comment rather than in code, and the next gesture that clears
+    /// the composer has to get the flag right too: forgetting it either resurrects a
+    /// highlight the reader dismissed on purpose, or kills the offer for good.
+    ///
+    /// The arrow-key handler does not use this — it assigns a row rather than clearing
+    /// one, and derives the flag from where the move landed.
+    private func clearCompletionChoices(dismissed: Bool) {
+        completionIndex = nil
+        hoverIndex = nil
+        completionDismissed = dismissed
+    }
+
     /// Fills the composer with the chosen command, exactly as clicking the row does.
     ///
     /// It does not *run* the command. A completion is a way to finish typing, and
@@ -840,12 +847,10 @@ struct PanelRootView: View {
         // only open while `isBareCommandWord` holds, and the first space closes it. So
         // there is never an argument in the field for this to lose.
         draft = "/\(name) "
-        completionIndex = nil
-        // Both, here, rather than leaving the hover to the draft change that follows.
-        // `onChange(of: draft)` does clear it, so this is not a fix — it is the same
-        // pair `backOut` and that handler clear together, kept together in the third
-        // place that touches them.
-        hoverIndex = nil
+        // Here rather than left to the draft change that follows. `onChange(of: draft)`
+        // clears exactly this, so it is not a fix — it is the third place that touches
+        // the completion state, saying so through the same writer as the other two.
+        clearCompletionChoices(dismissed: false)
         // Ends the recall walk, the way submitting does. Choosing a command is a decision
         // about what the field holds, and leaving the walk open means a later ↑ — once an
         // argument makes the list close — replaces that choice with a question from

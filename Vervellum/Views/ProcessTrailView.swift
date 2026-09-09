@@ -12,6 +12,13 @@ import SwiftUI
 /// text that push the answer off the screen at exactly the moment it arrives, so they
 /// wait behind a disclosure like everything else. One line running, one line done, and
 /// the detail one click away in both.
+///
+/// The disclosure was previously forced open for the duration of a run, which meant it
+/// also shut itself the moment the answer landed. It no longer does either, and the
+/// consequence is deliberate: a reader who opens the queries mid-run still has them
+/// open afterwards. Closing what somebody opened, because a background task they were
+/// not watching finished, is the panel deciding it knows better — and the one click it
+/// saves is the same click they just spent.
 struct ProcessTrailView: View {
 
     @Environment(\.panelTextScale) private var textScale
