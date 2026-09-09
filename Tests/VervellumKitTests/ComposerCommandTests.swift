@@ -382,10 +382,12 @@ final class ComposerCommandTests: XCTestCase {
     /// The whole "what will Return do" contract, which used to live in the view where
     /// nothing could reach it.
     func testTheListOffersItsFirstRowOnlyWhenTakingItWouldHelp() throws {
-        // Unwrapped rather than asserted non-nil. The three `XCTAssertNil` cases below
-        // are fed these completions, so a nil here would let all of them pass on the
-        // wrong grounds — and the one case that would fail, comparing nil against 0,
-        // would report from the far end of the test.
+        // Unwrapped, so a nil stops the test here with the cause named. Carried on
+        // unguarded it would fail in the two offer cases immediately below — as a bare
+        // nil-against-0 mismatch, which says nothing about where the nil came from —
+        // while two of the four `XCTAssertNil` cases, the two fed these completions,
+        // would pass on the wrong grounds. The other two are handed a literal nil and a
+        // literal empty list and are about those, not about this.
         let rows = try XCTUnwrap(ComposerCommand.completions(for: "/h"),
                                  "\"/h\" always has something to complete")
 

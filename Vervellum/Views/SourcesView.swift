@@ -37,6 +37,14 @@ struct SourcesView: View {
                         ForEach(uncited) { source in
                             SourceRow(source: source, isCited: false)
                         }
+                        // The same route again, for the same reason as the toggle below.
+                        // The container's transition covers these rows when the *section*
+                        // opens, because they are inside it — but `showsAll` moves them
+                        // while the section is already open, and there the container is
+                        // not transitioning at all. Left on the default fade, the rows
+                        // the toggle summons arrived differently from the toggle that
+                        // summoned them.
+                        .transition(PanelTheme.Motion.disclosureTransition(reduceMotion))
                     }
                 }
                 .transition(PanelTheme.Motion.disclosureTransition(reduceMotion))
