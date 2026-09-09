@@ -361,7 +361,7 @@ final class ProviderSettingsTests: XCTestCase {
         XCTAssertEqual(decoded?.first?.name, "Future")
     }
 
-    /// The two backends are told apart by protocol, not by guessing from the address.
+    /// The backends are told apart by protocol, not by guessing from the address.
     func testTheBackendFactoryBuildsTheKindTheProfileNames() throws {
         let trace = ResearchTrace(sink: SilentLog())
         let mcp = try SearchBackendFactory.make(
@@ -373,6 +373,30 @@ final class ProviderSettingsTests: XCTestCase {
             profile: SearchProfile.new(kind: .searxng, endpoint: "https://searx.example.org"),
             apiKey: nil, trace: trace)
         XCTAssertTrue(searxng is SearXNGClient)
+
+        let runner = StubCommandRunner { _ in .unrouted }
+        let kagi = try SearchBackendFactory.make(
+            profile: SearchProfile.new(kind: .kagiCLI, endpoint: "kagi"),
+            apiKey: nil, trace: trace, commandRunner: runner)
+        XCTAssertTrue(kagi is KagiCLIClient)
+        // The command it looked for is the one the profile holds, not a hardcoded name.
+        XCTAssertEqual(runner.resolved, ["kagi"])
+    }
+
+    /// A Kagi provider whose tool is not installed fails while the settings are being
+    /// read — before the turn's first billable call — and the message has to be one
+    /// somebody can act on, because "not found" is the failure most users will hit first.
+    func testTheBackendFactoryRefusesAKagiProviderWithNoTool() {
+        let runner = StubCommandRunner(executable: nil) { _ in .unrouted }
+        XCTAssertThrowsError(try SearchBackendFactory.make(
+            profile: SearchProfile.new(kind: .kagiCLI, endpoint: "kagi"),
+            apiKey: nil, trace: ResearchTrace(sink: SilentLog()),
+            commandRunner: runner)) { error in
+            let message = (error as? ResearchError)?.message ?? "\(error)"
+            XCTAssertTrue(message.contains("kagi-cli"), message)
+            XCTAssertTrue(message.contains("full path"), message)
+        }
+        XCTAssertEqual(runner.resolved, ["kagi"])
     }
 
     /// A missing MCP key fails before the billable planning call, which is why the

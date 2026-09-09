@@ -21,10 +21,13 @@ import Foundation
 /// found nothing, and the test would then fail somewhere else naming the wrong thing.
 final class StubCommandRunner: CommandRunning, @unchecked Sendable {
 
-    /// One command the client ran. `@unchecked Sendable` for `StubTransport.Call`'s
-    /// reason: every property is a `let`, the value is built under the lock and never
-    /// mutated afterwards.
-    struct Call: @unchecked Sendable {
+    /// One command the client ran.
+    ///
+    /// Checked `Sendable`, unlike `StubTransport.Call`: every property here is an
+    /// immutable value the compiler can already prove sendable, so there is nothing to
+    /// promise on its behalf — and a field added later that breaks that gets an error
+    /// rather than a silent pass.
+    struct Call: Sendable {
         let executable: URL
         let arguments: [String]
         let environment: [String: String]

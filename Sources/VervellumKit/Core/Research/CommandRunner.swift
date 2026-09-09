@@ -82,6 +82,23 @@ final class CommandRunner: CommandRunning {
     /// that the output has grown past `limit` until it has already read all of it.
     private static let chunkSize = 64 * 1024
 
+    /// How long a child gets to honour the signal that asks it to stop, before this call
+    /// stops waiting for it.
+    ///
+    /// `Process.terminate()` sends `SIGTERM`, which is a *request*: a program is entitled
+    /// to catch it, and a wedged one cannot answer at all. There is no `SIGKILL` from
+    /// here — that needs `kill(2)` from a platform module, and nothing under `Core/` may
+    /// import one — so the deadline is enforced on this side of the pipe instead. When
+    /// the grace period passes, the caller is given its error and the turn moves on,
+    /// whatever the child is doing.
+    ///
+    /// The cost is real and bounded: one dispatch thread stays parked on a read that will
+    /// never end, for as long as that child lives. A hung search that ends the turn with
+    /// an error beats one that never ends at all — without this, a child that ignored
+    /// `SIGTERM` left the continuation unresumed and the research turn simply stopped,
+    /// with nothing on screen to say why.
+    static let terminationGrace: TimeInterval = 2
+
     // MARK: Resolving
 
     /// Where a bare command name is looked for, after `PATH`.
@@ -117,23 +134,41 @@ final class CommandRunner: CommandRunning {
     func resolve(command: String) -> URL? {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let manager = FileManager.default
 
         // A path the user wrote is taken as a path, tilde and all, and is not searched
         // for anywhere else. Someone who types `/opt/kagi/bin/kagi` means that file.
-        if trimmed.contains("/") {
+        if trimmed.hasPrefix("/") || trimmed.hasPrefix("~/") {
             let expanded = trimmed.hasPrefix("~/")
                 ? NSHomeDirectory() + String(trimmed.dropFirst(1))
                 : trimmed
-            let url = URL(fileURLWithPath: expanded).standardizedFileURL
-            return manager.isExecutableFile(atPath: url.path) ? url : nil
+            return Self.executableFile(at: expanded)
         }
+        // Anything else with a slash in it is relative to this process's working
+        // directory — the very dependence the fixed list above refuses to have, and a
+        // background app's working directory is whatever it was launched with. Two
+        // grammars are documented, a bare name and an absolute path; `./kagi` is neither,
+        // and saying so at the settings screen beats resolving it against `/`.
+        if trimmed.contains("/") { return nil }
 
         for directory in Self.searchDirectories {
-            let candidate = URL(fileURLWithPath: directory).appendingPathComponent(trimmed)
-            if manager.isExecutableFile(atPath: candidate.path) { return candidate }
+            if let url = Self.executableFile(at: directory + "/" + trimmed) { return url }
         }
         return nil
+    }
+
+    /// The file at `path` if it is a program, or nil.
+    ///
+    /// The directory check is not pedantry: `isExecutableFile` is true of most
+    /// directories, because that is what their execute bit means. Without it a command of
+    /// `/tmp` passes configuration and fails much later as "could not start the search
+    /// command", which sends whoever reads that looking in the wrong place.
+    static func executableFile(at path: String) -> URL? {
+        var isDirectory: ObjCBool = false
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: path, isDirectory: &isDirectory),
+              !isDirectory.boolValue,
+              manager.isExecutableFile(atPath: path) else { return nil }
+        return URL(fileURLWithPath: path).standardizedFileURL
     }
 
     // MARK: Running
@@ -147,15 +182,30 @@ final class CommandRunner: CommandRunning {
         process.executableURL = executable
         process.arguments = arguments
         process.environment = environment
+        // Pinned rather than inherited, so where the child writes anything of its own
+        // does not depend on the directory Vervellum happened to be launched from.
+        process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         process.standardInput = FileHandle.nullDevice
 
-        let control = Control(process: process)
+        let control = Control(process: process) { reason in
+            switch reason {
+            case .timedOut:
+                return ResearchError(
+                    "The search command did not finish within \(Int(timeout)) seconds.")
+            case .tooMuchOutput:
+                return ResearchError(
+                    "The search command printed more than \(limit / 1024) KB.")
+            case .cancelled:
+                return ResearchError.cancelled
+            }
+        }
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
+                control.attach(continuation)
                 Self.queue.async {
                     let launched: Bool
                     do {
@@ -163,7 +213,7 @@ final class CommandRunner: CommandRunning {
                     } catch {
                         // The name is not in the message: it came from the settings, and
                         // the settings screen is where it can be fixed.
-                        continuation.resume(throwing: ResearchError(
+                        control.finish(throwing: ResearchError(
                             "Vervellum could not start the search command. Check the "
                             + "command in the provider settings."))
                         return
@@ -172,16 +222,16 @@ final class CommandRunner: CommandRunning {
                     // falling through matters: with no child holding the pipe's write
                     // end, the read below would block on a pipe that will never close.
                     guard launched else {
-                        continuation.resume(throwing: ResearchError.cancelled)
+                        control.finish(throwing: ResearchError.cancelled)
                         return
                     }
 
                     let deadline = DispatchWorkItem { control.stop(because: .timedOut) }
                     Self.queue.asyncAfter(deadline: .now() + timeout, execute: deadline)
 
-                    // The child holds the write end, so this ends at its exit — including
-                    // the exit `control.stop` causes. That is what makes a timeout and a
-                    // cancellation unblock a read rather than leak a thread.
+                    // Blocking here is safe exactly as far as `Control.stop` is: this ends
+                    // when the child exits, and a child that will not exit is answered by
+                    // the grace timer rather than by this thread — see `terminationGrace`.
                     let handle = pipe.fileHandleForReading
                     var output = Data()
                     while true {
@@ -198,20 +248,22 @@ final class CommandRunner: CommandRunning {
                     try? handle.close()
 
                     guard let reason = control.reason else {
-                        continuation.resume(returning: (process.terminationStatus, output))
+                        control.finish(returning: (process.terminationStatus, output))
                         return
                     }
-                    switch reason {
-                    case .timedOut:
-                        continuation.resume(throwing: ResearchError(
-                            "The search command did not finish within "
-                            + "\(Int(timeout)) seconds."))
-                    case .tooMuchOutput:
-                        continuation.resume(throwing: ResearchError(
-                            "The search command printed more than \(limit / 1024) KB."))
-                    case .cancelled:
-                        continuation.resume(throwing: ResearchError.cancelled)
+                    // The deadline and a natural exit can land in the same moment, and
+                    // `DispatchWorkItem.cancel()` cannot stop one that has already begun —
+                    // so a search that finished can be sitting here labelled a timeout,
+                    // with its results in hand. A child that exited by itself has an
+                    // answer worth having, so it reports its own status. Only `.timedOut`
+                    // is forgiven this way: `.tooMuchOutput` is decided by what *this*
+                    // side read rather than by how the child died, and stays an error
+                    // however it ended.
+                    if reason == .timedOut, process.terminationReason == .exit {
+                        control.finish(returning: (process.terminationStatus, output))
+                        return
                     }
+                    control.finish(throwing: control.failure(reason))
                 }
             }
         } onCancel: {
@@ -219,25 +271,58 @@ final class CommandRunner: CommandRunning {
         }
     }
 
-    /// The one piece of shared state, and the reason it is a type rather than a pair of
-    /// captured variables: `stop` is called from a timer, from a cancellation handler and
-    /// from the reading thread, and it has to be safe for all three to arrive at once and
-    /// for any of them to arrive before the process has started.
+    /// The one piece of shared state, and the reason it is a type rather than a few
+    /// captured variables: it is written from a timer, from a cancellation handler and
+    /// from the reading thread, any of them can arrive first, and exactly one of them may
+    /// resume the caller.
     private final class Control: @unchecked Sendable {
 
         enum Reason { case timedOut, tooMuchOutput, cancelled }
+
+        /// How a stop reason is worded. Held here so `stop` can answer the caller from a
+        /// timer without knowing what the timeout or the limit was.
+        let failure: (Reason) -> Error
 
         private let process: Process
         private let lock = NSLock()
         private var running = false
         private var stopped: Reason?
+        private var continuation: CheckedContinuation<(status: Int32, output: Data), Error>?
 
-        init(process: Process) { self.process = process }
+        init(process: Process, failure: @escaping (Reason) -> Error) {
+            self.process = process
+            self.failure = failure
+        }
 
         var reason: Reason? {
             lock.lock()
             defer { lock.unlock() }
             return stopped
+        }
+
+        func attach(_ continuation: CheckedContinuation<(status: Int32, output: Data), Error>) {
+            lock.lock()
+            self.continuation = continuation
+            lock.unlock()
+        }
+
+        /// Resumes the caller, once. Every later attempt is a no-op, which is what lets
+        /// the grace timer and the reading thread both be free to end the call without
+        /// either having to know whether the other got there first.
+        func finish(returning value: (status: Int32, output: Data)) {
+            take()?.resume(returning: value)
+        }
+
+        func finish(throwing error: Error) {
+            take()?.resume(throwing: error)
+        }
+
+        private func take() -> CheckedContinuation<(status: Int32, output: Data), Error>? {
+            lock.lock()
+            defer { lock.unlock() }
+            let pending = continuation
+            continuation = nil
+            return pending
         }
 
         /// Starts the process unless something already asked for it to stop, and says
@@ -254,10 +339,10 @@ final class CommandRunner: CommandRunning {
             lock.unlock()
             try process.run()
             lock.lock()
-            let cancelledDuringLaunch = stopped != nil
+            let cancelledDuringLaunch = stopped
             running = true
             lock.unlock()
-            if cancelledDuringLaunch { process.terminate() }
+            if let cancelledDuringLaunch { signal(because: cancelledDuringLaunch) }
             return true
         }
 
@@ -273,7 +358,19 @@ final class CommandRunner: CommandRunning {
             stopped = reason
             let live = running
             lock.unlock()
-            if live { process.terminate() }
+            if live { signal(because: reason) }
+        }
+
+        /// Asks the child to stop, and makes sure the caller is answered whether or not it
+        /// agrees to. See `CommandRunner.terminationGrace`.
+        private func signal(because reason: Reason) {
+            process.terminate()
+            CommandRunner.queue.asyncAfter(
+                deadline: .now() + CommandRunner.terminationGrace
+            ) { [weak self] in
+                guard let self else { return }
+                self.finish(throwing: self.failure(reason))
+            }
         }
     }
 }

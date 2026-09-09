@@ -218,6 +218,11 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(commands.resolved, ["kagi"])
         XCTAssertEqual(commands.calls.map(\.arguments),
                        [["search", "--format", "json", "--", "stellar parallax"]])
+        // The key never travels in the vector, where `ps` would show it, and nothing this
+        // process holds travels in the environment either.
+        let environment = try XCTUnwrap(commands.calls.first?.environment)
+        XCTAssertTrue(Set(environment.keys).isSubset(of: Set(KagiCLIClient.passedThrough)),
+                      "unexpected subprocess environment: \(environment.keys)")
         // And nothing went looking for a search server: the only requests are the model's
         // three stages and the page fetch.
         XCTAssertEqual(transport.trail.filter { $0.contains("/search") }, [])
@@ -239,6 +244,43 @@ final class ResearchRunnerTests: XCTestCase {
                       "the model was asked to plan a turn that could not search: "
                       + transport.trail.description)
         XCTAssertTrue(commands.calls.isEmpty)
+        // Pins *why* it failed. Without this the test passes for any pre-flight failure
+        // at all, including one that has nothing to do with the tool being missing.
+        XCTAssertEqual(commands.resolved, ["kagi"])
+    }
+
+    /// The other failure, and the one that costs money: the tool is installed, the
+    /// planner has been paid for, and the search itself fails. The turn fails rather than
+    /// answering from nothing, and the reason survives to the turn where the user reads
+    /// it — a rate limit named as one beats "research failed".
+    func testAKagiCommandThatFailsAfterPlanningFailsTheTurn() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
+                switch Self.stage(of: call) {
+                case .plan: return .completion(json: Self.plan("stellar parallax"))
+                case .assess: return .completion(json: Self.assessment)
+                default: return .unrouted
+                }
+            case .stream:
+                return .stream(["An answer that should never be written."])
+            default:
+                return .unrouted
+            }
+        }
+        let commands = StubCommandRunner { _ in
+            .output(status: 1, text: "kagi: rate limited")
+        }
+
+        let turn = await run("How is stellar parallax measured?",
+                             searchKind: .kagiCLI, searchEndpoint: "kagi",
+                             transport: transport, commandRunner: commands)
+
+        XCTAssertEqual(turn.stage, .failed)
+        let failure = try XCTUnwrap(turn.failure)
+        XCTAssertTrue(failure.contains("exited with status 1"), failure)
+        // And the tool's own words are not what the user is shown.
+        XCTAssertFalse(failure.contains("rate limited"), failure)
     }
 
     // MARK: Links in the question

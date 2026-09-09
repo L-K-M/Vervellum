@@ -451,9 +451,10 @@ struct ProvidersView: View {
             LabeledContent(kind.endpointLabel) {
                 TextField(kind.endpointPlaceholder, text: profile.endpoint)
                     .textFieldStyle(.roundedBorder)
-                    // A command, not a URL, and macOS would otherwise offer to correct
-                    // its capitalisation on the way in.
-                    .autocorrectionDisabled(kind == .kagiCLI)
+                    // Neither an address nor a command is prose, and macOS would
+                    // otherwise offer to "correct" one on the way in — a capitalised
+                    // hostname is as broken as a capitalised command name.
+                    .autocorrectionDisabled(true)
             }
             keyRow(title: kind.keyLabel,
                    entry: Binding(get: { searchKeyEntries[id] ?? "" },

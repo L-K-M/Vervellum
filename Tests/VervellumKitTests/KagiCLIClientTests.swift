@@ -21,6 +21,10 @@ final class KagiCLIClientTests: XCTestCase {
                       trace: ResearchTrace(sink: SilentLog()), runner: runner)
     }
 
+    private func message(_ error: Error) -> String {
+        (error as? ResearchError)?.message ?? "\(error)"
+    }
+
     // MARK: The argument vector
 
     /// The shape of an ordinary search, asserted whole. A vector is easy to extend by
@@ -79,6 +83,19 @@ final class KagiCLIClientTests: XCTestCase {
                        ["time_range"])
     }
 
+    /// The schema the model is shown and the set its answer is checked against are one
+    /// list. Written twice they would drift, and drift is silent either way round: a
+    /// value offered and then dropped, or enforced and never offered.
+    func testTheAdvertisedWindowsAreTheOnesEnforced() throws {
+        let properties = try XCTUnwrap(KagiCLIClient.inputSchema["properties"] as? [String: Any])
+        let window = try XCTUnwrap(properties["time_range"] as? [String: Any])
+        XCTAssertEqual(window["enum"] as? [String], KagiCLIClient.timeRanges)
+        for advertised in KagiCLIClient.timeRanges {
+            XCTAssertEqual(try KagiCLIClient.command(for: ["q": "q", "time_range": advertised])
+                            .dropped, [], advertised)
+        }
+    }
+
     func testARegionIsTwoLettersOrItIsDropped() throws {
         let valid = try KagiCLIClient.command(for: ["q": "q", "region": "CH"])
         XCTAssertEqual(valid.arguments, ["search", "--format", "json", "--region", "ch", "--", "q"])
@@ -92,12 +109,37 @@ final class KagiCLIClientTests: XCTestCase {
     }
 
     /// A search with nothing to search for is a model slip, and running it would spend a
-    /// query to be told so.
-    func testAnEmptyQueryIsRefused() {
+    /// query to be told so. Three different slips, told apart, because "the query was not
+    /// text" and "the query was empty" send whoever reads the trace to different places.
+    func testAQueryThatIsNotOneIsRefusedByItsOwnName() {
         for query in ["", "   ", "\n"] {
-            XCTAssertThrowsError(try KagiCLIClient.command(for: ["q": query]))
+            XCTAssertThrowsError(try KagiCLIClient.command(for: ["q": query])) { error in
+                XCTAssertTrue(message(error).contains("empty"), message(error))
+            }
         }
         XCTAssertThrowsError(try KagiCLIClient.command(for: [:]))
+        XCTAssertThrowsError(try KagiCLIClient.command(for: ["q": 42])) { error in
+            XCTAssertTrue(message(error).contains("not text"), message(error))
+        }
+    }
+
+    /// A single argument has a hard ceiling at the `exec` boundary, and a planner that
+    /// has just read three pages is entirely capable of putting a paragraph of one into
+    /// `q`. Refused here with a sentence about the query; refused in the spawn, it would
+    /// arrive as "could not start the search command" and send the reader to the settings
+    /// screen to fix something that is not wrong.
+    func testAQueryTooLongForAnArgumentIsRefusedHere() throws {
+        let atTheLimit = String(repeating: "a", count: KagiCLIClient.maxQueryBytes)
+        XCTAssertEqual(try KagiCLIClient.command(for: ["q": atTheLimit]).arguments.last,
+                       atTheLimit)
+
+        let overIt = String(repeating: "a", count: KagiCLIClient.maxQueryBytes + 1)
+        XCTAssertThrowsError(try KagiCLIClient.command(for: ["q": overIt])) { error in
+            XCTAssertTrue(message(error).contains("too long"), message(error))
+        }
+        // Counted in bytes, not characters: the boundary that matters is `exec`'s.
+        let multibyte = String(repeating: "é", count: KagiCLIClient.maxQueryBytes / 2 + 1)
+        XCTAssertThrowsError(try KagiCLIClient.command(for: ["q": multibyte]))
     }
 
     /// The schema is still the contract for argument *names*, and an invented one means
@@ -158,6 +200,23 @@ final class KagiCLIClientTests: XCTestCase {
         XCTAssertEqual(empty["KAGI_API_KEY"], "inherited")
     }
 
+    /// `childEnvironment` being a good filter is half of the property; this is the other
+    /// half, and the half a refactor could quietly undo. One line — launching with
+    /// `ProcessInfo.processInfo.environment` — would leave every other test in this file
+    /// passing while handing a third-party binary the model key.
+    func testASearchLaunchesWithTheFilteredEnvironment() async throws {
+        let runner = StubCommandRunner { _ in .kagiResults([]) }
+        _ = try await client(runner, apiKey: "stored").search(arguments: ["q": "q"])
+
+        let environment = try XCTUnwrap(runner.calls.first?.environment)
+        XCTAssertEqual(environment["KAGI_API_KEY"], "stored")
+        XCTAssertTrue(Set(environment.keys).isSubset(of: Set(KagiCLIClient.passedThrough)),
+                      "an unlisted variable reached the child: \(environment.keys)")
+        // Named explicitly as well as covered by the subset check, because this one is
+        // the reason the filter exists.
+        XCTAssertNil(environment["VERVELLUM_MODEL_KEY"])
+    }
+
     // MARK: Reading what it printed
 
     /// The output is handed on untouched, exactly as a SearXNG response is: the extractor
@@ -188,6 +247,9 @@ final class KagiCLIClientTests: XCTestCase {
     /// error goes to the null device — because a CLI is entitled to print a credential it
     /// was handed back at you in a diagnostic, and this app does not put a provider's text
     /// in a log or on screen.
+    ///
+    /// The status is pinned by the sentence rather than by "the message contains a 2",
+    /// which any incidental digit would satisfy — including one arriving from the tool.
     func testANonZeroExitFailsWithTheStatusAndNothingElse() async {
         let runner = StubCommandRunner { _ in
             .output(status: 2, text: "error: KAGI_API_KEY=secret-value is invalid")
@@ -196,7 +258,9 @@ final class KagiCLIClientTests: XCTestCase {
             _ = try await client(runner).search(arguments: ["q": "q"])
             XCTFail("a failed command was treated as a result")
         } catch let error as ResearchError {
-            XCTAssertTrue(error.message.contains("2"), error.message)
+            XCTAssertTrue(
+                error.message.hasPrefix("The Kagi command-line tool exited with status 2."),
+                error.message)
             XCTAssertFalse(error.message.contains("secret-value"), error.message)
         } catch {
             XCTFail("unexpected error: \(error)")
@@ -204,15 +268,47 @@ final class KagiCLIClientTests: XCTestCase {
     }
 
     /// A tool configured to print something else — `--format pretty` in a config file is
-    /// enough — is a configuration problem with a name, not an empty result set.
-    func testOutputThatIsNotJSONIsAFailureRatherThanNoResults() async {
-        for text in ["", "1. Rust — https://rust-lang.org", "<html></html>"] {
+    /// enough — is a configuration problem with a name, not an empty result set. And the
+    /// same rule holds on this path as on the exit-status one: what it printed does not
+    /// travel in the error. Standard output is not safer than standard error just because
+    /// it parsed badly — it is a page's text, a URL, whatever the tool had to say.
+    func testOutputThatIsNotJSONIsAFailureThatQuotesNothing() async {
+        for text in ["", "1. Rust — https://rust-lang.org", "<html>secret-value</html>"] {
             let runner = StubCommandRunner { _ in .output(status: 0, text: text) }
             do {
                 _ = try await client(runner).search(arguments: ["q": "q"])
                 XCTFail("non-JSON output was accepted: \(text)")
-            } catch {}
+            } catch let error as ResearchError {
+                XCTAssertFalse(error.message.contains("rust-lang.org"), error.message)
+                XCTAssertFalse(error.message.contains("secret-value"), error.message)
+            } catch {
+                XCTFail("unexpected error: \(error)")
+            }
         }
+    }
+
+    /// The fixture the other tests use is built by a helper, which means it agrees with
+    /// the client by construction. This one is the payload written out as the tool's own
+    /// documentation prints it, so a shape that stopped matching fails here rather than
+    /// shipping as "every search returns nothing".
+    func testTheDocumentedOutputShapeBecomesSources() async throws {
+        let json = """
+            {"data":[{"t":0,"rank":1,"title":"Rust Programming Language",
+                      "url":"https://www.rust-lang.org",
+                      "snippet":"A language empowering everyone.","published":null},
+                     {"t":0,"rank":2,"title":"The Rust Book",
+                      "url":"https://doc.rust-lang.org/book/",
+                      "snippet":"The official book.","published":"2026-01-02"}]}
+            """
+        let runner = StubCommandRunner { _ in .output(status: 0, text: json) }
+        let result = try await client(runner).search(arguments: ["q": "rust"])
+        let sources = EvidenceExtractor.sources(from: [result])
+
+        XCTAssertEqual(sources.map(\.url),
+                       ["https://www.rust-lang.org", "https://doc.rust-lang.org/book/"])
+        XCTAssertEqual(sources.map(\.title), ["Rust Programming Language", "The Rust Book"])
+        XCTAssertEqual(sources.map(\.number), [1, 2])
+        XCTAssertEqual(sources.last?.publishedAt, "2026-01-02")
     }
 
     // MARK: Finding the program
@@ -231,8 +327,20 @@ final class KagiCLIClientTests: XCTestCase {
         XCTAssertNil(runner.resolve(command: "/bin/vervellum-no-such-program-xyzzy"))
         XCTAssertNil(runner.resolve(command: ""))
         XCTAssertNil(runner.resolve(command: "   "))
-        // A directory is not a program.
         XCTAssertNil(runner.resolve(command: "/bin/sh/nonsense"))
+
+        // A directory has an execute bit, and `isExecutableFile` says yes to it. Caught
+        // here, where it reads as a configuration mistake, rather than at the launch,
+        // where it would arrive as "could not start the search command".
+        XCTAssertNil(runner.resolve(command: "/tmp"))
+        XCTAssertNil(runner.resolve(command: "/usr/bin"))
+
+        // Two grammars are documented — a bare name and an absolute path. A relative one
+        // resolves against a working directory a background app does not choose, which is
+        // the dependence the fixed directory list exists to avoid.
+        XCTAssertNil(runner.resolve(command: "./sh"))
+        XCTAssertNil(runner.resolve(command: "bin/sh"))
+        XCTAssertNil(runner.resolve(command: "../bin/sh"))
     }
 
     /// `PATH` alone is not the list, and the reason is a real bug rather than caution: a

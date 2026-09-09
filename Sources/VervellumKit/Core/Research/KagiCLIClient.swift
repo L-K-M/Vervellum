@@ -32,6 +32,9 @@ final class KagiCLIClient: SearchBackend {
     /// Standard output is capped well above a search result and well below anything that
     /// could hurt: twenty hits of JSON is a few tens of kilobytes.
     static let maxOutputBytes = 1_000_000
+    /// The longest query that becomes a command-line argument. Far below the `exec`
+    /// ceiling, and far above any real search: Kagi's own box takes a phrase.
+    static let maxQueryBytes = 8_000
     /// One search's wall clock. Longer than an HTTP search would need, because this one
     /// pays for process startup and the CLI's own connection setup, and short enough that
     /// a hung command cannot hold up a turn the user is watching.
@@ -58,9 +61,15 @@ final class KagiCLIClient: SearchBackend {
 
     static let toolName = "kagi_web_search"
 
-    /// The recency windows `kagi search --time` accepts. Written out because they are
-    /// also the list a model-written value is checked against.
-    static let timeRanges: Set<String> = ["day", "week", "month", "year"]
+    /// The recency windows `kagi search --time` accepts.
+    ///
+    /// One list, used twice: it is advertised to the model as the schema's `enum` and it
+    /// is what a model-written value is checked against. Written out separately in each
+    /// place, the two would drift, and drift here is silent — a value the model is
+    /// invited to use and then dropped, or one enforced and never offered. Ordered
+    /// shortest-first rather than alphabetically, because that is the order the schema
+    /// reads best in.
+    static let timeRanges = ["day", "week", "month", "year"]
 
     /// The arguments this client accepts, as a JSON Schema.
     ///
@@ -80,7 +89,7 @@ final class KagiCLIClient: SearchBackend {
             ] as [String: Any],
             "time_range": [
                 "type": "string",
-                "enum": ["day", "week", "month", "year"],
+                "enum": KagiCLIClient.timeRanges,
                 "description": "Optional recency filter. Use it for a question about a "
                     + "current state of affairs.",
             ] as [String: Any],
@@ -169,9 +178,21 @@ final class KagiCLIClient: SearchBackend {
     /// test can assert — which is the only way to keep the promise at the top of this
     /// file from quietly decaying into string building.
     static func command(for arguments: [String: Any]) throws -> (arguments: [String], dropped: [String]) {
-        guard let query = arguments["q"] as? String,
-              !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard let query = arguments["q"] as? String else {
+            throw ResearchError("The search query was not text. Try another model.")
+        }
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ResearchError("The model wrote an empty search query. Try another model.")
+        }
+        // A single argument has a hard ceiling at the `exec` boundary — 128 KiB on Linux,
+        // more on macOS — and a planner that has just read three pages is capable of
+        // putting a paragraph of one into `q`. Failing here says what is wrong; failing
+        // in the spawn says "could not start the search command", which is a sentence
+        // about the settings and would send the reader to the wrong screen.
+        guard query.utf8.count <= maxQueryBytes else {
+            throw ResearchError(
+                "The search query is too long to pass to a command (\(query.utf8.count) "
+                + "bytes). A query is a handful of words; try another model.")
         }
 
         var argv = ["search", "--format", "json"]
@@ -226,8 +247,18 @@ final class KagiCLIClient: SearchBackend {
     }
 
     /// `HOME` and `XDG_CONFIG_HOME` are how the CLI finds `~/.config/kagi-cli/config.toml`;
-    /// `PATH` is for whatever it runs itself; `LANG` decides how it renders text. The
-    /// three `KAGI_` variables are the credentials it documents.
-    static let passedThrough = ["PATH", "HOME", "XDG_CONFIG_HOME", "LANG",
+    /// `PATH` is for whatever it runs itself; `LANG` decides how it renders text;
+    /// `TMPDIR` keeps anything it spools out of the world-readable `/tmp`. The three
+    /// `KAGI_` variables are the credentials it documents.
+    ///
+    /// The proxy variables are here because leaving them out produces the worst kind of
+    /// bug report. On a network that requires a proxy the tool would reach nothing, the
+    /// search would end at the timeout, and the failure message says to try `kagi search`
+    /// in a terminal — where it works, because a terminal has these set. Both cases are
+    /// listed: the lowercase spellings are the older convention and plenty of tools read
+    /// only those.
+    static let passedThrough = ["PATH", "HOME", "XDG_CONFIG_HOME", "LANG", "TMPDIR",
+                                "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                                "http_proxy", "https_proxy", "all_proxy", "no_proxy",
                                 "KAGI_SESSION_TOKEN", "KAGI_API_KEY", "KAGI_API_TOKEN"]
 }

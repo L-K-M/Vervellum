@@ -113,12 +113,17 @@ rules are about the argument vector:
   client, not in the schema: an `enum` in a JSON Schema describes what a model *should*
   write, and the shared argument validation checks names rather than values.
 - **The child gets a built environment, not this one.** `PATH`, `HOME`,
-  `XDG_CONFIG_HOME`, `LANG` and Kagi's own credential variables — nothing else. A
-  third-party binary is not handed the model key or the reader key.
-- **Bounded, and never quoted back.** Standard output is capped and the command is
-  terminated on a timeout. Standard error is attached to the null device and never read,
-  so a diagnostic that echoes a credential cannot reach a log line or the panel; a
-  failure is reported as an exit status and nothing more.
+  `XDG_CONFIG_HOME`, `LANG`, `TMPDIR`, the standard proxy variables and Kagi's own
+  credential variables — nothing else. A third-party binary is not handed the model key
+  or the reader key. (The proxy variables are there so a search behind a corporate proxy
+  works the way the same command works in your terminal.)
+- **Bounded, and never quoted back.** Standard output is capped. The command is asked to
+  stop on a timeout — `SIGTERM` is a request, and a program is entitled to catch it, so
+  the deadline is enforced on Vervellum's side as well: when the grace period passes the
+  search ends with an error whether or not the command has. Standard error is attached to
+  the null device and never read, so a diagnostic that echoes a credential cannot reach a
+  log line or the panel; a failure is reported as an exit status and nothing more, and
+  the same holds for output that could not be parsed.
 
 The credential belongs to the tool. `kagi auth` stores it where the user's own terminal
 already reads it, and Vervellum neither asks for it nor keeps a copy — a key stored in
