@@ -81,6 +81,12 @@ struct SourcesView: View {
         // `countText` is nil only for a turn with no sources at all, which is a
         // section that does not appear.
         .accessibilityValue(countText ?? "")
+        // And a heading, as well as a button. Nothing was lost by wrapping
+        // `SectionLabel` — it never carried the trait — but this row is a section
+        // header, and now that it is also the only way into the section it belongs in
+        // the headings rotor, where a reader can reach it without swiping the whole
+        // transcript to find it.
+        .accessibilityAddTraits(.isHeader)
     }
 
     @ViewBuilder

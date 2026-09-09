@@ -90,6 +90,11 @@ struct ProcessTrailView: View {
         // VoiceOver heard "Show research detail" for the whole forty seconds. "Loud while
         // it is happening" has to mean out loud.
         .accessibilityValue(summaryLine)
+        // And a heading, as well as a button. Nothing was lost by making this a button —
+        // no trait was there to lose — but the row is a section header, and now that it
+        // is also the only way into the detail it belongs in the headings rotor, where a
+        // reader can reach it without swiping the whole transcript.
+        .accessibilityAddTraits(.isHeader)
     }
 
     @ViewBuilder

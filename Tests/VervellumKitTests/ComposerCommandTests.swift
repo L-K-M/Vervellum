@@ -381,9 +381,13 @@ final class ComposerCommandTests: XCTestCase {
 
     /// The whole "what will Return do" contract, which used to live in the view where
     /// nothing could reach it.
-    func testTheListOffersItsFirstRowOnlyWhenTakingItWouldHelp() {
-        let rows = ComposerCommand.completions(for: "/h")
-        XCTAssertNotNil(rows)
+    func testTheListOffersItsFirstRowOnlyWhenTakingItWouldHelp() throws {
+        // Unwrapped rather than asserted non-nil. The three `XCTAssertNil` cases below
+        // are fed these completions, so a nil here would let all of them pass on the
+        // wrong grounds — and the one case that would fail, comparing nil against 0,
+        // would report from the far end of the test.
+        let rows = try XCTUnwrap(ComposerCommand.completions(for: "/h"),
+                                 "\"/h\" always has something to complete")
 
         XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
                                                        draft: "/h", completions: rows), 0,
@@ -427,6 +431,14 @@ final class ComposerCommandTests: XCTestCase {
                                                        completions: ComposerCommand.completions(for: "/h")),
                        1,
                        "a row the reader walked to outlives the exit that cleared the offer")
+        // And the pass-through is unchecked against the list, which is the decision the
+        // doc comment spends ten lines on. Pinned here so a later "defensive" bounds
+        // check has to argue with a failing test rather than arrive as a tidy-up.
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: 99, isDismissed: false,
+                                                       draft: "/h",
+                                                       completions: ComposerCommand.completions(for: "/h")),
+                       99,
+                       "a choice is handed back without being measured against the list")
         XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: 0, isDismissed: true,
                                                        draft: "", completions: nil), 0,
                        "every condition on the offer at once, and the choice still wins")
