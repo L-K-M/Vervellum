@@ -9,11 +9,16 @@ import Foundation
 /// on one provider's field names. This protocol is that contract written down, so a
 /// backend that is not an MCP server can be added without the runner learning about it.
 ///
-/// The two implementations differ in exactly one interesting way. An MCP server
-/// *advertises* its own tool and schema, and `SearchMCPClient` fetches it rather than
-/// assuming; a SearXNG instance has no such advertisement, so `SearXNGClient` supplies
-/// the schema itself. Either way the planner is given a real schema, and the arguments
-/// it writes are checked against that schema before a request goes out.
+/// The implementations differ in one interesting way. An MCP server *advertises* its own
+/// tool and schema, and `SearchMCPClient` fetches it rather than assuming; a SearXNG
+/// instance and the Kagi CLI have no such advertisement, so those clients supply the
+/// schema themselves. Either way the planner is given a real schema, and the arguments it
+/// writes are checked against that schema before a request goes out.
+///
+/// One of them is not a server at all. `KagiCLIClient` runs a program on the user's own
+/// machine, which is why this protocol says nothing about transports: what a backend
+/// needs to reach its index is the backend's business, and the pipeline's business is a
+/// schema, a call and a result.
 protocol SearchBackend: AnyObject {
 
     /// A name for the log and for user-facing prose. Never a provider's own text.
@@ -39,7 +44,12 @@ extension SearchBackend {
     ///
     /// A missing required key or an invented one means the model misread the schema,
     /// and sending it anyway spends a request to get a provider-side error back. Shared
-    /// because the check belongs to the *contract*, not to either protocol.
+    /// because the check belongs to the *contract*, not to any one protocol.
+    ///
+    /// Names only. What a value is *allowed to be* — an enum, a format, a range — is
+    /// described by the schema and not enforced here, so a backend that turns a value
+    /// into something more dangerous than a query parameter has to check it itself. See
+    /// `KagiCLIClient.command(for:)`, where a value becomes a command-line argument.
     func validate(_ arguments: [String: Any],
                   required: [String],
                   properties: Set<String>) throws {
@@ -65,7 +75,8 @@ enum SearchBackendFactory {
     static func make(profile: SearchProfile,
                      apiKey: String?,
                      trace: ResearchTrace,
-                     transport: any HTTPTransporting = HTTPTransport.shared) throws -> SearchBackend {
+                     transport: any HTTPTransporting = HTTPTransport.shared,
+                     commandRunner: any CommandRunning = CommandRunner.shared) throws -> SearchBackend {
         switch profile.kind {
         case .mcp:
             guard let url = ProviderSettings.validatedEndpointURL(profile.endpoint) else {
@@ -83,6 +94,28 @@ enum SearchBackendFactory {
             // a proxy that wants a bearer token. Demanding one would block the most
             // common self-hosted setup.
             return SearXNGClient(searchURL: url, apiKey: apiKey, trace: trace, transport: transport)
+        case .kagiCLI:
+            // `profile.endpoint` is not a URL for this kind: it holds a command, either a
+            // bare name to look for or a full path to one. The field's meaning follows
+            // the kind, which is why the settings pane puts the picker above it.
+            //
+            // Resolved here, so "you have not installed it" is reported with the rest of
+            // the configuration problems and before the turn's first billable call —
+            // rather than surfacing as a failed search a minute into a run.
+            guard let executable = commandRunner.resolve(command: profile.endpoint) else {
+                // Naming what was looked for is most of the message: `kagi-cli` typed
+                // where `kagi` was meant is indistinguishable from a missing install
+                // otherwise, and both are one edit away from working.
+                throw ResearchError(
+                    "Vervellum could not find the Kagi command-line tool "
+                    + "\"\(profile.endpoint)\". Install it from "
+                    + "https://github.com/Microck/kagi-cli, or put its full path in the "
+                    + "provider settings.")
+            }
+            // The key stays optional, and is usually absent: `kagi auth` holds the
+            // credential. One stored here is passed to the tool as `KAGI_API_KEY`.
+            return KagiCLIClient(executable: executable, apiKey: apiKey, trace: trace,
+                                 runner: commandRunner)
         }
     }
 }
