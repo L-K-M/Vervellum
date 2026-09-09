@@ -7,12 +7,17 @@ import AppKit
 /// rather than hidden. A source the model looked at and did not use is evidence about
 /// the answer: four cited out of eighteen found means the model was selective, and the
 /// user should be able to see the fourteen it passed over.
+///
+/// The list itself is closed until asked for. "8 of 24 cited" is the fact most readers
+/// want from it, and eight rows of URLs between the answer and the next question buries
+/// the thing they came for. The count stays on screen; the rows are one click away.
 struct SourcesView: View {
 
     @Environment(\.panelTextScale) private var textScale
 
     let sources: [Source]
     let citedNumbers: Set<Int>
+    @Binding var isExpanded: Bool
     @Binding var showsAll: Bool
 
     private var cited: [Source] { sources.filter { citedNumbers.contains($0.number) } }
@@ -20,29 +25,56 @@ struct SourcesView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.small) {
-            SectionLabel(text: "Sources", trailing: countText)
-            VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
-                ForEach(cited) { source in
-                    SourceRow(source: source, isCited: true)
-                }
-                if showsAll {
-                    ForEach(uncited) { source in
-                        SourceRow(source: source, isCited: false)
+            header
+            if isExpanded {
+                VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
+                    ForEach(cited) { source in
+                        SourceRow(source: source, isCited: true)
+                    }
+                    if showsAll {
+                        ForEach(uncited) { source in
+                            SourceRow(source: source, isCited: false)
+                        }
                     }
                 }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+                uncitedToggle
             }
-            if !uncited.isEmpty {
-                Button {
-                    withAnimation(PanelTheme.Motion.disclosure) { showsAll.toggle() }
-                } label: {
-                    Text(showsAll
-                         ? "Hide the \(uncited.count) uncited"
-                         : "Show \(uncited.count) found but not cited")
-                        .font(PanelTheme.Font.caption(textScale))
-                        .foregroundStyle(PanelTheme.Palette.accent)
-                }
-                .buttonStyle(.plain)
+        }
+    }
+
+    /// The label, which is also the way in. A whole-width hit area rather than a
+    /// chevron to aim at: the row is one line of small text, and the reader's target
+    /// should be the sentence they are reading.
+    private var header: some View {
+        Button {
+            withAnimation(PanelTheme.Motion.disclosure) { isExpanded.toggle() }
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
+                SectionLabel(text: "Sources", trailing: countText)
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(PanelTheme.Font.at(9, textScale, weight: .semibold))
+                    .foregroundStyle(PanelTheme.Palette.tertiaryText)
             }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isExpanded ? "Hide the sources" : "Show the sources")
+    }
+
+    @ViewBuilder
+    private var uncitedToggle: some View {
+        if !uncited.isEmpty {
+            Button {
+                withAnimation(PanelTheme.Motion.disclosure) { showsAll.toggle() }
+            } label: {
+                Text(showsAll
+                     ? "Hide the \(uncited.count) uncited"
+                     : "Show \(uncited.count) found but not cited")
+                    .font(PanelTheme.Font.caption(textScale))
+                    .foregroundStyle(PanelTheme.Palette.accent)
+            }
+            .buttonStyle(.plain)
         }
     }
 

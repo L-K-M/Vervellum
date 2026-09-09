@@ -44,6 +44,7 @@ struct TurnView: View, Equatable {
     var onAskFollowup: (String) -> Void
 
     @State private var trailExpanded = false
+    @State private var sourcesExpanded = false
     @State private var showsAllSources = false
 
     private var validation: CitationValidator.Result {
@@ -97,6 +98,7 @@ struct TurnView: View, Equatable {
             if !turn.sources.isEmpty {
                 SourcesView(sources: turn.sources,
                             citedNumbers: Set(turn.citedSources(using: validation).map(\.number)),
+                            isExpanded: $sourcesExpanded,
                             showsAll: $showsAllSources)
             }
 

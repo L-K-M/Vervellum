@@ -347,4 +347,23 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertNil(ComposerCommand.completions(for: "/direct what is the time"))
     }
 
+    // MARK: What the list offers
+
+    /// The list highlights its first row only while the command word is unfinished,
+    /// because a highlighted row is one Return will *take*. `isHalfTypedCommand` is that
+    /// condition — the same predicate that decides whether Return would otherwise be
+    /// withheld, which is why the two can never disagree about a bare command word.
+    func testTheWordsAnOfferedRowWouldFinish() {
+        for unfinished in ["/dee", "/h", "/mod"] {
+            XCTAssertTrue(ComposerCommand.isHalfTypedCommand(unfinished),
+                          "\(unfinished) would be left without an offer")
+        }
+        // And a command already typed in full is not offered anything: `/new` and Return
+        // starts a thread, exactly as it did before the list highlighted anything.
+        for finished in ["/new", "/help", "/model", "/history", "/copy"] {
+            XCTAssertFalse(ComposerCommand.isHalfTypedCommand(finished),
+                           "\(finished) would be completed instead of run")
+        }
+    }
+
 }

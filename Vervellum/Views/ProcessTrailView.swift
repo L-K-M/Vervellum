@@ -6,10 +6,12 @@ import SwiftUI
 /// it. But process detail is also the fastest way to turn a panel into noise, so it
 /// obeys one rule: **loud while it is happening, one quiet line once it is done.**
 ///
-/// While a turn runs the stages are named as they complete, because a 40-second wait
-/// with a spinner feels broken and the same wait with "searching the web · 3 of 4"
-/// feels like work. Once the answer lands the whole thing collapses to a summary the
-/// user can expand if they want to audit it.
+/// While a turn runs the stage is named as it changes, because a 40-second wait with a
+/// spinner feels broken and the same wait with "searching the web · 3 of 4" feels like
+/// work. That live line is the whole of it: the queries behind it are a dozen rows of
+/// text that push the answer off the screen at exactly the moment it arrives, so they
+/// wait behind a disclosure like everything else. One line running, one line done, and
+/// the detail one click away in both.
 struct ProcessTrailView: View {
 
     @Environment(\.panelTextScale) private var textScale
@@ -22,7 +24,7 @@ struct ProcessTrailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.small) {
             header
-            if isExpanded || isRunning {
+            if isExpanded {
                 detail
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -56,16 +58,17 @@ struct ProcessTrailView: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if !isRunning {
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(PanelTheme.Font.at(9, textScale, weight: .semibold))
-                        .foregroundStyle(PanelTheme.Palette.tertiaryText)
-                }
+                // Shown while it runs too. The queries arrive early and are the most
+                // interesting thing on screen for the few seconds before an answer
+                // exists — but only to a reader who went looking, which is what the
+                // chevron is for.
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(PanelTheme.Font.at(9, textScale, weight: .semibold))
+                    .foregroundStyle(PanelTheme.Palette.tertiaryText)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(isRunning)
         .accessibilityLabel(isExpanded ? "Hide research detail" : "Show research detail")
     }
 
