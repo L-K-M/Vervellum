@@ -220,6 +220,15 @@ enum TurnNotice: String, Codable, Equatable {
     /// remedy is different: no setting turns this on, the attachment has to be attached
     /// again.
     case attachmentMissing
+    /// A file was attached to *this* question and its bytes could not be written, so the
+    /// answer was produced with it but the thread will reopen without it.
+    ///
+    /// The opposite direction from `attachmentMissing`, which is about a turn that ran
+    /// without something it names. Here the model saw the file — the bytes it is sent
+    /// come from memory — and it is the record on disk that is short. Told at ask time
+    /// rather than discovered at reopen, because that is when the reader can still do
+    /// something about it.
+    case attachmentNotStored
     /// A notice written by a newer build that this one does not know. Kept rather than
     /// failing the whole document: a `notices` array that refused to decode used to make
     /// an older build start from an empty library and overwrite the newer file.
@@ -275,6 +284,10 @@ enum TurnNotice: String, Codable, Equatable {
             return "A model provider failed, so the next one configured answered instead, "
                 + "and the rest of this turn used it too. The model named on this turn is "
                 + "the one that answered."
+        case .attachmentNotStored:
+            return "An attachment could not be saved, so it will not be here when this "
+                + "thread is reopened. The answer was written with it — only the stored "
+                + "copy is missing."
         case .attachmentMissing:
             return "Something attached to this question could not be sent, so the answer "
                 + "was written without it. The file is listed above as a record of what "
