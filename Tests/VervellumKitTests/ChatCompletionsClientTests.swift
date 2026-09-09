@@ -200,4 +200,49 @@ final class ChatCompletionsClientTests: XCTestCase {
                                                  headerFields: ["Content-Type": "application/json"]))
         XCTAssertFalse(HTTPTransport.isEventStream(json))
     }
+
+    // MARK: Attached images
+
+    /// The regression that matters most here. Plenty of the OpenAI-compatible servers
+    /// this app gets pointed at — a local llama.cpp, an older gateway — accept only a
+    /// string for `content` and reject an array outright, so a turn with nothing attached
+    /// has to send exactly the bytes it sent before images existed.
+    func testAMessageWithNoImagesKeepsAPlainStringContent() throws {
+        let body = ChatCompletionsClient.requestBody(model: "m", system: "s", userContent: "u",
+                                                     stream: false, optionalParameters: false)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.last?["content"] as? String, "u")
+    }
+
+    /// With images the newer parts shape is used, text first: the question is what the
+    /// pictures are *for*, and a model reading parts in order should have it before them.
+    func testImagesBecomePartsWithTheTextFirst() throws {
+        let images = [
+            ChatCompletionsClient.ImagePart(mediaType: "image/png", base64: "AAAA"),
+            ChatCompletionsClient.ImagePart(mediaType: "image/jpeg", base64: "BBBB"),
+        ]
+        let body = ChatCompletionsClient.requestBody(model: "m", system: "s", userContent: "u",
+                                                     images: images, stream: true,
+                                                     optionalParameters: false)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        let parts = try XCTUnwrap(messages.last?["content"] as? [[String: Any]])
+
+        XCTAssertEqual(parts.count, 3)
+        XCTAssertEqual(parts[0]["type"] as? String, "text")
+        XCTAssertEqual(parts[0]["text"] as? String, "u")
+        XCTAssertEqual(parts[1]["type"] as? String, "image_url")
+        XCTAssertEqual((parts[1]["image_url"] as? [String: Any])?["url"] as? String,
+                       "data:image/png;base64,AAAA")
+        XCTAssertEqual((parts[2]["image_url"] as? [String: Any])?["url"] as? String,
+                       "data:image/jpeg;base64,BBBB")
+    }
+
+    /// Inline rather than hosted. The alternative is uploading the user's screenshot
+    /// somewhere to get a link for it, which is the opposite of what this app promises
+    /// about where their data goes.
+    func testAnImagePartIsADataURLAndNotALink() {
+        let part = ChatCompletionsClient.ImagePart(mediaType: "image/webp", base64: "Zm8=")
+        XCTAssertEqual(part.dataURL, "data:image/webp;base64,Zm8=")
+        XCTAssertFalse(part.dataURL.hasPrefix("http"))
+    }
 }

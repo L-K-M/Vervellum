@@ -102,6 +102,14 @@ enum ResearchContext {
             .map { ["claim": withoutCitationMarkers($0.claim), "verdict": $0.verdict.rawValue] }
         if !unsettled.isEmpty { entry["unsettled"] = Array(unsettled.prefix(maxHistoricFindings)) }
         if !turn.notices.isEmpty { entry["notices"] = turn.notices.map(\.rawValue) }
+        // Names only, and deliberately so. The picture itself was sent on the turn it was
+        // attached to and is not sent again — see `Attachment` — but a later turn that
+        // says "the second one" is otherwise talking about something the model has no
+        // record of ever seeing. This is what lets it answer "you attached a screenshot
+        // earlier; attach it again and I can look" instead of contradicting the user.
+        if !turn.attachments.isEmpty {
+            entry["attached"] = turn.attachments.map(\.name)
+        }
         return (entry, answer.count > maxHistoricAnswerCharacters
                 || domains.count > maxHistoricDomains || unsettled.count > maxHistoricFindings)
     }

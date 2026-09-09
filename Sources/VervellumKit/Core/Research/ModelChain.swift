@@ -245,6 +245,7 @@ final class ModelChain {
         let model = profile.model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !model.isEmpty else { return nil }
         let client = ChatCompletionsClient(url: url, model: model, apiKey: keys[profile.id],
+                                           sendsImages: profile.sendsImages,
                                            trace: trace, transport: transport)
         built[profile.id] = client
         return client

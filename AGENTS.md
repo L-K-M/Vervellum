@@ -181,6 +181,10 @@ VervellumTests/              macOS-only tests (hotkeys, panel geometry, Accessib
   `ResearchPrompts` holds the prompts; `PlanParser` /
   `AssessmentParser`, `CitationValidator`, `SourceHarvester`, `EvidenceExtractor`,
   `ResearchContext` and `ProviderSettings` are pure and carry the validation rules.
+  `Attachment` decides what a user may attach to a question and what its bytes turn out
+  to be; the bytes themselves live in `Store/AttachmentStore`, beside the thread file
+  rather than inside it, because a thread's history is what gets re-sent to the model on
+  every later turn.
 - `Store/` — `ThreadLibrary` (the versioned document) and `ThreadArchive`.
 - `Text/` — `MarkdownParser`, `ComposerCommand`, `Formatting`, `TranscriptFormatter`.
 - `Platform/` — the seams: `SecretStore`, `SettingsStore`, `LogSink`,

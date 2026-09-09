@@ -230,6 +230,14 @@ final class ResearchRunner: ResearchRunning {
     /// alongside the transport and for the same reason: it is the seam a test replaces to
     /// drive a whole turn without the thing on the other side existing.
     private let commandRunner: any CommandRunning
+    /// The bytes behind an attachment on the turn being run.
+    ///
+    /// A closure rather than a store, so this file does no file IO and a test can attach
+    /// an image without a directory existing. It answers nil for an attachment whose
+    /// bytes are gone — a library copied without its attachments folder — and the turn
+    /// carries on without the picture, which is the same outcome as a provider that
+    /// cannot be shown one.
+    private let attachmentBytes: (Attachment) -> Data?
 
     /// The turn being run, and where to report it. Instance state rather than threaded
     /// through every stage: a runner executes exactly one turn, and passing an
@@ -240,11 +248,13 @@ final class ResearchRunner: ResearchRunning {
 
     init(environment: Environment, trace: ResearchTrace,
          transport: any HTTPTransporting = HTTPTransport.shared,
-         commandRunner: any CommandRunning = CommandRunner.shared) {
+         commandRunner: any CommandRunning = CommandRunner.shared,
+         attachmentBytes: @escaping (Attachment) -> Data? = { _ in nil }) {
         self.environment = environment
         self.trace = trace
         self.transport = transport
         self.commandRunner = commandRunner
+        self.attachmentBytes = attachmentBytes
     }
 
     // MARK: Running
@@ -319,6 +329,49 @@ final class ResearchRunner: ResearchRunning {
 
     // MARK: Pipeline
 
+    /// The current turn's attachments, split into what each stage can use: text to inline
+    /// in the payload, images to hang off the user message.
+    ///
+    /// Done once per turn rather than per stage, because reading and base64-encoding a
+    /// four-megabyte screenshot twice is two seconds of the user's turn spent producing
+    /// bytes that are identical.
+    ///
+    /// Only counts reach the trace. A file name is the user's own text, and this log has
+    /// the same rule for it as for a page's: it records shape, never content.
+    private func preparedAttachments() -> (payload: [[String: String]],
+                                           images: [ChatCompletionsClient.ImagePart]) {
+        let attachments = current?.attachments ?? []
+        guard !attachments.isEmpty else { return ([], []) }
+
+        var payload: [[String: String]] = []
+        var images: [ChatCompletionsClient.ImagePart] = []
+        var missing = 0
+        for attachment in attachments {
+            guard let data = attachmentBytes(attachment) else {
+                missing += 1
+                continue
+            }
+            switch attachment.kind {
+            case .image:
+                images.append(ChatCompletionsClient.ImagePart(
+                    mediaType: attachment.mediaType, base64: data.base64EncodedString()))
+            case .text:
+                // Re-decoded rather than trusted: the record says what the bytes were
+                // when they were stored, and the bytes are what is being sent now.
+                if let text = Attachment.text(from: data) {
+                    payload.append(["name": attachment.name, "text": text])
+                }
+            case .other:
+                // A kind a later build wrote. Nothing here knows how to send it, and
+                // guessing would be worse than leaving it out.
+                continue
+            }
+        }
+        trace.log("Attachments: \(images.count) image(s), \(payload.count) text file(s)"
+                  + (missing > 0 ? ", \(missing) whose bytes are gone" : ""))
+        return (payload, images)
+    }
+
     private func execute(question: String, mode: Mode, history: [ResearchTurn]) async throws {
         let settings = environment.settings
         let problems = settings.problems(hasModelKey: environment.modelKey != nil,
@@ -351,9 +404,11 @@ final class ResearchRunner: ResearchRunning {
         let today = ResearchContext.todayString()
 
         trace.log("Turn started mode=\(mode.traceName) history=\(history.count)")
+        let attachments = preparedAttachments()
 
         if mode == .direct {
-            try await answerDirectly(chain: chain, question: question, history: history, today: today)
+            try await answerDirectly(chain: chain, question: question, history: history,
+                                     today: today, attachments: attachments)
             return
         }
 
@@ -434,6 +489,7 @@ final class ResearchRunner: ResearchRunning {
 
         // 2 — plan.
         var planExtra: [String: Any] = ["search_tool": search.toolDescriptor]
+        if !attachments.payload.isEmpty { planExtra["attachments"] = attachments.payload }
         if !linked.isEmpty {
             // Excerpts, not the pages. This call chooses queries and cites nothing, so
             // it needs to know what each page is about rather than what it says in full
@@ -458,11 +514,18 @@ final class ResearchRunner: ResearchRunning {
         // no JSON at all, and only the second was worth another provider while the
         // first killed the turn. `PlanParser`'s own messages give the game away — "Try
         // again or choose another model" is the advice the chain exists to take.
+        let planImages = attachments.images
         let plan = try await chain.perform("Plan") { chat in
+            // The planner is shown the picture when the provider can take one: an image
+            // is very often what the question is *about*, and planning searches from the
+            // words alone is the commonest way to search for the wrong thing.
+            let images = chat.sendsImages ? planImages : []
             let object = try await chat.completeJSON(
                 system: ResearchPrompts.plan(maxSearches: Self.maxSearches, today: today,
-                                             hasLinkedPages: !linked.isEmpty),
-                payload: planContext.payload, label: "Plan")
+                                             hasLinkedPages: !linked.isEmpty,
+                                             hasAttachments: !planImages.isEmpty
+                                                 || !attachments.payload.isEmpty),
+                payload: planContext.payload, label: "Plan", images: images)
             return try PlanParser.parse(object, maxSearches: Self.maxSearches)
         }
         update { turn in
@@ -490,7 +553,8 @@ final class ResearchRunner: ResearchRunning {
                     turn.reading = "The planner decided this question needs no web evidence."
                 }
             }
-            try await answerDirectly(chain: chain, question: question, history: history, today: today)
+            try await answerDirectly(chain: chain, question: question, history: history,
+                                     today: today, attachments: attachments)
             return
         }
         if plan.searches.isEmpty {
@@ -718,12 +782,13 @@ final class ResearchRunner: ResearchRunning {
         let searchesRun: [[String: String]] = plan.searches.map {
             ["purpose": $0.purpose, "query": $0.displayQuery]
         }
-        let answerExtra: [String: Any] = [
+        var answerExtra: [String: Any] = [
             "reading": plan.reading,
             "searches_run": searchesRun,
             "evidence": evidence,
             "highest_source_number": evidence.compactMap { $0["number"] as? Int }.max() ?? 0,
         ]
+        if !attachments.payload.isEmpty { answerExtra["attachments"] = attachments.payload }
         let answerContext = ResearchContext.assemble(
             question: question, history: history, today: today, extra: answerExtra)
         if answerContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
@@ -733,15 +798,25 @@ final class ResearchRunner: ResearchRunning {
         // two would be concatenated into a paragraph neither model wrote — so the
         // fragment is discarded before the retry. The reader sees the answer restart,
         // which is honest, rather than a seam they cannot see.
+        // Whether the provider that actually answered was shown the pictures. Recorded
+        // inside the closure because the chain decides who answers: a fallback without
+        // eyes is sent the turn without them rather than a request it would reject, and
+        // the reader has to be told the difference.
+        var sentImages = false
+        let answerImages = attachments.images
         let answer = try await chain.perform("Answer", beforeRetry: { [weak self] in
             self?.update { $0.answer = "" }
         }) { chat in
-            try await chat.streamText(
-                system: ResearchPrompts.answer, payload: answerContext.payload, label: "Answer"
+            let images = chat.sendsImages ? answerImages : []
+            sentImages = !images.isEmpty
+            return try await chat.streamText(
+                system: ResearchPrompts.answer, payload: answerContext.payload,
+                label: "Answer", images: images
             ) { [weak self] chunk in
                 self?.update { $0.answer += chunk }
             }
         }
+        if !answerImages.isEmpty, !sentImages { update { $0.addNotice(.imagesNotSent) } }
         recordAnsweringModel(from: chain)
         update { $0.applyCitationValidation(sourceCount: sources.count) }
         try Task.checkCancellation()
@@ -1070,20 +1145,30 @@ final class ResearchRunner: ResearchRunning {
     private func answerDirectly(chain: ModelChain,
                                 question: String,
                                 history: [ResearchTurn],
-                                today: String) async throws {
+                                today: String,
+                                attachments: (payload: [[String: String]],
+                                              images: [ChatCompletionsClient.ImagePart])) async throws {
         update { $0.stage = .answering }
-        let context = ResearchContext.assemble(question: question, history: history, today: today)
+        var directExtra: [String: Any] = [:]
+        if !attachments.payload.isEmpty { directExtra["attachments"] = attachments.payload }
+        let context = ResearchContext.assemble(question: question, history: history,
+                                               today: today, extra: directExtra)
         if context.trimmed { update { $0.addNotice(.contextTrimmed) } }
         // Same reset as the research path's answer stage, for the same reason.
+        var sentImages = false
         _ = try await chain.perform("Direct answer", beforeRetry: { [weak self] in
             self?.update { $0.answer = "" }
         }) { chat in
-            try await chat.streamText(
-                system: ResearchPrompts.direct, payload: context.payload, label: "Direct answer"
+            let images = chat.sendsImages ? attachments.images : []
+            sentImages = !images.isEmpty
+            return try await chat.streamText(
+                system: ResearchPrompts.direct, payload: context.payload,
+                label: "Direct answer", images: images
             ) { [weak self] chunk in
                 self?.update { $0.answer += chunk }
             }
         }
+        if !attachments.images.isEmpty, !sentImages { update { $0.addNotice(.imagesNotSent) } }
         recordAnsweringModel(from: chain)
         // The same check the research path makes after its answer. A Stop pressed
         // mid-stream ends the stream rather than failing it, and without this the

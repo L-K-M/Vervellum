@@ -54,7 +54,16 @@ Vervellum makes network requests in exactly five cases, each with a fixed purpos
   resolves into your network is not caught — see the limitation recorded in
   `SECURITY.md`. That page's text then travels the same road as
   any source: into the evidence, and on to your model provider. Do not paste a link to
-  something you would not send them. **Use a reader service** sends
+  something you would not send them.
+- **Attachments.** An image or file you attach to a question goes to your model provider
+  with that question — an image inline in the request as a `data:` URL, a text file as
+  text in the payload. Nothing is uploaded anywhere else to make a link for it. It is
+  sent **only on the turn you attached it to**: later questions in the same thread carry
+  the file's *name* so the model knows something was attached, and nothing more, so a
+  follow-up never re-bills you for a picture you sent once. The bytes are kept beside
+  your threads in `attachments/`, written `0600`, and deleted when no thread refers to
+  them any more. A provider is shown images only if you ticked that box for it; a turn
+  whose image could not be sent says so. **Use a reader service** sends
   the addresses to the reader endpoint you configured instead, with that endpoint's
   key — the sites then see the service rather than you, and the service sees the
   addresses. **Snippets only** fetches nothing at all.

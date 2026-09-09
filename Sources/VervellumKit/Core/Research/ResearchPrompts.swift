@@ -43,6 +43,21 @@ enum ResearchPrompts {
         """
 
     /// Appended to the calls whose reply is parsed as JSON.
+    /// What to do with something the user attached.
+    ///
+    /// Its own clause because an attachment breaks the assumption every other rule here
+    /// rests on: that all evidence is numbered. An image the user pasted has no number
+    /// and cannot get one — Vervellum numbers what it fetched, and it did not fetch this
+    /// — so a model told "every statement resting on a source must carry that source's
+    /// number" would either invent a number for the picture or refuse to mention it.
+    /// Neither is what the user wanted when they attached it.
+    ///
+    /// The citation rule is untouched: no URLs, no invented numbers. This adds one
+    /// permitted way to refer to something, by the name it was attached under.
+    static let attachments = """
+        ATTACHMENTS. The user may attach images or files to a question. These are not         numbered evidence and have no citation number: they came from the user, not         from a search. Refer to one by its name — "in diagram.png" — or simply as what         it is. Never give an attachment a bracketed number, and never treat the absence         of a number as a reason not to use it. An attached file's text appears in the         payload under "attachments"; an attached image is supplied with this message.         If the user refers to an attachment that is not present in this turn, say so         and ask them to attach it again rather than guessing at its contents.
+        """
+
     static let jsonOnly = """
 
         Return only a single JSON object. No markdown fences, no commentary before or \
@@ -109,7 +124,17 @@ enum ResearchPrompts {
     /// has already read by the time this call is made. Conditional rather than always
     /// present because a prompt that describes a "linked_pages" key the payload does not
     /// carry invites the model to go looking for one, and to explain its absence.
-    static func plan(maxSearches: Int, today: String, hasLinkedPages: Bool = false) -> String {
+    static func plan(maxSearches: Int, today: String, hasLinkedPages: Bool = false,
+                     hasAttachments: Bool = false) -> String {
+        // Only when there is one. A standing sentence about attachments on every turn
+        // would be a standing invitation to plan searches about a file nobody sent.
+        let attached = hasAttachments
+            ? " The user attached something to this question — an image is supplied with "
+                + "this message, and any attached text is in the payload under "
+                + "\"attachments\". Read it first: it usually says what to search for, "
+                + "and searching for the question's words while ignoring it is the "
+                + "commonest way to plan the wrong searches."
+            : ""
         let linked = hasLinkedPages ? """
 
 
@@ -136,7 +161,7 @@ enum ResearchPrompts {
         return """
         \(trust)
 
-        TASK: plan the web searches needed to answer the user's question with evidence.\(linked)
+        TASK: plan the web searches needed to answer the user's question with evidence.\(linked)\(attached)
 
         Work out which factual questions the answer actually depends on, then plan up \
         to \(maxSearches) searches that would resolve them — as few as settle the \
@@ -196,6 +221,8 @@ enum ResearchPrompts {
         The numbered evidence is this turn's alone: earlier answers in the thread are \
         supplied without their citations, and nothing from an earlier turn may be \
         cited unless it appears in the evidence supplied now.
+
+        \(attachments)
 
         Where sources conflict, say so and attribute each side to its number. Do not \
         average them into a false consensus. Where a search summary is too thin to \
@@ -277,6 +304,8 @@ enum ResearchPrompts {
         confidence is high, where it is low, and what would need checking against a \
         live source. If the question turns on a fact that changes over time, say that \
         the answer may be stale and what to verify.
+
+        \(attachments)
 
         Style: markdown. Lead with the answer. Short paragraphs. No preamble, no padding.
         """

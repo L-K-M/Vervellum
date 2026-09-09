@@ -209,6 +209,11 @@ enum TurnNotice: String, Codable, Equatable {
     /// necessarily the *selected* provider: a turn can move on twice, and the second
     /// failure is a spare's. The turn's `model` is the one that actually answered.
     case modelFellBack
+    /// An image was attached, but the provider that answered was not configured to be
+    /// shown images — so it answered from the question's words alone. Said out loud
+    /// because an answer that ignores the picture, with nothing explaining why, reads as
+    /// a model that looked and did not understand.
+    case imagesNotSent
     /// A notice written by a newer build that this one does not know. Kept rather than
     /// failing the whole document: a `notices` array that refused to decode used to make
     /// an older build start from an empty library and overwrite the newer file.
@@ -277,6 +282,14 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     var askedAt: Date
     var stage: ResearchStage = .queued
 
+    /// What the user attached to the question, as records rather than bytes — see
+    /// `Attachment` for why the pictures live beside the thread instead of in it.
+    ///
+    /// Kept on the turn so a reopened thread can still show what was attached, and so a
+    /// copied transcript can say so. Not re-sent: `ResearchContext` puts the *names* into
+    /// the history it hands the model and nothing else, because an attachment is sent on
+    /// the turn it belongs to and on no other.
+    var attachments: [Attachment] = []
     /// One sentence stating how the model read the question.
     var reading: String = ""
     var searches: [PlannedSearch] = []
@@ -365,7 +378,7 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     // could not have protected it either way: the decoder zeroes it, so the test passes
     // whether or not the key is written.
     enum CodingKeys: String, CodingKey {
-        case id, question, askedAt, stage, reading, searches, searchesCompleted, sources
+        case id, question, askedAt, attachments, stage, reading, searches, searchesCompleted, sources
         case pagesAttempted, pagesRead
         case answer, findings, limitations, followups, notices, failure, duration, model
     }
@@ -375,6 +388,7 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         id = try container.decode(UUID.self, forKey: .id)
         question = try container.decode(String.self, forKey: .question)
         askedAt = try container.decode(Date.self, forKey: .askedAt)
+        attachments = try container.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
         stage = try container.decode(ResearchStage.self, forKey: .stage)
         reading = try container.decode(String.self, forKey: .reading)
         searches = try container.decode([PlannedSearch].self, forKey: .searches)

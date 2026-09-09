@@ -30,21 +30,28 @@ final class ResearchRunnerTests: XCTestCase {
 
     private func settings(pageReading: PageReadingMode = .direct,
                           searchKind: SearchProviderKind = .searxng,
-                          searchEndpoint: String = ResearchRunnerTests.searchEndpoint) -> ProviderSettings {
-        ProviderSettings(modelEndpoint: Self.modelEndpoint,
-                         modelName: "test-model",
-                         searchEndpoint: searchEndpoint,
-                         searchKind: searchKind,
-                         pageReading: pageReading)
+                          searchEndpoint: String = ResearchRunnerTests.searchEndpoint,
+                          sendsImages: Bool = false) -> ProviderSettings {
+        var settings = ProviderSettings(modelEndpoint: Self.modelEndpoint,
+                                        modelName: "test-model",
+                                        searchEndpoint: searchEndpoint,
+                                        searchKind: searchKind,
+                                        pageReading: pageReading)
+        for index in settings.modelProfiles.indices {
+            settings.modelProfiles[index].sendsImages = sendsImages
+        }
+        return settings
     }
 
     private func environment(pageReading: PageReadingMode = .direct,
                              searchKind: SearchProviderKind = .searxng,
-                             searchEndpoint: String = ResearchRunnerTests.searchEndpoint)
+                             searchEndpoint: String = ResearchRunnerTests.searchEndpoint,
+                             sendsImages: Bool = false)
         -> ResearchRunner.Environment {
         ResearchRunner.Environment(settings: settings(pageReading: pageReading,
                                                       searchKind: searchKind,
-                                                      searchEndpoint: searchEndpoint),
+                                                      searchEndpoint: searchEndpoint,
+                                                      sendsImages: sendsImages),
                                    modelKey: "model-key", searchKey: nil)
     }
 
@@ -54,16 +61,22 @@ final class ResearchRunnerTests: XCTestCase {
                      searchKind: SearchProviderKind = .searxng,
                      searchEndpoint: String = ResearchRunnerTests.searchEndpoint,
                      transport: StubTransport,
-                     commandRunner: StubCommandRunner = StubCommandRunner { _ in .unrouted })
+                     commandRunner: StubCommandRunner = StubCommandRunner { _ in .unrouted },
+                     sendsImages: Bool = false,
+                     attachments: [Attachment] = [],
+                     attachmentBytes: @escaping (Attachment) -> Data? = { _ in nil })
         async -> ResearchTurn {
         let runner = ResearchRunner(environment: environment(pageReading: pageReading,
                                                              searchKind: searchKind,
-                                                             searchEndpoint: searchEndpoint),
+                                                             searchEndpoint: searchEndpoint,
+                                                             sendsImages: sendsImages),
                                     trace: ResearchTrace(sink: SilentLog()),
                                     transport: transport,
-                                    commandRunner: commandRunner)
-        return await runner.run(ResearchTurn(question: question), mode: mode,
-                                history: [], onUpdate: { _ in })
+                                    commandRunner: commandRunner,
+                                    attachmentBytes: attachmentBytes)
+        var turn = ResearchTurn(question: question)
+        turn.attachments = attachments
+        return await runner.run(turn, mode: mode, history: [], onUpdate: { _ in })
     }
 
     /// The stage a chat-completions request belongs to, read off its system prompt.
@@ -368,6 +381,92 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(turn.pagesRead, 0)
         XCTAssertTrue(transport.calls.allSatisfy { $0.kind != .fetch },
                       "nothing may be fetched: \(transport.trail)")
+    }
+
+    // MARK: Attachments
+
+    private static let image = Attachment(kind: .image, name: "shot.png",
+                                          mediaType: "image/png", byteCount: 4)
+
+    /// A `/direct` turn with an image, on a provider configured to be shown one: the
+    /// picture reaches the request as an inline data URL beside the question's text.
+    func testAnAttachedImageIsSentToAProviderThatTakesOne() async throws {
+        let transport = StubTransport { call in
+            call.kind == .stream ? .stream(["It is a screenshot of a stack trace."]) : .unrouted
+        }
+
+        let turn = await run("What is this?", mode: .direct, transport: transport,
+                             sendsImages: true, attachments: [Self.image],
+                             attachmentBytes: { _ in Data([0x89, 0x50, 0x4E, 0x47]) })
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertFalse(turn.notices.contains(.imagesNotSent))
+
+        let body = try XCTUnwrap(transport.calls.first?.body)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        let parts = try XCTUnwrap(messages.last?["content"] as? [[String: Any]])
+        XCTAssertEqual(parts.first?["type"] as? String, "text")
+        XCTAssertEqual((parts.last?["image_url"] as? [String: Any])?["url"] as? String,
+                       "data:image/png;base64,iVBORw==")
+    }
+
+    /// The same turn on a provider nobody said has eyes. The question still gets an
+    /// answer — a request carrying an image part would have been rejected outright — and
+    /// the turn says the picture was left out, because an answer that ignores it with
+    /// nothing explaining why reads as a model that looked and did not understand.
+    func testAnImageIsWithheldFromAProviderThatCannotSeeAndTheTurnSaysSo() async throws {
+        let transport = StubTransport { call in
+            call.kind == .stream ? .stream(["I cannot see the attachment."]) : .unrouted
+        }
+
+        let turn = await run("What is this?", mode: .direct, transport: transport,
+                             sendsImages: false, attachments: [Self.image],
+                             attachmentBytes: { _ in Data([0x89, 0x50, 0x4E, 0x47]) })
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertTrue(turn.notices.contains(.imagesNotSent), "notices: \(turn.notices)")
+
+        // And the request is the shape it was before this feature existed.
+        let body = try XCTUnwrap(transport.calls.first?.body)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        XCTAssertNotNil(messages.last?["content"] as? String,
+                        "an image-less request must still send a plain string")
+    }
+
+    /// An attached text file is inlined into the payload, so a model with no eyes at all
+    /// can still read it — and the provider's image flag has nothing to do with it.
+    func testAnAttachedTextFileIsInlinedForAnyProvider() async throws {
+        let transport = StubTransport { call in
+            call.kind == .stream ? .stream(["The log shows a timeout."]) : .unrouted
+        }
+        let note = Attachment(kind: .text, name: "log.txt", mediaType: "text/plain", byteCount: 12)
+
+        let turn = await run("What failed?", mode: .direct, transport: transport,
+                             sendsImages: false, attachments: [note],
+                             attachmentBytes: { _ in Data("read timeout".utf8) })
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertFalse(turn.notices.contains(.imagesNotSent), "a text file is not an image")
+        let content = try XCTUnwrap(transport.calls.first?.userContent)
+        XCTAssertTrue(content.contains("read timeout"), content)
+        XCTAssertTrue(content.contains("log.txt"), content)
+    }
+
+    /// Bytes that are gone — a library copied without its attachments folder — are not a
+    /// failed turn. The question is still a question.
+    func testAnAttachmentWhoseBytesAreGoneDoesNotFailTheTurn() async throws {
+        let transport = StubTransport { call in
+            call.kind == .stream ? .stream(["Answering from the words alone."]) : .unrouted
+        }
+
+        let turn = await run("What is this?", mode: .direct, transport: transport,
+                             sendsImages: true, attachments: [Self.image],
+                             attachmentBytes: { _ in nil })
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        let body = try XCTUnwrap(transport.calls.first?.body)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        XCTAssertNotNil(messages.last?["content"] as? String)
     }
 
     // MARK: Links in the question
