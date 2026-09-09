@@ -73,9 +73,27 @@ final class AttachmentStoreTests: XCTestCase {
     }
 
     /// Sweeping a directory that was never created is a no-op rather than a crash — the
-    /// state every library starts in.
+    /// state every library starts in, and one a sweep must not quietly leave.
     func testSweepingAnAbsentDirectoryDoesNothing() {
         XCTAssertEqual(AttachmentStore(directory: directory).sweep(keeping: []), 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path),
+                       "sweeping an absent directory created it")
+    }
+
+    /// Re-attaching under an id that already has bytes replaces them. The path a retaken
+    /// screenshot follows, and the one where a write that appended — or refused — would
+    /// send the model something other than what the panel is showing.
+    func testWritingAgainForTheSameIdReplacesTheBytes() throws {
+        let store = AttachmentStore(directory: directory)
+        let attachment = record()
+        try store.write(Data([1, 2, 3]), for: attachment)
+        try store.write(Data([9]), for: attachment)
+
+        XCTAssertEqual(store.data(for: attachment), Data([9]))
+        // And nothing is left over from the first write: the staged copy is moved into
+        // place, never left beside it.
+        let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        XCTAssertEqual(names, [attachment.id.uuidString])
     }
 
     func testErasingRemovesEverything() throws {

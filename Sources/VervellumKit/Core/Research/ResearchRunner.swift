@@ -390,8 +390,12 @@ final class ResearchRunner: ResearchRunning {
         // fire on. `unavailable` rather than an absent entry, because "there was a file
         // called this and you cannot see it" is the fact worth carrying.
         for name in lost { payload.append(["name": name, "unavailable": "yes"]) }
-        trace.log("Attachments: \(images.count) image(s), "
-                  + "\(payload.count - lost.count) text file(s)"
+        // Counted, not derived. `payload.count - lost.count` was right only because the
+        // loop above appends the lost names into `payload`, and nothing said so — a
+        // third kind of entry would have made the log quietly wrong, in the one place
+        // somebody looks to find out why their file was ignored.
+        let sentText = payload.filter { $0["text"] != nil }.count
+        trace.log("Attachments: \(images.count) image(s), \(sentText) text file(s)"
                   + (lost.isEmpty ? "" : ", \(lost.count) that could not be sent"))
         if !lost.isEmpty { update { $0.addNotice(.attachmentMissing) } }
         return (payload, images)
@@ -514,6 +518,11 @@ final class ResearchRunner: ResearchRunning {
 
         // 2 — plan.
         var planExtra: [String: Any] = ["search_tool": search.toolDescriptor]
+        // The whole text, not an excerpt as `linked_pages` gets. A linked page is
+        // arbitrarily long and was fetched on the model's behalf; an attachment was
+        // already truncated to `maxTextCharacters` when it was stored, and it is usually
+        // the thing the question is *about* — a planner given half a log plans searches
+        // for the half it saw.
         if !attachments.payload.isEmpty { planExtra["attachments"] = attachments.payload }
         if !linked.isEmpty {
             // Excerpts, not the pages. This call chooses queries and cites nothing, so
@@ -545,6 +554,14 @@ final class ResearchRunner: ResearchRunning {
             // is very often what the question is *about*, and planning searches from the
             // words alone is the commonest way to search for the wrong thing.
             let images = chat.sendsImages ? planImages : []
+            // Said in the trace, because the turn's own notice is raised by the answer
+            // stage: a plan made without the screenshot, on a chain that fell back to a
+            // provider with no eyes, otherwise looks in the log exactly like a plan made
+            // with it.
+            if !planImages.isEmpty, images.isEmpty {
+                self.trace.log("Plan: \(planImages.count) image(s) withheld — "
+                               + "this provider is not set to be sent images")
+            }
             let object = try await chat.completeJSON(
                 system: ResearchPrompts.plan(maxSearches: Self.maxSearches, today: today,
                                              hasLinkedPages: !linked.isEmpty,

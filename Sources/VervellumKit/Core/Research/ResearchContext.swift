@@ -24,6 +24,11 @@ enum ResearchContext {
 
     private static let maxHistoricDomains = 8
     private static let maxHistoricFindings = 5
+    /// How many attachment names one historic turn contributes. The intake caps a
+    /// question at four, so this only binds a turn written by another build — but every
+    /// other list here is bounded, and an unbounded one is the kind of thing that grows
+    /// every later turn's context without anybody noticing.
+    private static let maxHistoricAttachments = 8
     private static let jsonArrayBoundaryBytes = 2
     private static let jsonSeparatorBytes = 1
 
@@ -108,7 +113,7 @@ enum ResearchContext {
         // record of ever seeing. This is what lets it answer "you attached a screenshot
         // earlier; attach it again and I can look" instead of contradicting the user.
         if !turn.attachments.isEmpty {
-            entry["attached"] = turn.attachments.map(\.name)
+            entry["attached"] = Array(turn.attachments.prefix(maxHistoricAttachments).map(\.name))
         }
         return (entry, answer.count > maxHistoricAnswerCharacters
                 || domains.count > maxHistoricDomains || unsettled.count > maxHistoricFindings)

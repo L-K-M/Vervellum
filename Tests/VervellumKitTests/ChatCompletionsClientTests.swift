@@ -238,6 +238,10 @@ final class ChatCompletionsClientTests: XCTestCase {
         let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
         let parts = try XCTUnwrap(messages.last?["content"] as? [[String: Any]])
 
+        // The *system* message stays a plain string. A build that array-ified every
+        // message when images were present would pass every other assertion here and
+        // still 400 on the string-only servers this shape exists for.
+        XCTAssertEqual(messages.first?["content"] as? String, "s")
         XCTAssertEqual(parts.count, 3)
         XCTAssertEqual(parts[0]["type"] as? String, "text")
         XCTAssertEqual(parts[0]["text"] as? String, "u")

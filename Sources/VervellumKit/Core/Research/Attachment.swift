@@ -27,7 +27,9 @@ struct Attachment: Codable, Equatable, Identifiable {
     enum Kind: String, Codable {
         case image
         case text
-        /// A kind this build does not know. Never written; only decoded.
+        /// A kind this build does not know. `make` never produces one; a decoded
+        /// `.other` is written back as `"other"` if the thread is saved again, which is
+        /// what keeps a newer build's attachment intact through an older build's save.
         case other
 
         init(from decoder: Decoder) throws {
@@ -56,7 +58,11 @@ struct Attachment: Codable, Equatable, Identifiable {
 
     // MARK: Limits
 
-    /// The largest image that may be attached, before base64.
+    /// The largest attachment of any kind, before base64.
+    ///
+    /// Named for the image because that is the case the number was chosen against, but
+    /// it gates text too — a screenshot and a pasted log go down the same pipe into the
+    /// same context window, and one ceiling is the honest way to say so.
     ///
     /// Chosen against what happens next rather than against what a disk can hold: the
     /// bytes are base64-encoded into a JSON request body, which costs a third again, and
@@ -98,7 +104,11 @@ struct Attachment: Codable, Equatable, Identifiable {
         }
         let riff: [UInt8] = [0x52, 0x49, 0x46, 0x46]   // "RIFF"
         let webp: [UInt8] = [0x57, 0x45, 0x42, 0x50]   // "WEBP"
-        if data.count >= 12, data.starts(with: riff), Array(data[8..<12]) == webp {
+        // `prefix`/`suffix` rather than `data[8..<12]`: a `Data` handed over as a slice
+        // of a bigger buffer keeps the parent's indices, so the absolute range would
+        // read the wrong four bytes — or trap. `starts(with:)` was already index-safe.
+        if data.count >= 12, data.starts(with: riff),
+           Array(data.prefix(12).suffix(4)) == webp {
             return "image/webp"
         }
         return nil

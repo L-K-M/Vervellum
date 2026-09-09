@@ -96,7 +96,8 @@ final class AttachmentTests: XCTestCase {
         XCTAssertTrue(reason.message.contains("shot.png"), reason.message)
         XCTAssertTrue(reason.message.contains("MB"), reason.message)
 
-        // And the byte below the cap is fine, so the boundary is the documented one.
+        // And a file of exactly the cap is fine — `png()` adds an eight-byte header — so
+        // the boundary pinned here is the inclusive one the guard actually implements.
         let exact = png(Attachment.maxImageBytes - 8)
         XCTAssertEqual(exact.count, Attachment.maxImageBytes)
         XCTAssertNoThrow(try Attachment.make(from: exact, name: "shot.png").get())

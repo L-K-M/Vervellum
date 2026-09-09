@@ -68,18 +68,43 @@ final class AttachmentStore {
     ///
     /// The directory's mode is the one that has to hold, and it is set as the directory
     /// is created rather than fixed afterwards — nothing inside a `0700` directory is
-    /// reachable by another user whatever its own mode says. The file's `0600` is
-    /// defence in depth and is applied after the atomic write, because `Data.write` has
-    /// no way to take a mode; a failure to apply it does not fail the write, exactly as
-    /// in `ThreadArchive`, because a volume that cannot chmod is a poor reason to lose
-    /// the user's file. `AttachmentStoreTests` pins both modes so a regression is loud.
+    /// reachable by another user whatever its own mode says.
+    ///
+    /// The file's `0600` is applied *before* it is reachable under its own name, which
+    /// is why the bytes go to a temporary name first: `Data.write` takes no mode, so a
+    /// chmod after the write would leave the file at the umask's default — usually
+    /// `0644` — at its final path for as long as the two calls take. Inside a `0700`
+    /// directory nobody could open it in that window, but a directory that pre-dates
+    /// this feature, or one a sync tool recreated, is not one this code created. Doing
+    /// it in this order means the promise does not rest on the directory being right.
+    ///
+    /// The chmod itself is still best-effort, exactly as in `ThreadArchive`: a volume
+    /// that cannot chmod is a poor reason to lose the user's file.
+    /// `AttachmentStoreTests` pins both modes so a regression is loud.
     func write(_ data: Data, for attachment: Attachment) throws {
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true,
                                         attributes: [.posixPermissions: 0o700])
-        let destination = url(for: attachment.id)
-        try data.write(to: destination, options: [.atomic])
+        // A UUID name, so a crash between the write and the move leaves something the
+        // sweep already understands: unreferenced, and removed once it is old enough.
+        let staged = url(for: UUID())
+        try data.write(to: staged, options: [.atomic])
         try? fileManager.setAttributes([.posixPermissions: 0o600],
-                                       ofItemAtPath: destination.path)
+                                       ofItemAtPath: staged.path)
+        let destination = url(for: attachment.id)
+        do {
+            // Removed first because `moveItem` refuses an occupied destination. The gap
+            // is between two writes of the same attachment, which is the "retaken
+            // screenshot" case and not one anything can be reading through.
+            if fileManager.fileExists(atPath: destination.path) {
+                try fileManager.removeItem(at: destination)
+            }
+            try fileManager.moveItem(at: staged, to: destination)
+        } catch {
+            // Never leave the staged copy behind on a failure: it is bytes of the user's
+            // file under a name no turn will ever mention.
+            try? fileManager.removeItem(at: staged)
+            throw error
+        }
     }
 
     /// The bytes for `attachment`, or nil when they are gone.

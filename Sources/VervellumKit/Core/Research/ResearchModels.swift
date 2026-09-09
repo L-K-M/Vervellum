@@ -283,8 +283,8 @@ enum TurnNotice: String, Codable, Equatable {
                 + "kind."
         case .imagesNotSent:
             return "An image was attached, but the model that answered is not set to be sent "
-                + "images, so it answered from the question's words alone. Turn on "
-                + "\"Send images\" for that provider in Settings to have it look."
+                + "images, so it answered without seeing it. Turn on \"Send images\" for "
+                + "that provider in Settings to have it look."
         case .unknown:
             return "This turn carries a note recorded by a newer version of Vervellum."
         }
