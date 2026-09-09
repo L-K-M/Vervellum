@@ -403,7 +403,22 @@ dependency tree would end that.
 - **Don't** add dependencies; prefer system frameworks.
 - **Don't** run the assessment stage in parallel with the answer stage. It does not
   depend on the prose, so it looks like free latency — but assessing the answer that
-  was *actually written* is the whole reason the verdict table can be trusted.
+  was *actually written* is the whole reason the verdict table can be trusted. The
+  revision stage sits *after* the assessment for the other half of the same reason: a
+  correction made against a check that has actually run. That ordering is what makes
+  the findings describe the draft rather than the prose above them, which is why
+  `draftAnswer` is kept and a notice says which is which.
+- **Don't** widen what sends an answer back for revision. `contradicted` and `mixed`
+  are the answer being wrong about the evidence in front of it; `insufficient` is a
+  hedge the answer prompt asks for, and triggering on it would put a second long model
+  call on nearly every turn. The reviser is shown those findings; it is not woken by
+  one.
+- **Don't** let a revision reach the screen unvalidated. It arrives after the citation
+  validation the reader's trust in `[n]` rests on, so it is checked *before* it is
+  accepted and dropped whole if it invents a number or writes a URL. A failed or
+  discarded revision must leave the answer exactly as the assessment left it — the
+  prose has already been streamed and read, and losing it to a bad rewrite is the
+  worst outcome available there.
 - **Don't** make the panel dismiss on focus loss by default. A run takes tens of
   seconds and the answer is meant to be read while working. The preference exists for
   people who want the Spotlight feel, and even then a run in flight keeps the panel up.

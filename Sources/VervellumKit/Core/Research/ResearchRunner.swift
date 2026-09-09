@@ -780,6 +780,135 @@ final class ResearchRunner: ResearchRunning {
         }
         trace.log("Assessment: \(assessment.findings.count) findings in "
                   + String(format: "%.1fs", trace.elapsed))
+        try Task.checkCancellation()
+
+        // 6 — revise, only when the check found something worth correcting.
+        try await revise(answer: answer, findings: assessment.findings, evidence: evidence,
+                         sources: sources, question: question, history: history,
+                         today: today, reading: plan.reading, chain: chain)
+    }
+
+    /// Whether a verdict sends the answer back for correction.
+    ///
+    /// `contradicted` is a factual error in prose the reader has already read, and
+    /// `mixed` is a claim stated more firmly than the sources will carry — both are the
+    /// answer being wrong about the evidence in front of it.
+    ///
+    /// `insufficient` is not one, and that is the whole difference between a stage that
+    /// runs occasionally and one that runs on nearly every turn. "The evidence does not
+    /// settle this" is a normal, correct thing for an answer to contain — the answer
+    /// prompt asks for exactly that hedge — so a finding of it is usually the check
+    /// agreeing with the answer rather than catching it out. The reviser is still *shown*
+    /// those findings, because a sentence it is already rewriting may need weakening on
+    /// the same grounds; it just will not be woken for one.
+    ///
+    /// A switch rather than a set, so a sixth verdict cannot be added without someone
+    /// deciding which side of this line it falls on.
+    static func warrantsRevision(_ verdict: Verdict) -> Bool {
+        switch verdict {
+        case .contradicted, .mixed: return true
+        case .supported, .insufficient, .opinion: return false
+        }
+    }
+
+    /// Rewrites the answer against the findings, when there are findings worth rewriting
+    /// for.
+    ///
+    /// Ordered after the assessment rather than folded into it, which is the only order
+    /// that keeps both halves honest: the check grades the answer that was actually
+    /// written, and the correction is made against a check that has actually run. The
+    /// cost is that the findings on screen describe the draft rather than the prose above
+    /// them — so the draft is kept in `draftAnswer`, and a notice says which is which.
+    ///
+    /// Everything here fails soft. A revision that does not arrive, comes back empty, or
+    /// breaks the citation rule leaves the turn exactly as the assessment left it: the
+    /// draft on screen, the findings that grade it below, and a notice saying the
+    /// correction did not land. The answer has already been streamed and read, and losing
+    /// it to a failed rewrite is the worst outcome available here. Cancellation still
+    /// propagates, because a Stop is a Stop.
+    private func revise(answer: String,
+                        findings: [Finding],
+                        evidence: [[String: Any]],
+                        sources: [Source],
+                        question: String,
+                        history: [ResearchTurn],
+                        today: String,
+                        reading: String,
+                        chain: ModelChain) async throws {
+        let revisable = findings.filter { Self.warrantsRevision($0.verdict) }
+        guard !revisable.isEmpty else { return }
+
+        // Every finding the check left unsettled, not only the ones that triggered this.
+        // The trigger decides whether the call is worth making; once it is being made,
+        // the reviser should see the whole of what the check was unsure about.
+        let unsettled = findings
+            .filter { $0.verdict != .supported && $0.verdict != .opinion }
+            .map { finding -> [String: Any] in
+                ["claim": finding.claim,
+                 "verdict": finding.verdict.rawValue,
+                 "reasoning": finding.reasoning,
+                 "sources": finding.sourceNumbers]
+            }
+        trace.log("Revising: \(revisable.count) claim(s) the evidence does not carry")
+        update { $0.isRevising = true }
+        // Cleared on every path out, including the ones that keep the draft: a label
+        // saying a request is outstanding must not outlive the request.
+        defer { update { $0.isRevising = false } }
+
+        let context = ResearchContext.assemble(
+            question: question, history: history, today: today,
+            extra: ["answer": answer, "evidence": evidence,
+                    "reading": reading, "findings": unsettled])
+        if context.trimmed { update { $0.addNotice(.contextTrimmed) } }
+
+        let revised: String
+        do {
+            revised = try await chain.perform("Revise") { chat in
+                // Streamed for the reason every long call here is — a provider that dies
+                // halfway is retried — but into nothing. The draft stays on screen until
+                // the whole correction has arrived and been checked, because text that
+                // rewrites itself under a reader mid-paragraph is worse than text that
+                // changes once.
+                try await chat.streamText(system: ResearchPrompts.revise,
+                                          payload: context.payload, label: "Revise") { _ in }
+            }
+        } catch let error as ResearchError where error != ResearchError.cancelled && !Task.isCancelled {
+            trace.warn("Revision unavailable: \(error.message)")
+            update { $0.addNotice(.revisionUnavailable) }
+            return
+        }
+
+        let trimmed = revised.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            // A reply with nothing in it is a call that failed and happened to return.
+            trace.warn("Revision unavailable: the reply was empty")
+            update { $0.addNotice(.revisionUnavailable) }
+            return
+        }
+        guard trimmed != answer.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            // The reviser read the findings and judged that none of them warranted a
+            // change, which is a real answer and not a failure — and not a revision
+            // either. Nothing is said, because nothing happened.
+            trace.log("Revision returned the answer unchanged")
+            return
+        }
+        // The citation rule is not advice here. A correction that invents a source
+        // number, or writes a URL the answer stage would have been refused, is a worse
+        // answer than the one it replaces — and it would arrive *after* the validation
+        // the reader's trust in these numbers rests on. So it is checked before it is
+        // accepted, and dropped whole rather than swapped in and annotated.
+        let validation = CitationValidator.validate(answer: trimmed, sourceCount: sources.count)
+        guard validation.outOfRangeCitations.isEmpty, validation.literalURLs.isEmpty else {
+            trace.warn("Revision discarded: it broke the citation rule")
+            update { $0.addNotice(.revisionUnavailable) }
+            return
+        }
+        update { turn in
+            turn.draftAnswer = answer
+            turn.answer = trimmed
+            turn.addNotice(.answerRevised)
+        }
+        trace.log("Revised the answer in " + String(format: "%.1fs", trace.elapsed))
     }
 
     /// How much of a linked page the *planner* is shown. The answer sees the whole

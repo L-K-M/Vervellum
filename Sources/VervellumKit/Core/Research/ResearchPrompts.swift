@@ -259,6 +259,62 @@ enum ResearchPrompts {
         \(jsonOnly)
         """
 
+    // MARK: Stage 4 — revise
+
+    /// Rewrites an answer against the findings that grade it.
+    ///
+    /// Only reached when the check found a claim the evidence contradicts or only
+    /// half-supports, so most turns never pay for this call. What it is allowed to do is
+    /// deliberately narrow: the answer has already been read, and a rewrite that took
+    /// the opportunity to restructure would replace prose the reader has under their eyes
+    /// with prose they have to start again. It corrects what the findings name, and
+    /// leaves everything else alone.
+    ///
+    /// The citation rule is repeated in full rather than referenced. This call produces
+    /// text that goes straight onto the screen, so it is exactly as bound by the rule as
+    /// the answer stage — and a prompt that said "the same rules as before" would be
+    /// relying on a message this model was never sent.
+    static let revise = """
+        \(trust)
+
+        TASK: correct an answer you are given, against a check that has already been run \
+        on it. You are shown the question, the numbered evidence the answer was written \
+        from, the answer itself, and the findings — claims the check judged \
+        "contradicted" (the evidence says otherwise), "mixed" (the sources disagree, or \
+        back it only in part) or "insufficient" (the evidence does not settle it).
+
+        WHAT TO CHANGE. Only the sentences the findings name. Every other sentence must \
+        come back word for word, with its citations intact. This is a correction, not a \
+        rewrite: the reader has already read this answer, and prose that reshuffles under \
+        them costs more than it fixes.
+
+        HOW TO CHANGE IT. A contradicted claim is replaced by what the evidence actually \
+        says, cited. A mixed claim is attributed — say which sources take which side, \
+        rather than averaging them. An insufficient claim is weakened to what the \
+        evidence supports, or kept and visibly marked as unsettled. Never trade an \
+        overstated claim for a different confident one: correcting means saying less, or \
+        saying it with its source, never inventing a replacement the evidence does not \
+        carry. If a finding is wrong — the answer does not make that claim, or the cited \
+        evidence does support it — leave that sentence exactly as it is.
+
+        CITATION RULE — absolute, exactly as it was for the answer. You may not write a \
+        URL, a bare domain, or a markdown link anywhere. Refer to evidence only by its \
+        number in square brackets: [1], or [2, 5] for several. Every statement that rests \
+        on a source must carry that source's number, and only numbers that appear in the \
+        evidence supplied here. A bracketed number inside code, fenced or inline, is code \
+        and is not a citation.
+
+        Do not mention the check, the findings, or the fact that anything was revised. \
+        Do not add a note about what changed. The answer must read as though it had been \
+        written this way — the interface says a revision happened, and saying it twice \
+        inside the prose is the answer talking about itself instead of the question.
+
+        Return the complete corrected answer as markdown and nothing else: no preamble, \
+        no explanation, no fences around the whole of it. Same language as the answer you \
+        were given, same style. If nothing in the findings warrants a change, return the \
+        answer unchanged.
+        """
+
     // MARK: Direct mode
 
     /// Used by `/direct`, which deliberately skips search. The badge in the UI says
