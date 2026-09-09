@@ -116,7 +116,10 @@ enum ResearchContext {
             entry["attached"] = Array(turn.attachments.prefix(maxHistoricAttachments).map(\.name))
         }
         return (entry, answer.count > maxHistoricAnswerCharacters
-                || domains.count > maxHistoricDomains || unsettled.count > maxHistoricFindings)
+                || domains.count > maxHistoricDomains || unsettled.count > maxHistoricFindings
+                // Names drop off the end like everything else here, and a caller told the
+                // entry is whole would have no way to know some went missing.
+                || turn.attachments.count > maxHistoricAttachments)
     }
 
     /// The evidence block, trimmed to `maxEvidenceCharacters` by dropping the

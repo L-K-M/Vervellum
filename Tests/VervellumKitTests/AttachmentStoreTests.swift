@@ -127,6 +127,23 @@ final class AttachmentStoreTests: XCTestCase {
         XCTAssertEqual(folder[.posixPermissions] as? NSNumber, 0o700)
     }
 
+    /// A directory this code did not create keeps whatever mode it was made with, because
+    /// `createDirectory` applies its attributes only when it creates something. The
+    /// staged write leans on the parent being closed, so a directory left behind by an
+    /// older build or recreated by a sync tool would leave every staged copy readable in
+    /// the window before it is chmod'ed — which is the exposure the staging order was
+    /// arranged to remove.
+    func testADirectoryThisCodeDidNotCreateIsTightenedAnyway() throws {
+        let manager = FileManager.default
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true,
+                                    attributes: [.posixPermissions: 0o755])
+
+        try AttachmentStore(directory: directory).write(Data([1, 2, 3]), for: record())
+
+        let folder = try manager.attributesOfItem(atPath: directory.path)
+        XCTAssertEqual(folder[.posixPermissions] as? NSNumber, 0o700)
+    }
+
     /// The one way a sweep could destroy something: bytes written for a question that
     /// has not been saved yet, so its id cannot be in the set the sweep is given. Another
     /// process reading the library a moment earlier would see them as unreachable. Too

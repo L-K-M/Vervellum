@@ -350,12 +350,18 @@ final class ThreadArchive {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         var loaded = Loaded()
-        let candidates = [url, url.appendingPathExtension("bak")].compactMap { candidate -> (URL, Data)? in
+        // One expression for the backup's name, read by both the loader and the presence
+        // test below. Written twice they agreed today and would have disagreed silently
+        // the day one of them moved — and a `.bak` the presence test could not see would
+        // report an unreadable library as "nothing stored", which is the one answer that
+        // lets a sweep delete what it still names.
+        let backup = url.appendingPathExtension("bak")
+        let candidates = [url, backup].compactMap { candidate -> (URL, Data)? in
             guard let data = fileManager.contents(atPath: candidate.path) else { return nil }
             return (candidate, data)
         }
         loaded.fileExisted = fileManager.fileExists(atPath: url.path)
-            || fileManager.fileExists(atPath: url.appendingPathExtension("bak").path)
+            || fileManager.fileExists(atPath: backup.path)
         // Inspect both stamps before adopting either file; rotation can erase a newer backup.
         for (_, data) in candidates {
             if let stamp = try? decoder.decode(VersionStamp.self, from: data),

@@ -276,6 +276,13 @@ final class ChatCompletionsClientTests: XCTestCase {
         let content = try XCTUnwrap(messages.last?["content"] as? String,
                                     "an image reached a provider that has no eyes")
         XCTAssertTrue(content.contains("\"q\""), "the question was lost: \(content)")
+        // The whole request, not only the message asserted above: the failure this test
+        // exists to prevent could return through a change of *placement* — an image part
+        // moved into the system message, or an extra message appended — and the check
+        // above is blind to exactly that.
+        let whole = try JSONSerialization.data(withJSONObject: body)
+        XCTAssertFalse(String(decoding: whole, as: UTF8.self).contains("image_url"),
+                       "an image reached a provider with no eyes")
     }
 
     /// And the same client with the flag on sends it, so the guard above is a filter

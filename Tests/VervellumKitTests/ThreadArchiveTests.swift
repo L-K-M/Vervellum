@@ -185,6 +185,9 @@ final class ThreadArchiveTests: XCTestCase {
     /// launch does. Reading that as "nothing was ever stored" is what would let the
     /// launch sweep delete the attachments the unread document still names.
     func testALibraryThatIsThereButCannotBeReadIsNotTrustworthy() throws {
+        // Anything left at the path first: a file from an earlier test would make this
+        // throw before its own assertions ran, and the error would name the wrong thing.
+        try? FileManager.default.removeItem(at: fileURL)
         try FileManager.default.createDirectory(at: fileURL, withIntermediateDirectories: false)
 
         let archive = ThreadArchive(fileURL: fileURL, debounce: 0)

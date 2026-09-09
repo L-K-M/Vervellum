@@ -100,7 +100,17 @@ final class AttachmentTests: XCTestCase {
         // the boundary pinned here is the inclusive one the guard actually implements.
         let exact = png(Attachment.maxImageBytes - 8)
         XCTAssertEqual(exact.count, Attachment.maxImageBytes)
-        XCTAssertNoThrow(try Attachment.make(from: exact, name: "shot.png").get())
+        // The happy path, said out loud. `XCTAssertNoThrow` proved only that nothing
+        // threw — a regression that classified an accepted image as text, stamped the
+        // wrong media type, or recorded the wrong size would have shipped green through
+        // it, and this is the PR's central behaviour.
+        guard case .success(let (accepted, stored)) =
+                Attachment.make(from: exact, name: "shot.png") else {
+            return XCTFail("a file of exactly the cap was refused")
+        }
+        XCTAssertEqual(accepted.kind, .image)
+        XCTAssertEqual(accepted.mediaType, "image/png")
+        XCTAssertEqual(accepted.byteCount, stored.count)
     }
 
     /// A long file is truncated with the same visible marker a truncated page carries.
@@ -117,6 +127,51 @@ final class AttachmentTests: XCTestCase {
         XCTAssertLessThan(text.count, long.count)
         XCTAssertEqual(attachment.byteCount, bytes.count,
                        "the record's size must be the size of what was stored")
+
+        // ASCII cannot tell a character cut from a byte cut — every character is one
+        // byte, so both land in the same place. A sliced multi-byte tail would decode
+        // lossily and still carry the marker and the shorter length asserted above, so
+        // only a fixture that is not ASCII can say which kind of cut this is.
+        let emoji = String(repeating: "\u{1F60A}", count: Attachment.maxTextCharacters + 500)
+        let (_, emojiBytes) = try Attachment.make(from: Data(emoji.utf8),
+                                                  name: "emoji.txt").get()
+        XCTAssertFalse(String(decoding: emojiBytes, as: UTF8.self).contains("\u{FFFD}"),
+                       "truncation split a multi-byte character")
+    }
+
+    /// The GIF signature is the only one made of characters a text file can contain —
+    /// PNG and JPEG both start with bytes that are not valid UTF-8. Four bytes of it were
+    /// matched once, which meant a note or a changelog that opened with the word GIF8 was
+    /// base64'd into a `data:` URL as a picture and its text never sent.
+    func testTextThatMentionsGIFIsNotSniffedAsOne() throws {
+        let note = "GIF8 is the prefix both GIF versions share, which is why it is not\n"
+            + "enough to identify one.\n"
+        let (attachment, _) = try Attachment.make(from: Data(note.utf8), name: "note.md").get()
+        XCTAssertEqual(attachment.kind, .text)
+
+        for header in ["GIF87a", "GIF89a"] {
+            let bytes = Data(header.utf8) + Data(repeating: 0, count: 16)
+            let (image, _) = try Attachment.make(from: bytes, name: "real.gif").get()
+            XCTAssertEqual(image.kind, .image, header)
+            XCTAssertEqual(image.mediaType, "image/gif", header)
+        }
+    }
+
+    /// The record is decoded inside a turn, which is inside the library — so a field
+    /// added to it later must not be able to take the whole document down. `id` is the
+    /// exception, because a record whose bytes cannot be found is not a record.
+    func testARecordFromAnOlderBuildStillDecodes() throws {
+        let id = UUID()
+        let sparse = "{\"id\":\"\(id.uuidString)\"}"
+        let decoded = try JSONDecoder().decode(Attachment.self, from: Data(sparse.utf8))
+
+        XCTAssertEqual(decoded.id, id)
+        XCTAssertEqual(decoded.kind, .other, "an unknown kind is the safe reading")
+        XCTAssertEqual(decoded.byteCount, 0)
+        XCTAssertFalse(decoded.name.isEmpty, "something has to be shown in the panel")
+
+        // Without an id there is nothing to look up, so this one still fails.
+        XCTAssertThrowsError(try JSONDecoder().decode(Attachment.self, from: Data("{}".utf8)))
     }
 
     // MARK: The name
@@ -189,5 +244,15 @@ final class AttachmentTests: XCTestCase {
         let profiles = try XCTUnwrap(ProviderSettings.decodeModelProfiles(json))
         XCTAssertEqual(profiles.count, 1)
         XCTAssertFalse(profiles[0].sendsImages)
+
+        // The key's spelling, pinned. The default above would still pass if the flag were
+        // renamed on the way out and read back as absent — and every user who had opted
+        // in would silently lose their eyes with no error anywhere.
+        let optedIn = """
+            [{"id":"\(UUID().uuidString)","name":"Q","endpoint":"https://b.example/v1",
+              "model":"m","keyAccount":"model-api-key","sendsImages":true}]
+            """
+        let decoded = try XCTUnwrap(ProviderSettings.decodeModelProfiles(optedIn))
+        XCTAssertTrue(try XCTUnwrap(decoded.first).sendsImages)
     }
 }

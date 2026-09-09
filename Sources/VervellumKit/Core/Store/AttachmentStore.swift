@@ -84,6 +84,13 @@ final class AttachmentStore {
     func write(_ data: Data, for attachment: Attachment) throws {
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true,
                                         attributes: [.posixPermissions: 0o700])
+        // And again, unconditionally, because `createDirectory` applies its attributes
+        // only when it *creates* the directory. A directory an older build or a sync tool
+        // left behind keeps whatever mode it was made with — and the staging order above
+        // only protects the bytes if the parent is closed. Without this the argument in
+        // the paragraph above holds for exactly the directories that never needed it.
+        try? fileManager.setAttributes([.posixPermissions: 0o700],
+                                       ofItemAtPath: directory.path)
         // A UUID name, so a crash between the write and the move leaves something the
         // sweep already understands: unreferenced, and removed once it is old enough.
         let staged = url(for: UUID())
@@ -135,6 +142,12 @@ final class AttachmentStore {
     /// sweep; getting it wrong in the other direction would delete a live attachment, so
     /// the caller passes what it *kept*, never what it dropped.
     @discardableResult
+    /// The window assumes bytes are written at *send* time, which is what both front
+    /// ends do: `ResearchEngine.start` and `LinuxPanel.ask` write inside the same
+    /// function that appends the turn and saves the library, milliseconds apart. Five
+    /// minutes is margin against a slow disk, not against a reader who is still typing —
+    /// a front end that ever wrote at attach time would need a window longer than a
+    /// compose, and should raise this rather than hope.
     func sweep(keeping live: Set<UUID>, sparingFilesNewerThan grace: TimeInterval = 300) -> Int {
         guard let names = try? fileManager.contentsOfDirectory(atPath: directory.path) else {
             return 0

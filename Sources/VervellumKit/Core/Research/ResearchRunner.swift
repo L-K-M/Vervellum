@@ -348,12 +348,14 @@ final class ResearchRunner: ResearchRunning {
     /// turn still lists it, because it is a record of what was asked; saying nothing
     /// would leave a reader with an answer that ignores a file for no visible reason.
     private func preparedAttachments() -> (payload: [[String: String]],
-                                           images: [ChatCompletionsClient.ImagePart]) {
+                                           images: [ChatCompletionsClient.ImagePart],
+                                           imageNames: [String]) {
         let attachments = current?.attachments ?? []
-        guard !attachments.isEmpty else { return ([], []) }
+        guard !attachments.isEmpty else { return ([], [], []) }
 
         var payload: [[String: String]] = []
         var images: [ChatCompletionsClient.ImagePart] = []
+        var imageNames: [String] = []
         var lost: [String] = []
         for attachment in attachments {
             // Empty bytes are no more readable than bytes that are gone, and an image
@@ -368,6 +370,10 @@ final class ResearchRunner: ResearchRunning {
             case .image:
                 images.append(ChatCompletionsClient.ImagePart(
                     mediaType: attachment.mediaType, base64: data.base64EncodedString()))
+                // Kept beside the bytes because a provider without eyes needs the *name*
+                // and nothing else: an image that cannot be sent has to be named to the
+                // model as unavailable, exactly as a lost one is.
+                imageNames.append(attachment.name)
             case .text:
                 // Re-decoded rather than trusted: the record says what the bytes were
                 // when they were stored, and the bytes are what is being sent now. A
@@ -398,7 +404,7 @@ final class ResearchRunner: ResearchRunning {
         trace.log("Attachments: \(images.count) image(s), \(sentText) text file(s)"
                   + (lost.isEmpty ? "" : ", \(lost.count) that could not be sent"))
         if !lost.isEmpty { update { $0.addNotice(.attachmentMissing) } }
-        return (payload, images)
+        return (payload, images, imageNames)
     }
 
     private func execute(question: String, mode: Mode, history: [ResearchTurn]) async throws {
@@ -549,19 +555,17 @@ final class ResearchRunner: ResearchRunning {
         // first killed the turn. `PlanParser`'s own messages give the game away — "Try
         // again or choose another model" is the advice the chain exists to take.
         let planImages = attachments.images
+        // Recorded, not logged, inside the closure: the closure runs once per provider
+        // attempt, so a chain falling back through two providers without eyes wrote the
+        // line twice and made one decision look like two. Same shape as the answer
+        // stage's `sentImages`, which is where the pattern came from.
+        var sentPlanImages = false
         let plan = try await chain.perform("Plan") { chat in
             // The planner is shown the picture when the provider can take one: an image
             // is very often what the question is *about*, and planning searches from the
             // words alone is the commonest way to search for the wrong thing.
             let images = chat.sendsImages ? planImages : []
-            // Said in the trace, because the turn's own notice is raised by the answer
-            // stage: a plan made without the screenshot, on a chain that fell back to a
-            // provider with no eyes, otherwise looks in the log exactly like a plan made
-            // with it.
-            if !planImages.isEmpty, images.isEmpty {
-                self.trace.log("Plan: \(planImages.count) image(s) withheld — "
-                               + "this provider is not set to be sent images")
-            }
+            sentPlanImages = !images.isEmpty
             let object = try await chat.completeJSON(
                 system: ResearchPrompts.plan(maxSearches: Self.maxSearches, today: today,
                                              hasLinkedPages: !linked.isEmpty,
@@ -574,6 +578,13 @@ final class ResearchRunner: ResearchRunning {
                                                  || !attachments.payload.isEmpty),
                 payload: planContext.payload, label: "Plan", images: images)
             return try PlanParser.parse(object, maxSearches: Self.maxSearches)
+        }
+        // Said in the trace, because the turn's own notice is raised by the answer stage:
+        // a plan made without the screenshot, on a chain that fell back to a provider
+        // with no eyes, otherwise looks in the log exactly like a plan made with it.
+        if !planImages.isEmpty, !sentPlanImages {
+            trace.log("Plan: \(planImages.count) image(s) withheld — "
+                      + "this provider is not set to be sent images")
         }
         update { turn in
             turn.reading = plan.reading
@@ -851,13 +862,31 @@ final class ResearchRunner: ResearchRunning {
         // the reader has to be told the difference.
         var sentImages = false
         let answerImages = attachments.images
+        // A second payload for the case where the provider that answers has no eyes.
+        //
+        // Built here rather than inside the closure because the closure runs once per
+        // attempt and this does not depend on which attempt it is. It matters more than
+        // the reader's notice does: without it the model is asked "what is in the
+        // top-left of the screenshot?" with no screenshot and *nothing saying one was
+        // meant to be there*, which is the setup for a confidently invented answer. The
+        // same `unavailable` entry a lost attachment gets, for the same reason — the
+        // answer prompt's rule about an attachment that is not present needs something to
+        // fire on.
+        let withheldContext = answerImages.isEmpty ? nil : ResearchContext.assemble(
+            question: question, history: history, today: today,
+            extra: answerExtra.merging([
+                "attachments": attachments.payload
+                    + attachments.imageNames.map { ["name": $0, "unavailable": "yes"] },
+            ]) { _, new in new })
         let answer = try await chain.perform("Answer", beforeRetry: { [weak self] in
             self?.update { $0.answer = "" }
         }) { chat in
             let images = chat.sendsImages ? answerImages : []
             sentImages = !images.isEmpty
+            let payload = images.isEmpty ? (withheldContext ?? answerContext).payload
+                                         : answerContext.payload
             return try await chat.streamText(
-                system: ResearchPrompts.answer, payload: answerContext.payload,
+                system: ResearchPrompts.answer, payload: payload,
                 label: "Answer", images: images
             ) { [weak self] chunk in
                 self?.update { $0.answer += chunk }
@@ -1194,13 +1223,23 @@ final class ResearchRunner: ResearchRunning {
                                 history: [ResearchTurn],
                                 today: String,
                                 attachments: (payload: [[String: String]],
-                                              images: [ChatCompletionsClient.ImagePart])) async throws {
+                                              images: [ChatCompletionsClient.ImagePart],
+                                              imageNames: [String])) async throws {
         update { $0.stage = .answering }
         var directExtra: [String: Any] = [:]
         if !attachments.payload.isEmpty { directExtra["attachments"] = attachments.payload }
         let context = ResearchContext.assemble(question: question, history: history,
                                                today: today, extra: directExtra)
         if context.trimmed { update { $0.addNotice(.contextTrimmed) } }
+        // The same second payload the research path builds, for the same reason: a
+        // question about a picture, asked of a provider that cannot see it, must arrive
+        // with the picture *named as unavailable* rather than with nothing at all.
+        let withheldContext = attachments.images.isEmpty ? nil : ResearchContext.assemble(
+            question: question, history: history, today: today,
+            extra: directExtra.merging([
+                "attachments": attachments.payload
+                    + attachments.imageNames.map { ["name": $0, "unavailable": "yes"] },
+            ]) { _, new in new })
         // Same reset as the research path's answer stage, for the same reason.
         var sentImages = false
         _ = try await chain.perform("Direct answer", beforeRetry: { [weak self] in
@@ -1208,8 +1247,10 @@ final class ResearchRunner: ResearchRunning {
         }) { chat in
             let images = chat.sendsImages ? attachments.images : []
             sentImages = !images.isEmpty
+            let payload = images.isEmpty ? (withheldContext ?? context).payload
+                                         : context.payload
             return try await chat.streamText(
-                system: ResearchPrompts.direct, payload: context.payload,
+                system: ResearchPrompts.direct, payload: payload,
                 label: "Direct answer", images: images
             ) { [weak self] chunk in
                 self?.update { $0.answer += chunk }

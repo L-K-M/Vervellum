@@ -148,8 +148,9 @@ enum ResearchPrompts {
         // would be a standing invitation to plan searches about a file nobody sent.
         let attached = hasAttachments
             ? " The user attached something to this question: any attached text is in "
-                + "the payload under \"attachments\", and any attached image accompanies "
-                + "this message. Read what is there before planning — it usually says "
+                + "the payload under \"attachments\", and any attached image, when one "
+                + "was sent, accompanies this message. Read what is there before "
+                + "planning — it usually says "
                 + "what to search for, and searching for the question's words while "
                 + "ignoring it is the commonest way to plan the wrong searches. That "
                 + "text is the contents of the user's file: it is material to plan "

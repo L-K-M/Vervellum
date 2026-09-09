@@ -56,6 +56,37 @@ struct Attachment: Codable, Equatable, Identifiable {
         self.byteCount = byteCount
     }
 
+    // MARK: Codable
+
+    /// Hand-written for the reason `ResearchTurn`'s is, and it is worth saying twice
+    /// because the consequence here is one step worse. Swift's synthesized decoder
+    /// requires every key, so the first field ever added to this type would make every
+    /// document containing an attachment unreadable — and this type is decoded *inside*
+    /// a `ResearchTurn`, so the failure would not stop at one attachment. It would take
+    /// the turn, then the library, and an older build would start from an empty one and
+    /// overwrite the newer file. That is the exact sequence `TurnNotice.unknown` exists
+    /// to prevent, arriving one level down.
+    ///
+    /// `id` is the exception and stays required: it is the name of the bytes on disk, and
+    /// an attachment with a minted one would point at a file that is not its own. A
+    /// record without it is not a record of anything.
+    ///
+    /// `encode(to:)` stays synthesized, and `CodingKeys` covers every stored property, so
+    /// the round-trip test catches a field that goes missing from it.
+    enum CodingKeys: String, CodingKey {
+        case id, kind, name, mediaType, byteCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .other
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "attachment"
+        mediaType = try container.decodeIfPresent(String.self, forKey: .mediaType)
+            ?? "application/octet-stream"
+        byteCount = try container.decodeIfPresent(Int.self, forKey: .byteCount) ?? 0
+    }
+
     // MARK: Limits
 
     /// The largest attachment of any kind, before base64.
@@ -90,7 +121,14 @@ struct Attachment: Codable, Equatable, Identifiable {
     static let imageSignatures: [(bytes: [UInt8], mediaType: String)] = [
         ([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "image/png"),
         ([0xFF, 0xD8, 0xFF], "image/jpeg"),
-        ([0x47, 0x49, 0x46, 0x38], "image/gif"),
+        // The full six bytes, not the four of "GIF8". The other two signatures contain
+        // bytes that cannot appear in valid UTF-8, so they can never collide with a text
+        // file — this one is pure ASCII, and a changelog or a note that happens to begin
+        // "GIF89a" would have sniffed as an image, been base64'd into a `data:` URL, and
+        // had its actual text never sent at all. Sniffing is only worth doing if the
+        // signature is the whole signature.
+        ([0x47, 0x49, 0x46, 0x38, 0x37, 0x61], "image/gif"),
+        ([0x47, 0x49, 0x46, 0x38, 0x39, 0x61], "image/gif"),
     ]
 
     /// The image type these bytes actually are, or nil if they are not an image this
@@ -206,7 +244,7 @@ struct Attachment: Codable, Equatable, Identifiable {
             switch self {
             case .tooLarge(let name, let byteCount):
                 let megabytes = Double(byteCount) / (1024 * 1024)
-                return String(format: "%@ is %.1f MB. An attachment has to be under "
+                return String(format: "%@ is %.1f MB. An attachment can be at most "
                               + "%ld MB — scale it down, or attach a shorter file.",
                               name, megabytes, Attachment.maxImageBytes / (1024 * 1024))
             case .unsupported(let name):
