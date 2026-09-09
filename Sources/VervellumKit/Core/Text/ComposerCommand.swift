@@ -257,6 +257,24 @@ enum ComposerCommand: Equatable {
     /// * **Never after the reader leaves.** ↑ off the top and Escape are ways out, and
     ///   an offer that re-highlighted row 0 on the way out would make the exit invisible.
     ///
+    /// `explicit` is handed back as given, without being checked against `completions`
+    /// — and that is the contract, not an oversight. A choice is the reader's, and this
+    /// function is not the place a stale one is caught, because a stale one cannot get
+    /// here: `clearCompletionChoices` empties both indices on every draft change, so a
+    /// row selected against a longer list does not survive the keystroke that shortened
+    /// it. The two callers that could subscript with the result guard anyway —
+    /// `submitFromComposer` with `indices.contains`, the arrow handler by mapping an
+    /// out-of-range index to nil before it moves — so the belt and the braces are both
+    /// on. Bounds-checking here as well would only add a third place for the rule to be
+    /// stated and a third place for it to drift.
+    ///
+    /// The same goes for a choice under `isDismissed`. Escape clears the choice as it
+    /// sets the flag, so the two are not live together by that route — but the pointer
+    /// *can* make them live together, because hovering a row after an Escape sets
+    /// `hoverIndex` without ending the dismissal. That is why the choice is answered
+    /// first: a reader who backs out with Escape and then reaches for the mouse gets the
+    /// row under the pointer, not nothing.
+    ///
     /// Pure and here rather than in the view for the same reason as `moveSelection` and
     /// `isHalfTypedCommand`: the rule is the interesting part, the regressions it guards
     /// against are ones only manual poking would find, and the GTK panel has no command

@@ -388,12 +388,20 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
                                                        draft: "/h", completions: rows), 0,
                        "an unfinished word is what the offer exists for")
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
+                                                       draft: "/", completions: rows), 0,
+                       "a bare slash is an unfinished word, and the offer is what stands "
+                        + "between Return and spending a request on \"/\"")
         XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: true,
                                                      draft: "/h", completions: rows),
                      "leaving the list has to stay left, or the exit is invisible")
+        // `rows`, not the completions for "/new". This function treats the list as
+        // opaque, and the assertion is about the *word* — passing "/new"'s own list
+        // would let the test pass through the empty-list guard if `completions(for:)`
+        // ever stopped answering for a finished command, which is the one branch this
+        // line exists to hold.
         XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
-                                                     draft: "/new",
-                                                     completions: ComposerCommand.completions(for: "/new")),
+                                                     draft: "/new", completions: rows),
                      "offering a row under a finished command would fill the field "
                         + "instead of starting a thread")
         XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,

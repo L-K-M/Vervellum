@@ -22,6 +22,7 @@ import SwiftUI
 struct ProcessTrailView: View {
 
     @Environment(\.panelTextScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let turn: ResearchTurn
     @Binding var isExpanded: Bool
@@ -33,7 +34,7 @@ struct ProcessTrailView: View {
             header
             if isExpanded {
                 detail
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(PanelTheme.Motion.disclosureTransition(reduceMotion))
             }
         }
         .padding(.vertical, PanelTheme.Space.small)
@@ -69,7 +70,10 @@ struct ProcessTrailView: View {
                 // interesting thing on screen for the few seconds before an answer
                 // exists — but only to a reader who went looking, which is what the
                 // chevron is for.
-                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                // Turned rather than swapped, for the reason `SourcesView` gives: two
+                // symbols are an identity change and will not animate.
+                Image(systemName: "chevron.down")
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
                     .font(PanelTheme.Font.at(9, textScale, weight: .semibold))
                     .foregroundStyle(PanelTheme.Palette.tertiaryText)
             }

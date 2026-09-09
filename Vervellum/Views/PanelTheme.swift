@@ -181,6 +181,22 @@ enum PanelTheme {
         /// expanding) animate.
         static let stage: Animation = .easeOut(duration: 0.18)
         static let disclosure: Animation = .easeInOut(duration: 0.16)
+
+        /// How a disclosed section arrives.
+        ///
+        /// A list that slides in from above is the shape Reduce Motion exists to
+        /// flatten, and both of the panel's disclosures now start closed — so the slide
+        /// is on the ordinary path rather than something a reader opts into once. Under
+        /// the setting it becomes a plain fade: the section still appears, it just does
+        /// not travel to get there.
+        ///
+        /// A function of the environment value rather than a reader of
+        /// `NSWorkspace.accessibilityDisplayShouldReduceMotion`, so a change to the
+        /// setting redraws the views that depend on it instead of taking effect at the
+        /// next relaunch.
+        static func disclosureTransition(_ reduceMotion: Bool) -> AnyTransition {
+            reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top))
+        }
     }
 }
 

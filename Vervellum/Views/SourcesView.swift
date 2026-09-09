@@ -14,6 +14,8 @@ import AppKit
 struct SourcesView: View {
 
     @Environment(\.panelTextScale) private var textScale
+    /// A disclosure that slides a list into place is exactly what this setting is for.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let sources: [Source]
     let citedNumbers: Set<Int>
@@ -37,7 +39,7 @@ struct SourcesView: View {
                         }
                     }
                 }
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .transition(PanelTheme.Motion.disclosureTransition(reduceMotion))
                 uncitedToggle
             }
         }
@@ -52,7 +54,12 @@ struct SourcesView: View {
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
                 SectionLabel(text: "Sources", trailing: countText)
-                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                // One symbol turned, not two swapped. Swapping `chevron.up` for
+                // `chevron.down` is an identity change and cannot animate, so the one
+                // control the reader actually clicked was the only thing on screen that
+                // jumped while everything under it slid.
+                Image(systemName: "chevron.down")
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
                     .font(PanelTheme.Font.at(9, textScale, weight: .semibold))
                     .foregroundStyle(PanelTheme.Palette.tertiaryText)
             }
