@@ -308,9 +308,9 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     ///
     /// Transient in a stronger sense than `searchesCompleted`, which is a tally that
     /// stays true after the fact. This one is a claim about an outstanding request, and
-    /// a document is a record of a turn that has stopped running — so it decodes to zero
-    /// whatever is on disk, and reaches disk at all only because every stored property
-    /// is encoded.
+    /// a document is a record of a turn that has stopped running — so it is the one
+    /// stored property with no `CodingKeys` case: never written, never read, zero on
+    /// every turn that comes back from disk.
     var pagesInFlight: Int = 0
     /// The streamed markdown answer, with `[n]` citations.
     var answer: String = ""
@@ -349,9 +349,17 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     //
     // `encode(to:)` stays synthesized: with this `CodingKeys` covering every stored
     // property, the existing round-trip test catches a field that goes missing from it.
+    //
+    // `pagesInFlight` is the one deliberate omission, and omitted rather than merely
+    // ignored on the way in. A stored property with no case here is skipped by the
+    // synthesized encoder, so the count cannot reach a document at all — which makes
+    // "never believed from disk" structural instead of a promise a later tidy-up
+    // ("why is this one field not `decodeIfPresent`?") could undo. The round-trip test
+    // could not have protected it either way: the decoder zeroes it, so the test passes
+    // whether or not the key is written.
     enum CodingKeys: String, CodingKey {
         case id, question, askedAt, stage, reading, searches, searchesCompleted, sources
-        case pagesAttempted, pagesRead, pagesInFlight
+        case pagesAttempted, pagesRead
         case answer, findings, limitations, followups, notices, failure, duration, model
     }
 
@@ -367,9 +375,9 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         sources = try container.decode([Source].self, forKey: .sources)
         pagesAttempted = try container.decodeIfPresent(Int.self, forKey: .pagesAttempted) ?? 0
         pagesRead = try container.decodeIfPresent(Int.self, forKey: .pagesRead) ?? 0
-        // Deliberately not decoded — see `pagesInFlight`. Nothing written to disk can
-        // be evidence that a request is outstanding now, so the key is read past
-        // rather than believed.
+        // Not decoded, and not encoded either — see `pagesInFlight`. Nothing written to
+        // disk can be evidence that a request is outstanding now. The assignment is here
+        // for the initializer's sake and to say so at the point someone would look.
         pagesInFlight = 0
         answer = try container.decode(String.self, forKey: .answer)
         findings = try container.decode([Finding].self, forKey: .findings)

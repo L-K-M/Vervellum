@@ -43,8 +43,10 @@ Vervellum makes network requests in exactly five cases, each with a fixed purpos
   which page was asked for, as any browser visit would. A link to your own network — a
   loopback address, or a machine on your LAN — is fetched like any other, deliberately,
   so that a self-hosted wiki or a local documentation server can be researched, but only
-  when *you* typed it: a search result on such an address is left unread, and a page that
-  redirects into one ends the read there. That page's text then travels the same road as
+  when *you* typed the address: a search result that names one is left unread, and a page
+  that redirects to one ends the read there. A search result under a *hostname* that
+  resolves into your network is not caught — see the limitation recorded in
+  `SECURITY.md`. That page's text then travels the same road as
   any source: into the evidence, and on to your model provider. Do not paste a link to
   something you would not send them. **Use a reader service** sends
   the addresses to the reader endpoint you configured instead, with that endpoint's

@@ -984,11 +984,22 @@ final class ResearchRunner: ResearchRunning {
         // the model provider as evidence. The address on the far side of a redirect is
         // held to the same rule inside the reader, which is the only other way one
         // arrives unasked.
+        // One consequence worth naming: a question's own link that failed in the linked
+        // pass (an empty text — a dev server that was briefly down) is unread, so it
+        // would otherwise be retried here. If it is private, it no longer is. That is
+        // the policy working rather than an oversight — this pass cannot tell the
+        // question's links from the search results — and it costs a retry the linked
+        // pass already had its chance at.
         let targets = Array(sources.filter { source in
             guard !source.wasRead else { return false }
-            guard let url = DirectPageReader.fetchableURL(source.url),
-                  DirectPageReader.isPubliclyRoutable(url) else {
-                // No address in the log — see the reader's own redirect refusal.
+            // Two different skips, so the trace does not report a malformed URL as a
+            // private one and send whoever reads it looking in the wrong place.
+            guard let url = DirectPageReader.fetchableURL(source.url) else {
+                trace.log("Page read skipped: not a fetchable address")
+                return false
+            }
+            // The address itself stays out of the log, as in the reader's own refusal.
+            guard DirectPageReader.isPubliclyRoutable(url) else {
                 trace.log("Page read skipped: not a public address")
                 return false
             }

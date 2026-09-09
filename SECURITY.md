@@ -85,14 +85,22 @@ and they are built to have nothing worth stealing:
   at most twice, and re-validates every hop as an absolute `http(s)` URL. `file:` and
   `data:` targets are rejected at each hop rather than only at the first.
 - **A redirect cannot cross into private address space.** A chain that started on a
-  public address must stay on one: a hop to a loopback, link-local, RFC 1918 or
-  carrier-NAT address ends the read, and so does a hop to a host that cannot be read as
-  either an ordinary name or a provably public literal — `http://2130706433/` and
-  `http://0177.0.0.1/` are two spellings of `127.0.0.1`, and the rule is "not provably
-  public" rather than a list of the spellings anyone has thought of. This is checked on
-  the address the URL states, not the address the connection reaches: a *hostname* that
-  resolves into private space still passes, because the name is resolved inside
-  `URLSession`. Closing that needs a custom connection path and is not done here.
+  public address must stay on one. A hop to loopback, link-local, an RFC 1918 block or
+  carrier NAT ends the read, in IPv4 and in IPv6 alike — `::1`, `fc00::/7`, `fe80::/9`,
+  and the forms that carry an IPv4 address inside them (`::ffff:192.168.1.1`, 6to4,
+  NAT64) are decided by what they actually name. So do the reserved local names
+  (`localhost`, `.local`, `.localdomain`), and so does any host that cannot be read as
+  either an ordinary name or a provably public literal: `http://2130706433/`,
+  `http://0x7f.0.0.0x1/` and `http://012.0.0.1/` are all `127.0.0.1` to a resolver, and
+  the rule is "not provably public" rather than a list of the spellings anyone has
+  thought of yet.
+- **What that check cannot see.** It reads the address the URL *states*, not the address
+  the connection reaches, so a *hostname* that resolves into private space still passes:
+  the name is resolved inside `URLSession`, where the answer is neither visible here nor
+  bindable to the socket that follows. Closing it means resolving the host first,
+  checking every address that comes back, and connecting to the checked address with the
+  original `Host` — a custom connection path, which is not built here. Until it is, this
+  boundary stops addresses, not names.
 - **Only text, and only some of it.** A non-text content type is skipped on its header
   rather than fetched and discarded, the body is capped, and the extracted text is
   truncated with a visible marker.
@@ -108,12 +116,15 @@ and they are built to have nothing worth stealing:
   from it, and neither is hidden. **The page's text leaves your machine** — it becomes
   numbered evidence and is sent to your model provider like any other source, so a link
   to an internal admin page discloses that page's contents to them. And the licence is
-  yours alone: **an address you did not type never reaches private space.** A search
-  result that points at one is left unread with its snippet, and a page that answers a
-  redirect with one ends the read — so no page that wins a search slot can turn Vervellum
-  into a probe of your network. If the first point matters for how you run Vervellum, set
-  **Reading the page** to *Snippets only*: nothing is fetched at all, and a question that
-  carried a link says so in a notice rather than having it read for you.
+  yours alone, as far as an address can be checked: **an address you did not type never
+  reaches private space.** A search result that points at one is left unread with its
+  snippet, and a page that answers a redirect with one ends the read, so no page that
+  wins a search slot can turn Vervellum into a probe of your network by naming it. A
+  *hostname* is the exception, and it is the gap described two bullets up: a name that
+  resolves into private space is not caught, because nothing here sees what it resolved
+  to. If any of this matters for how you run Vervellum, set **Reading the page** to
+  *Snippets only*: nothing is fetched at all, and a question that carried a link says so
+  in a notice rather than having it read for you.
 
 Setting **Reading the page** to *Use a reader service* moves the fetch to an MCP reader
 endpoint; setting it to *Snippets only* is the behaviour of every build before this one.

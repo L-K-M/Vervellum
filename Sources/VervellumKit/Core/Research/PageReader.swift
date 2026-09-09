@@ -240,6 +240,14 @@ final class DirectPageReader: PageReading {
         // The reserved loopback names, which resolve to 127.0.0.1 by definition
         // (RFC 6761) and so are decidable here without asking anyone.
         if host == "localhost" || host.hasSuffix(".localhost") { return false }
+        // `.local` is reserved to mDNS (RFC 6762) and `.localdomain` is the same idea by
+        // convention — the default a machine gives itself in `/etc/hosts`. Neither ever
+        // resolves off the network it is on, so both are decidable here exactly as
+        // `localhost` is, and a redirect to `http://printer.local/admin` is refused
+        // without anyone having to resolve anything. A `.local` address the user pasted
+        // is unaffected: this same function decides `startedPrivate`, so their chain
+        // begins private and stays free to move within it.
+        if host.hasSuffix(".local") || host.hasSuffix(".localdomain") { return false }
         // A colon at this point is an IPv6 literal: `URL.host` has already taken the
         // port off, and strips the brackets on Darwin but not everywhere.
         if host.contains(":") {
@@ -247,7 +255,29 @@ final class DirectPageReader: PageReading {
             return isPublicIPv6(bytes)
         }
         if let octets = ipv4Octets(host) { return isPublicIPv4(octets) }
+        // What is left is either a name or an address written in one of the forms
+        // `inet_aton` accepts and `inet_pton` does not — `0x7f.0.0.0x1`, `0177.0.0.1`,
+        // `2130706433`, `127.1`. A host whose every label is a number in one of those
+        // bases is one of those addresses rather than a name: no registry sells a domain
+        // made only of numeric labels, and the resolver reads the whole family as an
+        // address while a dotted-quad parser sees nothing it recognises. Refusing the
+        // shape rather than the spellings is what stops the next spelling.
+        if host.components(separatedBy: ".").allSatisfy({ Self.isNumericAddressPart($0) }) {
+            return false
+        }
         return isOrdinaryHostname(host)
+    }
+
+    /// Whether one dot-label is a number in a base a resolver reads: decimal, `0x`
+    /// hexadecimal, or the leading-zero octal that `012` means to `inet_aton`.
+    static func isNumericAddressPart(_ label: String) -> Bool {
+        guard !label.isEmpty else { return false }
+        let lowered = label.lowercased()
+        if lowered.hasPrefix("0x") {
+            let digits = lowered.dropFirst(2)
+            return !digits.isEmpty && digits.allSatisfy { $0.isASCII && $0.isHexDigit }
+        }
+        return lowered.allSatisfy { $0.isASCII && $0.isNumber }
     }
 
     /// A host that looks like a DNS name a public resolver would answer: two or more
@@ -274,6 +304,11 @@ final class DirectPageReader: PageReading {
     /// The four octets of a canonical dotted quad, or nil for anything else — including
     /// the octal and short forms a resolver accepts, which is the point: this says yes
     /// only to an address it can read exactly, and `isPubliclyRoutable` refuses the rest.
+    ///
+    /// A leading zero is the reason for the third guard, and it is not pedantry: `012`
+    /// is decimal 12 to `UInt8` and octal 10 to `inet_aton`, so `012.0.0.1` would be
+    /// read here as a public address and by the resolver as `10.0.0.1`. Refusing it
+    /// hands it to the numeric-label rule above, which reads it as the address it is.
     static func ipv4Octets(_ text: String) -> [UInt8]? {
         let fields = text.components(separatedBy: ".")
         guard fields.count == 4 else { return nil }
@@ -281,6 +316,7 @@ final class DirectPageReader: PageReading {
         for field in fields {
             guard (1...3).contains(field.count),
                   field.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  field == "0" || !field.hasPrefix("0"),
                   let value = UInt8(field)
             else { return nil }
             octets.append(value)
@@ -349,14 +385,27 @@ final class DirectPageReader: PageReading {
         }
     }
 
-    /// The same question for IPv6, including the two ways an IPv4 address can be spelled
-    /// as one — `::ffff:10.0.0.1` and the deprecated `::10.0.0.1` — which are decided by
-    /// the IPv4 rules rather than waved through for being sixteen bytes long.
+    /// The same question for IPv6, with one rule doing most of the work: **an address
+    /// that carries an IPv4 destination inside it is decided by that destination.**
+    /// Four prefixes do — `::ffff:0:0/96` (v4-mapped), the deprecated v4-compatible
+    /// form, `2002::/16` (6to4, where the relay encapsulates to the embedded address)
+    /// and `64:ff9b::/96` (the well-known prefix a NAT64 network translates) — and
+    /// writing `192.168.1.1` in any of them has to mean what writing it plainly means.
+    ///
+    /// Teredo (`2001:0::/32`) is not on that list deliberately: the IPv4 addresses it
+    /// embeds are the relay's and the client's own, not a destination inside the user's
+    /// network, so there is nothing there to decide.
     static func isPublicIPv6(_ bytes: [UInt8]) -> Bool {
         guard bytes.count == 16 else { return false }
         if bytes[0..<10].allSatisfy({ $0 == 0 }),
            (bytes[10] == 0 && bytes[11] == 0) || (bytes[10] == 0xff && bytes[11] == 0xff) {
             // `::` and `::1` land here too, and fail on their first octet being zero.
+            return isPublicIPv4(Array(bytes[12..<16]))
+        }
+        // 6to4 keeps the address in the second and third groups: `2002:c0a8:0101::`.
+        if bytes[0] == 0x20, bytes[1] == 0x02 { return isPublicIPv4(Array(bytes[2..<6])) }
+        // NAT64 keeps it where a mapped address keeps it, at the end.
+        if bytes[0] == 0x00, bytes[1] == 0x64, bytes[2] == 0xff, bytes[3] == 0x9b {
             return isPublicIPv4(Array(bytes[12..<16]))
         }
         if bytes[0] & 0xfe == 0xfc { return false }        // fc00::/7  unique local

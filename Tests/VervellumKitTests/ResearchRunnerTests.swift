@@ -197,9 +197,15 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(turn.pagesAttempted, 1)
         XCTAssertEqual(turn.pagesRead, 1)
         XCTAssertEqual(turn.sources.map(\.wasRead), [true, false])
+        // "Keeps its snippet" is the promise above, so it is asserted rather than
+        // assumed: an unread source that arrived with nothing would be a result the
+        // answer cannot use at all, which is a different outcome from not reading it.
+        XCTAssertEqual(turn.sources.last?.title, "Router")
+        XCTAssertFalse(turn.sources.last?.snippet.isEmpty ?? true)
         XCTAssertEqual(transport.calls.filter { $0.kind == .fetch }.map { $0.url.absoluteString },
                        ["https://a.example/one"],
-                       "a private address was requested")
+                       "only the public page may be fetched, and a private address never "
+                       + "requested at all")
     }
 
     // MARK: Links in the question

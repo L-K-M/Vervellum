@@ -151,10 +151,17 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertEqual(turn.runningProgressLabel, ResearchStage.planning.label)
     }
 
-    /// The count is a fact about *now*, not a tally left behind. A turn whose links were
-    /// read before the plan still reports the searches while any are outstanding, or a
-    /// question that started from a pasted link would read "Reading 2 pages" for the
-    /// whole search stage.
+    /// The count is a fact about *now*, not a tally left behind. Pages that *were* read
+    /// — the two behind a pasted link, finished before the plan existed — leave
+    /// `pagesAttempted` at 2 for the rest of the turn, and that must not displace the
+    /// search progress, or a question beginning with a link would read "Reading 2 pages"
+    /// for the whole search stage.
+    ///
+    /// A read genuinely in flight is the opposite case and outranks the searches
+    /// deliberately: it is what the turn is waiting on, and reporting a search count
+    /// while nothing is being searched is the confusion this field exists to end. The
+    /// two are different facts, which is exactly why the label stopped inferring one
+    /// from the other.
     func testSearchProgressOutranksPagesAlreadyReadForALink() {
         var turn = ResearchTurn(question: "Summarise https://example.com/a")
         turn.stage = .searching
@@ -254,6 +261,14 @@ final class ResearchModelTests: XCTestCase {
         // And the label written from that document says nothing about reading.
         XCTAssertEqual(try turn(withPagesInFlight: "\"pagesInFlight\":3,").runningProgressLabel,
                        ResearchStage.searching.label)
+
+        // The other half of the same invariant, which the decoder cannot enforce alone:
+        // the field is never written either. A key that reached a document would be a
+        // count waiting for someone to make the decoder believe it.
+        var reading = ResearchTurn(question: "Q")
+        reading.pagesInFlight = 3
+        let encoded = try JSONEncoder().encode(reading)
+        XCTAssertFalse(String(decoding: encoded, as: UTF8.self).contains("pagesInFlight"))
     }
 
     /// A partial search count must not resurface once the turn has moved past searching.
