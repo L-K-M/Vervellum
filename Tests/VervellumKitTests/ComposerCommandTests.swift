@@ -410,6 +410,16 @@ final class ComposerCommandTests: XCTestCase {
                                                      draft: "/new", completions: rows),
                      "offering a row under a finished command would fill the field "
                         + "instead of starting a thread")
+        // A different leg of the same guard, and the one nothing else here reaches.
+        // `/new` is refused for being a *complete* command — it passes
+        // `isBareCommandWord`, has completions, and falls at `parse`. `/model deep` is
+        // refused one step earlier, for not being a bare word at all. Only this case
+        // holds that step: a change to how the word is found could let an
+        // argument-bearing draft through while every assertion above stayed green.
+        XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
+                                                     draft: "/model deep", completions: rows),
+                     "a draft carrying an argument is not a word being typed, and "
+                        + "Return has to run it rather than complete it")
         XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
                                                      draft: "/h", completions: nil))
         XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
