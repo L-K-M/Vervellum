@@ -121,6 +121,182 @@ final class PageReadingTests: XCTestCase {
         XCTAssertNil(DirectPageReader.fetchableURL(""))
     }
 
+    // MARK: Address space
+
+    /// The addresses a page on the public internet has no business redirecting to.
+    /// `169.254.169.254` is in the list on its own account: it is the cloud metadata
+    /// service, and the classic thing an SSRF is pointed at.
+    func testAddressesInPrivateSpaceAreNotPubliclyRoutable() {
+        for address in ["http://127.0.0.1/", "http://127.9.9.9/x", "http://localhost/",
+                        "http://localhost:3000/notes", "http://api.localhost/",
+                        "http://10.0.0.5/", "http://172.16.0.1/", "http://172.31.255.255/",
+                        "http://192.168.1.1/admin", "http://169.254.169.254/latest/meta-data/",
+                        "http://0.0.0.0/", "http://100.64.0.1/", "http://255.255.255.255/",
+                        "http://239.0.0.1/", "http://[::1]/", "http://[fd00::1]/"] {
+            guard let url = URL(string: address) else {
+                XCTFail("\(address) did not parse as a URL at all")
+                continue
+            }
+            XCTAssertFalse(DirectPageReader.isPubliclyRoutable(url), address)
+        }
+    }
+
+    /// The other half of the rule, and the half a check like this usually gets wrong: an
+    /// ordinary page must still be reachable, or every redirect in the world stops
+    /// resolving and the reader quietly reads nothing.
+    func testOrdinaryPublicAddressesStayRoutable() {
+        for address in ["https://example.com/a", "https://www.example.co.uk/a",
+                        "https://a-b.example.com/", "https://sub.domain.example.org/x?y=1",
+                        "http://8.8.8.8/", "http://172.32.0.1/", "http://172.15.0.1/",
+                        "http://100.63.0.1/", "http://[2606:4700::1111]/"] {
+            guard let url = URL(string: address) else {
+                XCTFail("\(address) did not parse as a URL at all")
+                continue
+            }
+            XCTAssertTrue(DirectPageReader.isPubliclyRoutable(url), address)
+        }
+    }
+
+    /// Every one of these names the loopback to a resolver while looking nothing like it
+    /// to a checker that only knows dotted quads. They are refused for not being
+    /// *provably* public rather than recognised one by one, which is the only version of
+    /// this that a new spelling cannot walk around.
+    func testTheSpellingsThatHideALoopbackAreRefused() {
+        for address in ["http://2130706433/", "http://0x7f000001/", "http://0177.0.0.1/",
+                        "http://0x7f.1/", "http://127.1/", "http://intranet/",
+                        "http://router/status"] {
+            guard let url = URL(string: address) else { continue }
+            XCTAssertFalse(DirectPageReader.isPubliclyRoutable(url), address)
+        }
+    }
+
+    /// The IPv6 literal forms, taken at the byte level so the answer does not depend on
+    /// how a platform's `URL` chooses to hand back a host.
+    func testIPv6LiteralsAreClassifiedByTheirBytes() {
+        func isPublic(_ text: String) -> Bool? {
+            DirectPageReader.ipv6Bytes(text).map(DirectPageReader.isPublicIPv6)
+        }
+        XCTAssertEqual(isPublic("::1"), false)                      // loopback
+        XCTAssertEqual(isPublic("0:0:0:0:0:0:0:1"), false)          // the same, written out
+        XCTAssertEqual(isPublic("::"), false)                       // unspecified
+        XCTAssertEqual(isPublic("[::1]"), false)                    // brackets, as some hosts arrive
+        XCTAssertEqual(isPublic("fc00::1"), false)                  // unique local
+        XCTAssertEqual(isPublic("fd12:3456:789a::1"), false)
+        XCTAssertEqual(isPublic("fe80::1"), false)                  // link-local
+        XCTAssertEqual(isPublic("fe80::1%en0"), false)              // with a zone id
+        XCTAssertEqual(isPublic("febf::1"), false)                  // the top of fe80::/10
+        XCTAssertEqual(isPublic("ff02::1"), false)                  // multicast
+        XCTAssertEqual(isPublic("::ffff:192.168.0.1"), false)       // v4-mapped, and private
+        XCTAssertEqual(isPublic("::ffff:127.0.0.1"), false)
+        XCTAssertEqual(isPublic("2606:4700::1111"), true)
+        XCTAssertEqual(isPublic("fec0::1"), false)                  // site-local: deprecated, still private
+        XCTAssertEqual(isPublic("::ffff:8.8.8.8"), true)
+        XCTAssertNil(isPublic("not-an-address"))
+        XCTAssertNil(isPublic("fe80::1::2"))                        // two gaps is not an address
+        XCTAssertNil(isPublic("12345::1"))
+    }
+
+    /// A dotted quad is read only in the form it is written in. `0177.0.0.1` is the
+    /// loopback to `inet_aton` and nothing at all to this, which is why the caller
+    /// refuses what this cannot read rather than passing it on.
+    func testOnlyCanonicalDottedQuadsParse() {
+        XCTAssertEqual(DirectPageReader.ipv4Octets("192.168.0.1"), [192, 168, 0, 1])
+        XCTAssertEqual(DirectPageReader.ipv4Octets("8.8.8.8"), [8, 8, 8, 8])
+        XCTAssertNil(DirectPageReader.ipv4Octets("0177.0.0.1"))
+        XCTAssertNil(DirectPageReader.ipv4Octets("256.1.1.1"))
+        XCTAssertNil(DirectPageReader.ipv4Octets("1.2.3"))
+        XCTAssertNil(DirectPageReader.ipv4Octets("1.2.3.4.5"))
+        XCTAssertNil(DirectPageReader.ipv4Octets("1.2.3."))
+        XCTAssertNil(DirectPageReader.ipv4Octets("١.٢.٣.٤"))  // Arabic-Indic digits are `isNumber`
+    }
+
+    /// A redirect is where an address the user never typed gets in, so this is the case
+    /// the guard exists for: a page that won a search slot answering `302` with the
+    /// user's own router. The request must never be *made* — a refusal after the fetch
+    /// would have already probed the network.
+    func testARedirectIntoPrivateSpaceIsNotFollowed() async {
+        let stub = StubTransport { call in
+            guard call.url.absoluteString == "https://public.example.com/a" else { return .unrouted }
+            return .page(status: 302, headers: ["Location": "http://192.168.1.1/admin"], text: "")
+        }
+        let reader = DirectPageReader(trace: ResearchTrace(sink: SilentLog()), transport: stub)
+        let source = Source(number: 1, url: "https://public.example.com/a", title: "T", snippet: "S")
+
+        let pages = await reader.read([source])
+        XCTAssertTrue(pages.isEmpty)
+        XCTAssertEqual(stub.trail, ["fetch https://public.example.com/a"],
+                       "the private hop was requested, which is the whole thing this stops")
+    }
+
+    /// And the same refusal one hop later, because a chain that starts public must stay
+    /// public for its whole length rather than only across its first hop.
+    func testAPublicChainCannotTurnPrivateOnItsSecondHop() async {
+        let stub = StubTransport { call in
+            switch call.url.absoluteString {
+            case "https://public.example.com/a":
+                return .page(status: 301, headers: ["Location": "https://public.example.com/b"],
+                             text: "")
+            case "https://public.example.com/b":
+                return .page(status: 302, headers: ["Location": "http://127.0.0.1:8080/"], text: "")
+            default:
+                return .unrouted
+            }
+        }
+        let reader = DirectPageReader(trace: ResearchTrace(sink: SilentLog()), transport: stub)
+        let source = Source(number: 1, url: "https://public.example.com/a", title: "T", snippet: "S")
+
+        let pages = await reader.read([source])
+        XCTAssertTrue(pages.isEmpty)
+        XCTAssertEqual(stub.trail, ["fetch https://public.example.com/a",
+                                    "fetch https://public.example.com/b"])
+    }
+
+    /// The address the *user* typed is a different thing, and the reason the rule is
+    /// about the chain rather than about the hop: a pasted `http://localhost:3000` is a
+    /// page they asked for, and a local dev server that redirects to itself must still
+    /// be read. Nothing else reaches the reader pointing at private space — the runner
+    /// drops the search results that do.
+    func testAPastedPrivateAddressMayRedirectWithinPrivateSpace() async {
+        let stub = StubTransport { call in
+            switch call.url.absoluteString {
+            case "http://localhost:3000/notes":
+                return .page(status: 302, headers: ["Location": "http://127.0.0.1:3000/notes/"],
+                             text: "")
+            case "http://127.0.0.1:3000/notes/":
+                return .html("<p>The note the user asked about.</p>")
+            default:
+                return .unrouted
+            }
+        }
+        let reader = DirectPageReader(trace: ResearchTrace(sink: SilentLog()), transport: stub)
+        let source = Source(number: 1, url: "http://localhost:3000/notes", title: "T", snippet: "S")
+
+        let pages = await reader.read([source])
+        XCTAssertTrue(pages[1]?.contains("The note the user asked about.") ?? false,
+                      "a pasted local address stopped being readable")
+    }
+
+    /// The ordinary redirect the reader exists to follow, kept as a test of its own so
+    /// that a change to the guard cannot break `http → https` without saying so.
+    func testAnOrdinaryRedirectIsStillFollowed() async {
+        let stub = StubTransport { call in
+            switch call.url.absoluteString {
+            case "http://example.com/a":
+                return .page(status: 301, headers: ["Location": "https://www.example.com/a"],
+                             text: "")
+            case "https://www.example.com/a":
+                return .html("<p>The page behind two hops.</p>")
+            default:
+                return .unrouted
+            }
+        }
+        let reader = DirectPageReader(trace: ResearchTrace(sink: SilentLog()), transport: stub)
+        let source = Source(number: 1, url: "http://example.com/a", title: "T", snippet: "S")
+
+        let pages = await reader.read([source])
+        XCTAssertTrue(pages[1]?.contains("The page behind two hops.") ?? false)
+    }
+
     /// A page in an encoding nobody declared is read with mojibake in the accents
     /// rather than dropped entirely.
     func testDecodingFallsBackRatherThanFailing() {

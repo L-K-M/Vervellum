@@ -142,16 +142,16 @@ final class ResearchModelTests: XCTestCase {
         var turn = ResearchTurn(question: "Summarise https://example.com/a")
         turn.stage = .planning
         turn.pagesAttempted = 3
-        turn.isReadingPages = true
+        turn.pagesInFlight = 3
         XCTAssertEqual(turn.runningProgressLabel, "Reading 3 pages")
 
         // And the moment the read returns it is the planning call the reader waits on,
         // which is what the stage already says.
-        turn.isReadingPages = false
+        turn.pagesInFlight = 0
         XCTAssertEqual(turn.runningProgressLabel, ResearchStage.planning.label)
     }
 
-    /// The flag is a fact about *now*, not a count left behind. A turn whose links were
+    /// The count is a fact about *now*, not a tally left behind. A turn whose links were
     /// read before the plan still reports the searches while any are outstanding, or a
     /// question that started from a pasted link would read "Reading 2 pages" for the
     /// whole search stage.
@@ -171,11 +171,25 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertEqual(turn.runningProgressLabel, "Searching the web · 2 of 2")
 
         // The second read — the pages behind the search results — says so itself.
-        turn.isReadingPages = true
+        turn.pagesInFlight = 2
         XCTAssertEqual(turn.runningProgressLabel, "Reading 2 pages")
 
-        turn.pagesAttempted = 1
+        turn.pagesInFlight = 1
         XCTAssertEqual(turn.runningProgressLabel, "Reading 1 page")
+    }
+
+    /// The reason the field counts rather than flags. A turn that read one pasted link
+    /// and is now fetching the two pages behind its search results has attempted three,
+    /// and is reading two. The label reports what is outstanding, which is the only
+    /// number that describes what the user is waiting for.
+    func testTheLabelCountsWhatIsInFlightNotWhatWasAttempted() {
+        var turn = ResearchTurn(question: "Summarise https://example.com/a")
+        turn.stage = .searching
+        turn.searches = [PlannedSearch(purpose: "a", argumentsJSON: "{\"q\":\"a\"}")]
+        turn.searchesCompleted = 1
+        turn.pagesAttempted = 3
+        turn.pagesInFlight = 2
+        XCTAssertEqual(turn.runningProgressLabel, "Reading 2 pages")
     }
 
     /// The turn this feature created: a question answered by its own links, whose plan
@@ -187,10 +201,10 @@ final class ResearchModelTests: XCTestCase {
         turn.stage = .searching
         turn.searches = []
         turn.pagesAttempted = 3
-        turn.isReadingPages = true
+        turn.pagesInFlight = 3
         XCTAssertEqual(turn.runningProgressLabel, "Reading 3 pages")
 
-        turn.isReadingPages = false
+        turn.pagesInFlight = 0
         XCTAssertEqual(turn.runningProgressLabel, ResearchStage.searching.label)
     }
 
@@ -206,12 +220,12 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertEqual(turn.runningProgressLabel, "Searching the web · 1 of 1")
     }
 
-    /// A flag the runner never cleared — a crash mid-read, a document from a build that
+    /// A count the runner never zeroed — a crash mid-read, a document from a build that
     /// did — must not leave a finished turn claiming to be fetching something.
     func testAFinishedTurnNeverClaimsToBeReading() {
         var turn = ResearchTurn(question: "Q")
         turn.pagesAttempted = 2
-        turn.isReadingPages = true
+        turn.pagesInFlight = 2
 
         for stage in [ResearchStage.complete, .failed, .cancelled] {
             turn.stage = stage
@@ -219,17 +233,27 @@ final class ResearchModelTests: XCTestCase {
         }
     }
 
-    /// The flag is new, so a thread written before it has to decode without it.
-    func testATurnWrittenBeforeTheReadingFlagDecodes() throws {
-        let json = """
-            {"id":"\(UUID().uuidString)","question":"Q","askedAt":"2026-09-08T12:00:00Z",
-             "stage":"searching","reading":"","searches":[],"sources":[],"answer":"",
-             "findings":[],"limitations":"","followups":[],"notices":[],"model":""}
-            """
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let turn = try decoder.decode(ResearchTurn.self, from: Data(json.utf8))
-        XCTAssertFalse(turn.isReadingPages)
+    /// The field is new, so a thread written before it has to decode without it — and a
+    /// thread saved *during* a read, which is the shape a crash mid-fetch leaves behind,
+    /// must not come back claiming a request is still outstanding. A document is a record
+    /// of a turn; nothing in one can be evidence about the network right now.
+    func testAStoredTurnNeverDecodesAsReading() throws {
+        func turn(withPagesInFlight field: String) throws -> ResearchTurn {
+            let json = """
+                {"id":"\(UUID().uuidString)","question":"Q","askedAt":"2026-09-08T12:00:00Z",
+                 "stage":"searching","reading":"","searches":[],"sources":[],"answer":"",
+                 \(field)"findings":[],"limitations":"","followups":[],"notices":[],"model":""}
+                """
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(ResearchTurn.self, from: Data(json.utf8))
+        }
+
+        XCTAssertEqual(try turn(withPagesInFlight: "").pagesInFlight, 0)
+        XCTAssertEqual(try turn(withPagesInFlight: "\"pagesInFlight\":3,").pagesInFlight, 0)
+        // And the label written from that document says nothing about reading.
+        XCTAssertEqual(try turn(withPagesInFlight: "\"pagesInFlight\":3,").runningProgressLabel,
+                       ResearchStage.searching.label)
     }
 
     /// A partial search count must not resurface once the turn has moved past searching.

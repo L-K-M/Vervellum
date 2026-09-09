@@ -159,6 +159,49 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(Self.stage(of: calls[5]), .assess)
     }
 
+    // MARK: Address space
+
+    /// A search result is a URL nobody in this conversation typed, so it does not get to
+    /// point the reader at the user's own network. The source stays — it is still a
+    /// result, and it keeps its snippet like any page that could not be read — but the
+    /// request is never made, which is the difference between a page Vervellum declined
+    /// to read and a probe of a home router whose response text goes to the model
+    /// provider as evidence.
+    func testASearchResultOnAPrivateAddressIsNeverFetched() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
+                switch Self.stage(of: call) {
+                case .plan: return .completion(json: Self.plan("router admin page"))
+                case .assess: return .completion(json: Self.assessment)
+                default: return .unrouted
+                }
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "https://a.example/one", title: "One"),
+                                           (url: "http://192.168.1.1/admin", title: "Router")]))
+            case .fetch:
+                return .html("<p>The page text for \(call.url.path).</p>")
+            case .stream:
+                return .stream(["The public page says so [1]."])
+            default:
+                return .unrouted
+            }
+        }
+
+        let turn = await run("What does my router's admin page say?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.sources.map(\.url),
+                       ["https://a.example/one", "http://192.168.1.1/admin"],
+                       "the result should still be a source, just an unread one")
+        XCTAssertEqual(turn.pagesAttempted, 1)
+        XCTAssertEqual(turn.pagesRead, 1)
+        XCTAssertEqual(turn.sources.map(\.wasRead), [true, false])
+        XCTAssertEqual(transport.calls.filter { $0.kind == .fetch }.map { $0.url.absoluteString },
+                       ["https://a.example/one"],
+                       "a private address was requested")
+    }
+
     // MARK: Links in the question
 
     func testAQuestionsLinksAreReadBeforeThePlannerIsAsked() async throws {

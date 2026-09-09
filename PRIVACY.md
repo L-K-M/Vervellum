@@ -42,9 +42,11 @@ Vervellum makes network requests in exactly five cases, each with a fixed purpos
   rather than re-sending anything, at most twice. The sites learn your IP address and
   which page was asked for, as any browser visit would. A link to your own network — a
   loopback address, or a machine on your LAN — is fetched like any other, deliberately,
-  so that a self-hosted wiki or a local documentation server can be researched. That
-  page's text then travels the same road as any source: into the evidence, and on to
-  your model provider. Do not paste a link to something you would not send them. **Use a reader service** sends
+  so that a self-hosted wiki or a local documentation server can be researched, but only
+  when *you* typed it: a search result on such an address is left unread, and a page that
+  redirects into one ends the read there. That page's text then travels the same road as
+  any source: into the evidence, and on to your model provider. Do not paste a link to
+  something you would not send them. **Use a reader service** sends
   the addresses to the reader endpoint you configured instead, with that endpoint's
   key — the sites then see the service rather than you, and the service sees the
   addresses. **Snippets only** fetches nothing at all.

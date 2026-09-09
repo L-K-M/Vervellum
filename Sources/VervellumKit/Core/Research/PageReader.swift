@@ -83,6 +83,12 @@ enum PageReaderFactory {
 ///   preserves the rule's actual reason (a credential must never reach a host the user
 ///   did not configure) while letting `http → https` and `example.com → www.example.com`
 ///   resolve, which a large share of real links need. Two hops, http(s) only.
+/// * **A redirect may not cross into private address space.** A page that won a search
+///   slot answering `302 http://192.168.1.1/admin` would otherwise make the reader
+///   probe the user's own network and send back what it found as evidence. So a chain
+///   that started on a public address must stay on one; a chain the *user* started on a
+///   private address — a pasted `http://localhost:3000` — is theirs to make, and is the
+///   only way the reader ever reaches one. See `isPubliclyRoutable(_:)`.
 /// * **Only text is read.** A PDF, an image or a video is skipped on its content type
 ///   rather than fetched and discarded, and the body is capped well below the
 ///   transport's own limit.
@@ -139,6 +145,11 @@ final class DirectPageReader: PageReading {
     /// One page's text, or an empty string for anything that could not be read.
     private func text(at address: String) async -> String {
         var target = address
+        // Decided once, from the address this chain started on, because it is a fact
+        // about *provenance*: only a URL the user's own question carried reaches here
+        // pointing into private space (the runner drops the search results that do), and
+        // a redirect must not be able to manufacture what the question did not ask for.
+        let startedPrivate = Self.fetchableURL(address).map { !Self.isPubliclyRoutable($0) } ?? false
         for hop in 0...Self.maxRedirects {
             guard let url = Self.fetchableURL(target) else { return "" }
             do {
@@ -153,9 +164,16 @@ final class DirectPageReader: PageReading {
                 if (300..<400).contains(response.statusCode) {
                     guard hop < Self.maxRedirects,
                           let location = response.value(forHTTPHeaderField: "Location"),
-                          let next = URL(string: location, relativeTo: url)?.absoluteString
+                          let resolved = URL(string: location, relativeTo: url)?.absoluteString,
+                          let next = Self.fetchableURL(resolved)
                     else { return "" }
-                    target = next
+                    guard startedPrivate || Self.isPubliclyRoutable(next) else {
+                        // No address in the log: the hop is a host the user did not
+                        // choose, and where their network answers is their business.
+                        trace.log("Page read stopped: redirect into a private address")
+                        return ""
+                    }
+                    target = next.absoluteString
                     continue
                 }
                 guard (200..<300).contains(response.statusCode) else {
@@ -192,6 +210,160 @@ final class DirectPageReader: PageReading {
         guard let normalized = SourceHarvester.normalized(raw, trimmingPunctuation: false),
               let url = URL(string: normalized) else { return nil }
         return url
+    }
+
+    // MARK: Address space
+
+    /// Whether a URL's host is provably in public address space.
+    ///
+    /// False for the case this exists to stop — a literal inside a range that belongs to
+    /// the machine or the network around it: loopback, link-local, the RFC 1918 blocks,
+    /// carrier-grade NAT, multicast, the unspecified address. And false, too, for any
+    /// host it cannot read as either an ordinary name or a public literal: a decimal or
+    /// hexadecimal integer (`http://2130706433/`), an octal-looking quad
+    /// (`http://0177.0.0.1/`), a single label with no dot, anything malformed. Those
+    /// forms exist in the wild almost exclusively as ways of writing `127.0.0.1` that a
+    /// checker will not recognise, so the answer to one is "not provably public" rather
+    /// than a guess at what a resolver would make of it. The cost of refusing is a
+    /// redirect chain the reader gives up on, which is a source that keeps its snippet.
+    ///
+    /// **Known gap, deliberately left.** This reads the address the URL *states*, not
+    /// the address the request reaches. A hostname that resolves into private space —
+    /// an internal name on the user's own network, or a DNS answer that changes between
+    /// this check and the connection — passes, because the name is resolved inside
+    /// `URLSession` where this code cannot see it and cannot bind the answer to the
+    /// socket that follows. Closing that needs a custom connection path, and is a
+    /// different piece of work; a check that looked like it closed it would be worse
+    /// than one that says plainly where it stops.
+    static func isPubliclyRoutable(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased(), !host.isEmpty else { return false }
+        // The reserved loopback names, which resolve to 127.0.0.1 by definition
+        // (RFC 6761) and so are decidable here without asking anyone.
+        if host == "localhost" || host.hasSuffix(".localhost") { return false }
+        // A colon at this point is an IPv6 literal: `URL.host` has already taken the
+        // port off, and strips the brackets on Darwin but not everywhere.
+        if host.contains(":") {
+            guard let bytes = ipv6Bytes(host) else { return false }
+            return isPublicIPv6(bytes)
+        }
+        if let octets = ipv4Octets(host) { return isPublicIPv4(octets) }
+        return isOrdinaryHostname(host)
+    }
+
+    /// A host that looks like a DNS name a public resolver would answer: two or more
+    /// labels of letters, digits and hyphens, none of them empty or hyphen-edged, and a
+    /// last label that is not all digits — which is what a dotted address that got this
+    /// far (`0177.0.0.1`, `0x7f.1`) ends in.
+    ///
+    /// Unicode-tolerant on purpose: `URL` does not normalise an internationalised host
+    /// to punycode on every platform, and refusing a redirect to a real domain because
+    /// it is written in its own script would be a bug wearing a security hat.
+    static func isOrdinaryHostname(_ host: String) -> Bool {
+        var name = host
+        if name.hasSuffix(".") { name.removeLast() }   // an FQDN's trailing root label
+        let labels = name.components(separatedBy: ".")
+        guard labels.count >= 2 else { return false }
+        for label in labels {
+            guard !label.isEmpty, !label.hasPrefix("-"), !label.hasSuffix("-"),
+                  label.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" })
+            else { return false }
+        }
+        return !(labels.last?.allSatisfy(\.isNumber) ?? true)
+    }
+
+    /// The four octets of a canonical dotted quad, or nil for anything else — including
+    /// the octal and short forms a resolver accepts, which is the point: this says yes
+    /// only to an address it can read exactly, and `isPubliclyRoutable` refuses the rest.
+    static func ipv4Octets(_ text: String) -> [UInt8]? {
+        let fields = text.components(separatedBy: ".")
+        guard fields.count == 4 else { return nil }
+        var octets: [UInt8] = []
+        for field in fields {
+            guard (1...3).contains(field.count),
+                  field.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  let value = UInt8(field)
+            else { return nil }
+            octets.append(value)
+        }
+        return octets
+    }
+
+    /// The sixteen bytes of an IPv6 literal, or nil if the text is not one.
+    ///
+    /// Hand-rolled because `inet_pton` lives in a platform module and nothing under
+    /// `Core/` may import one.
+    static func ipv6Bytes(_ text: String) -> [UInt8]? {
+        var body = text
+        if body.hasPrefix("["), body.hasSuffix("]") { body = String(body.dropFirst().dropLast()) }
+        // A zone id names an interface on this machine; the address in front of it is
+        // what decides, and its presence at all means a link-local address.
+        if let zone = body.firstIndex(of: "%") { body = String(body[..<zone]) }
+        guard body.contains(":") else { return nil }
+
+        // At most one `::`, which stands for the run of zero groups.
+        let halves = body.components(separatedBy: "::")
+        guard halves.count <= 2 else { return nil }
+
+        func bytes(of groups: String) -> [UInt8]? {
+            guard !groups.isEmpty else { return [] }
+            var result: [UInt8] = []
+            let fields = groups.components(separatedBy: ":")
+            for (index, field) in fields.enumerated() {
+                // The last group may be a dotted tail: `::ffff:192.168.0.1`.
+                if index == fields.count - 1, field.contains(".") {
+                    guard let octets = ipv4Octets(field) else { return nil }
+                    result.append(contentsOf: octets)
+                    continue
+                }
+                guard (1...4).contains(field.count),
+                      field.allSatisfy({ $0.isASCII && $0.isHexDigit }),
+                      let value = UInt16(field, radix: 16)
+                else { return nil }
+                result.append(UInt8(truncatingIfNeeded: value >> 8))
+                result.append(UInt8(truncatingIfNeeded: value))
+            }
+            return result
+        }
+
+        guard let head = bytes(of: halves[0]) else { return nil }
+        guard halves.count == 2 else { return head.count == 16 ? head : nil }
+        guard let tail = bytes(of: halves[1]), head.count + tail.count <= 16 else { return nil }
+        return head + Array(repeating: 0, count: 16 - head.count - tail.count) + tail
+    }
+
+    /// Whether a dotted quad is in space a page on the public internet could legitimately
+    /// redirect to. Everything reserved for the machine, the local network or the carrier
+    /// in between is out, and so is multicast and the rest of the top of the range.
+    static func isPublicIPv4(_ octets: [UInt8]) -> Bool {
+        guard octets.count == 4 else { return false }
+        switch (octets[0], octets[1]) {
+        case (0, _):            return false   // "this network" — 0.0.0.0 is the local host
+        case (10, _):           return false   // RFC 1918
+        case (100, 64...127):   return false   // RFC 6598 carrier-grade NAT
+        case (127, _):          return false   // loopback
+        case (169, 254):        return false   // link-local, and the cloud metadata address
+        case (172, 16...31):    return false   // RFC 1918
+        case (192, 168):        return false   // RFC 1918
+        case (224...255, _):    return false   // multicast, reserved, broadcast
+        default:                return true
+        }
+    }
+
+    /// The same question for IPv6, including the two ways an IPv4 address can be spelled
+    /// as one — `::ffff:10.0.0.1` and the deprecated `::10.0.0.1` — which are decided by
+    /// the IPv4 rules rather than waved through for being sixteen bytes long.
+    static func isPublicIPv6(_ bytes: [UInt8]) -> Bool {
+        guard bytes.count == 16 else { return false }
+        if bytes[0..<10].allSatisfy({ $0 == 0 }),
+           (bytes[10] == 0 && bytes[11] == 0) || (bytes[10] == 0xff && bytes[11] == 0xff) {
+            // `::` and `::1` land here too, and fail on their first octet being zero.
+            return isPublicIPv4(Array(bytes[12..<16]))
+        }
+        if bytes[0] & 0xfe == 0xfc { return false }        // fc00::/7  unique local
+        if bytes[0] == 0xfe, bytes[1] >= 0x80 { return false }  // fe80::/9: link-local, and the
+                                                                // deprecated site-local above it
+        if bytes[0] == 0xff { return false }               // ff00::/8  multicast
+        return true
     }
 
     /// Decodes a page's bytes, honouring the charset the response declared.

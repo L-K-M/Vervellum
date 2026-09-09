@@ -289,7 +289,7 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// reading decodes to.
     var pagesAttempted: Int = 0
     var pagesRead: Int = 0
-    /// Whether a page fetch is in flight *right now*.
+    /// How many pages are being fetched *right now*, and zero the rest of the time.
     ///
     /// Set by the runner around both reads — the question's links before the plan
     /// exists, and the pages behind the search results after it — because "what is
@@ -300,10 +300,18 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// pasted link therefore read "Planning searches" for as long as three fetches take,
     /// which is up to half a minute of the one moment the label exists to explain.
     ///
-    /// Transient, exactly like `searchesCompleted`: it describes a moment inside a run
-    /// and means nothing once the turn is terminal. It reaches disk only because the
-    /// whole turn does.
-    var isReadingPages: Bool = false
+    /// A count rather than a flag, because it has to answer *how many* as well as
+    /// *whether*, and `pagesAttempted` cannot: that one accumulates across both reads,
+    /// so a turn that read one pasted link and is now fetching two search results would
+    /// say "Reading 3 pages" with two in flight. One field, both facts, neither of them
+    /// inferred.
+    ///
+    /// Transient in a stronger sense than `searchesCompleted`, which is a tally that
+    /// stays true after the fact. This one is a claim about an outstanding request, and
+    /// a document is a record of a turn that has stopped running — so it decodes to zero
+    /// whatever is on disk, and reaches disk at all only because every stored property
+    /// is encoded.
+    var pagesInFlight: Int = 0
     /// The streamed markdown answer, with `[n]` citations.
     var answer: String = ""
     var findings: [Finding] = []
@@ -343,7 +351,7 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     // property, the existing round-trip test catches a field that goes missing from it.
     enum CodingKeys: String, CodingKey {
         case id, question, askedAt, stage, reading, searches, searchesCompleted, sources
-        case pagesAttempted, pagesRead, isReadingPages
+        case pagesAttempted, pagesRead, pagesInFlight
         case answer, findings, limitations, followups, notices, failure, duration, model
     }
 
@@ -359,7 +367,10 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         sources = try container.decode([Source].self, forKey: .sources)
         pagesAttempted = try container.decodeIfPresent(Int.self, forKey: .pagesAttempted) ?? 0
         pagesRead = try container.decodeIfPresent(Int.self, forKey: .pagesRead) ?? 0
-        isReadingPages = try container.decodeIfPresent(Bool.self, forKey: .isReadingPages) ?? false
+        // Deliberately not decoded — see `pagesInFlight`. Nothing written to disk can
+        // be evidence that a request is outstanding now, so the key is read past
+        // rather than believed.
+        pagesInFlight = 0
         answer = try container.decode(String.self, forKey: .answer)
         findings = try container.decode([Finding].self, forKey: .findings)
         limitations = try container.decode(String.self, forKey: .limitations)
@@ -385,15 +396,15 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// "Searching the web · 2 of 3" rather than a static label for the whole stage.
     /// Terminal stages fall through to `stage.label`, which is also what logs use.
     ///
-    /// Page reading reports through `isReadingPages` rather than through a stage of its
+    /// Page reading reports through `pagesInFlight` rather than through a stage of its
     /// own. A new `ResearchStage` case would be an enum value an older build cannot
     /// decode, and `ResearchStage` — unlike `TurnNotice` — has no lenient decoder, so it
-    /// would make a thread written here unreadable there. A label is not worth that; a
-    /// `Bool` that decodes to `false` costs nothing.
+    /// would make a thread written here unreadable there. A label is not worth that; an
+    /// `Int` an older build ignores costs nothing.
     var runningProgressLabel: String {
-        // Nothing below describes a turn that has stopped, and the flag is the runner's
-        // to clear — so the label refuses to speak for a terminal turn rather than
-        // trusting that it was cleared.
+        // Nothing below describes a turn that has stopped, and the count is the
+        // runner's to zero — so the label refuses to speak for a terminal turn rather
+        // than trusting that it was zeroed.
         guard !stage.isTerminal else { return stage.label }
         // A fetch in flight outranks everything, in either stage, because it is the one
         // thing the reader is actually waiting on. Asked as a fact rather than inferred
@@ -402,10 +413,9 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         //
         // No "2 of 3" here, unlike the searches: the direct reader fetches the pages
         // concurrently, so there is no meaningful running count to report — only how
-        // many are being read. The `> 0` is belt and braces, so no arrangement of the
-        // two fields can ever render "Reading 0 pages".
-        if isReadingPages, pagesAttempted > 0 {
-            return "Reading \(pagesAttempted) page\(pagesAttempted == 1 ? "" : "s")"
+        // many are outstanding, which is what this counts.
+        if pagesInFlight > 0 {
+            return "Reading \(pagesInFlight) page\(pagesInFlight == 1 ? "" : "s")"
         }
         guard case .searching = stage else { return stage.label }
         if !searches.isEmpty, searchesCompleted < searches.count {
