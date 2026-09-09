@@ -256,6 +256,10 @@ enum ComposerCommand: Equatable {
     ///   Return filled the field instead of starting a thread.
     /// * **Never after the reader leaves.** ↑ off the top and Escape are ways out, and
     ///   an offer that re-highlighted row 0 on the way out would make the exit invisible.
+    ///   Both of those exits reach here as `isDismissed` — there is no third parameter
+    ///   for the arrow one, and none is wanted: the handler turns the nil that
+    ///   `moveSelection` answers off the top into the flag, so the two ways out are one
+    ///   fact by the time this reads them.
     ///
     /// `explicit` is handed back as given, without being checked against `completions`
     /// — and that is the contract, not an oversight. A choice is the reader's, and this
@@ -266,7 +270,10 @@ enum ComposerCommand: Equatable {
     /// `submitFromComposer` with `indices.contains`, the arrow handler by mapping an
     /// out-of-range index to nil before it moves — so the belt and the braces are both
     /// on. Bounds-checking here as well would only add a third place for the rule to be
-    /// stated and a third place for it to drift.
+    /// stated and a third place for it to drift. A negative passes through too, which is
+    /// worth saying out loud: both guards happen to reject one, but only because they
+    /// ask `indices.contains` rather than compare against a count, and a caller that
+    /// compared against a count would subscript with it.
     ///
     /// The same goes for a choice under `isDismissed`. Escape clears the choice as it
     /// sets the flag, so the two are not live together by that route — but the pointer

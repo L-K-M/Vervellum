@@ -261,8 +261,12 @@ struct PanelRootView: View {
                 // Both of them: the pointer's row is an index into the same list.
                 // And the list is a new list, so leaving the old one says nothing about
                 // this one.
+                //
+                // Read before it is cleared: this is the edit that puts a dismissed
+                // offer back, and the announcement is the only thing that says so.
+                let wasDismissed = completionDismissed
                 clearCompletionChoices(dismissed: false)
-                announceListOpening(from: old, to: new)
+                announceListOpening(from: old, to: new, reopened: wasDismissed)
             }
             .onChange(of: engine.thread.turns.count) { _, _ in
                 scrollToBottom(proxy)
@@ -943,6 +947,47 @@ struct PanelRootView: View {
         announce("/\(completions[index].name), \(index + 1) of \(completions.count)")
     }
 
+    /// Said when a command list appears where there was none, and again on the first
+    /// keystroke after the reader dismissed one.
+    ///
+    /// The gap this closes is real: the list opening changes what Return does — from
+    /// declining a half-typed word to taking a row — and a reader whose cursor is in the
+    /// field had no way to know until they pressed it and heard the result.
+    ///
+    /// `reopened` is the other half of that, and it was missing. Escape and ↑ off the
+    /// top both say so out loud, but the dismissal they set lives exactly one keystroke:
+    /// `onChange(of: draft)` clears it, so typing one more character silently put the
+    /// offer back and turned Return from asking to completing again — a third change of
+    /// meaning, and the only unspoken one. Once per dismissal rather than per keystroke,
+    /// because the flag it reads is cleared by the same edit that reads it.
+    ///
+    /// It does not name the row, and that is the difference from the announcement
+    /// declined earlier. Naming it goes stale immediately: the list opens at `/` holding
+    /// the whole catalogue, so the row named would be the first of eight, and the reader
+    /// is in the middle of typing the word that narrows it. A single-match list is no
+    /// safer, though it looks it — Backspace widens `/d` back to `/` without the list
+    /// ever closing, so the one name spoken would be left describing eight rows. What
+    /// does not go stale is that a list is there and which key takes from it.
+    ///
+    /// Which key is a preference, not a constant. With submit-on-Return off, plain
+    /// Return inserts a newline and never reaches `onSubmit` — `ComposerView` answers
+    /// false to `insertNewline:` in that mode — so Shift-Return is what completes a row,
+    /// and naming Return would have sent exactly the readers this exists for to a key
+    /// that puts a line break in their question.
+    ///
+    /// Otherwise only on the opening. Every later keystroke narrows a list already
+    /// announced, and a line spoken per keystroke would talk over the character echo —
+    /// which is what makes a field unusable rather than merely quiet.
+    private func announceListOpening(from old: String, to new: String, reopened: Bool) {
+        guard let opened = ComposerCommand.completions(for: new), !opened.isEmpty,
+              ComposerCommand.isHalfTypedCommand(new),
+              reopened || ComposerCommand.completions(for: old) == nil
+        else { return }
+        let key = preferences.submitOnReturn ? "Return" : "Shift-Return"
+        announce("Command list, \(opened.count) \(opened.count == 1 ? "match" : "matches"). "
+                 + "\(key) completes the highlighted one.")
+    }
+
     /// Speaks one line to VoiceOver.
     ///
     /// Only ever from a key the reader pressed. Every announcement here exists because
@@ -953,30 +998,6 @@ struct PanelRootView: View {
     /// chokepoint rather than a key handler, so it holds today only because the send
     /// button greys itself out on the same predicate and cannot reach the guard. A
     /// caller added later that is not a keystroke would need to say so.
-    /// Said once, when a command list appears where there was none.
-    ///
-    /// The gap this closes is real: the list opening changes what Return does — from
-    /// declining a half-typed word to taking a row — and a reader whose cursor is in the
-    /// field had no way to know until they pressed it and heard the result.
-    ///
-    /// It does not name the row, and that is the difference from the announcement
-    /// declined earlier. Naming it goes stale immediately: the list opens at `/` holding
-    /// the whole catalogue, so the row named would be the first of eight, and the reader
-    /// is in the middle of typing the word that narrows it. What does not go stale is
-    /// that a list is there and Return will take from it.
-    ///
-    /// Only on the opening. Every later keystroke narrows a list already announced, and
-    /// a line spoken per keystroke would talk over the character echo — which is what
-    /// makes a field unusable rather than merely quiet.
-    private func announceListOpening(from old: String, to new: String) {
-        guard ComposerCommand.completions(for: old) == nil,
-              let opened = ComposerCommand.completions(for: new), !opened.isEmpty,
-              ComposerCommand.isHalfTypedCommand(new)
-        else { return }
-        announce("Command list, \(opened.count) \(opened.count == 1 ? "match" : "matches"). "
-                 + "Return completes the highlighted one.")
-    }
-
     private func announce(_ message: String) {
         NSAccessibility.post(element: NSApp as Any,
                              notification: .announcementRequested,

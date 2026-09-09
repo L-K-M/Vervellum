@@ -204,8 +204,16 @@ enum PanelTheme {
         /// A list that slides in from above is the shape Reduce Motion exists to
         /// flatten, and both of the panel's disclosures now start closed — so the slide
         /// is on the ordinary path rather than something a reader opts into once. Under
-        /// the setting it becomes a plain fade: the section still appears, it just does
-        /// not travel to get there.
+        /// the setting the travel is dropped and the section simply appears.
+        ///
+        /// Not a fade, which is what this used to claim and was wrong about. A
+        /// transition only animates when the surrounding transaction carries one, and
+        /// `disclosureAnimation` is nil under the same setting — so `.opacity` here takes
+        /// no time at all. Nil is still right: that animation gates the container's
+        /// height and the chevron's rotation as well as the rows arriving, and those are
+        /// the motion. `.opacity` is the *shape* of the no-motion transition rather than
+        /// something the reader sees, and it stays that way so a caller who ever animates
+        /// without going through `disclosureAnimation` cross-fades rather than slides.
         ///
         /// A function of the environment value rather than a reader of
         /// `NSWorkspace.accessibilityDisplayShouldReduceMotion`, so a change to the
