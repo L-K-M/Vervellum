@@ -987,7 +987,16 @@ final class ResearchRunner: ResearchRunning {
               validation.literalURLs.isEmpty,
               !draftCitedSomething || !validation.citedSourceIndices.isEmpty
         else {
-            trace.warn("Revision discarded: it broke the citation rule")
+            // Which clause fired, because the three are different stories. Two are a
+            // reviser breaking a rule it was given; the third is the un-citing guard,
+            // which is the only one that can also refuse a *correct* rewrite — one that
+            // weakened every flagged claim and legitimately dropped its numbers. It fails
+            // soft either way, so the only way to know how often that happens is to say
+            // which branch it was.
+            let broken = !validation.outOfRangeCitations.isEmpty ? "a source number that does not exist"
+                : !validation.literalURLs.isEmpty ? "a URL in the prose"
+                : "no citation at all, where the draft had one"
+            trace.warn("Revision discarded: \(broken)")
             update { $0.addNotice(.revisionUnavailable) }
             return
         }

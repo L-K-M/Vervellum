@@ -730,6 +730,44 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertTrue(turn.notices.contains(.answerRevised), "\(turn.notices)")
     }
 
+    /// The mirror, and the reason the claim above is true in both directions. Without it
+    /// a *new* verdict that warrants a revision would land in neither loop: this one
+    /// filters it out, and the named tests above only ever say "contradicted" and
+    /// "mixed". A gate that drifted from `warrantsRevision` for that verdict would fail
+    /// nothing.
+    func testEveryVerdictThatWarrantsRevisionSendsTheAnswerBack() async throws {
+        let sentBack = Verdict.allCases
+            .filter { ResearchRunner.warrantsRevision($0) }
+            .map(\.rawValue)
+        XCTAssertFalse(sentBack.isEmpty, "nothing warrants a revision any more")
+
+        for verdict in sentBack {
+            let transport = revisionTransport(
+                verdict: verdict,
+                answer: ["Parallax is measured in degrees [1]."],
+                revision: .stream(["Parallax is measured in arcseconds [1]."]))
+
+            let turn = await run("How is stellar parallax measured?", transport: transport)
+
+            XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+            XCTAssertTrue(transport.calls.contains { Self.stage(of: $0) == .revise },
+                          "\(verdict) never sent the answer back")
+            XCTAssertEqual(turn.draftAnswer, "Parallax is measured in degrees [1].", verdict)
+        }
+    }
+
+    /// The two switches, read directly. One decides whether a finding *wakes* the stage,
+    /// the other whether it is *shown* to a rewrite already under way — and the whole
+    /// reason they are switches rather than set membership is that a sixth verdict has to
+    /// be decided about twice. This is what notices if one of them quietly grows a
+    /// `default`.
+    func testWhichVerdictsWakeTheReviserAndWhichAreMerelyShownToIt() {
+        XCTAssertEqual(Verdict.allCases.filter(ResearchRunner.warrantsRevision),
+                       [.contradicted, .mixed])
+        XCTAssertEqual(Verdict.allCases.filter(ResearchRunner.isShownToReviser),
+                       [.contradicted, .mixed, .insufficient])
+    }
+
     /// A reviser that fences the whole answer would otherwise replace good prose with a
     /// wall of monospace — and the citation check would pass it, because a bracketed
     /// number inside a fence is code rather than a citation.
@@ -739,6 +777,8 @@ final class ResearchRunnerTests: XCTestCase {
                        "Parallax is measured in arcseconds [1].")
         XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("```\nOne\nTwo\n```"),
                        "One\nTwo")
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("```md\nText [1].\n```"),
+                       "Text [1].", "`md` is the other spelling of a prose wrapper")
 
         // A fence naming a *code* language — unlike the `markdown` wrapper the first
         // assertion unwraps — is a real code block, and an answer that is nothing but one
@@ -798,9 +838,15 @@ final class ResearchRunnerTests: XCTestCase {
     func testAnAnswerTheCheckDidNotFaultIsNeverSentBackForRevision() async throws {
         // Derived from the runner's own rule rather than listed here, so a sixth verdict
         // is covered the day it is added: whichever side of `warrantsRevision` it lands
-        // on, it is either in this loop or in the test above, and cannot be in neither.
-        for verdict in Verdict.allCases.filter({ !ResearchRunner.warrantsRevision($0) })
-            .map(\.rawValue) {
+        // on, this loop or its mirror below takes it, and it cannot fall between them.
+        let accepted = Verdict.allCases
+            .filter { !ResearchRunner.warrantsRevision($0) }
+            .map(\.rawValue)
+        // A derived loop can pass by running nothing. If every verdict came to warrant a
+        // revision, the filter would empty and this test would go green while checking
+        // the opposite of what it is named for.
+        XCTAssertFalse(accepted.isEmpty, "no verdict is left that does not warrant a revision")
+        for verdict in accepted {
             let transport = revisionTransport(
                 verdict: verdict,
                 answer: ["Parallax is measured in arcseconds [1]."],

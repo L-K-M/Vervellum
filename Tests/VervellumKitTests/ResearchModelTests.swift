@@ -413,6 +413,32 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertEqual(decoded.threads.first?.turns.first?.searches.first?.displayQuery, "x")
     }
 
+    /// The upgrade path, which the round trip above cannot see: it writes the field and
+    /// reads it back, so it would pass just as happily if a document *without* the field
+    /// were undecodable. Every thread saved before the revision stage existed is such a
+    /// document, and a `keyNotFound` here would take the whole library with it on the
+    /// first launch after the update.
+    func testATurnSavedBeforeTheRevisionStageStillLoads() throws {
+        var turn = ResearchTurn(question: "Q")
+        turn.stage = .complete
+        turn.answer = "An answer [1]."
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: try encoder.encode(turn)) as? [String: Any])
+        // The document as an older build wrote it: no such key at all, rather than null.
+        object.removeValue(forKey: "draftAnswer")
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(
+            ResearchTurn.self, from: try JSONSerialization.data(withJSONObject: object))
+
+        XCTAssertEqual(decoded.answer, "An answer [1].")
+        XCTAssertNil(decoded.draftAnswer)
+        XCTAssertFalse(decoded.isRevising)
+    }
+
     /// Retry has to know how a turn was asked, and the document does not store it: a
     /// `/direct` turn and a turn the planner decided needed no search both carry the
     /// no-evidence notice, and only the second has a reading.

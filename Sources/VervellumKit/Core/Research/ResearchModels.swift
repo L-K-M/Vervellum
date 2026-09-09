@@ -482,6 +482,9 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         // and the cost of that bug is a turn that says it is revising for as long as it
         // is on screen, which is a lie told by the one label that exists to say where the
         // run actually is.
+        // Below the fetches, which is safe rather than lucky: every read this turn makes
+        // happens in `.planning` or `.searching`, so nothing is outstanding by the time
+        // `.assessing` is reached and the two branches cannot both be true.
         if isRevising, stage == .assessing { return "Revising the answer" }
         guard case .searching = stage else { return stage.label }
         if !searches.isEmpty, searchesCompleted < searches.count {
