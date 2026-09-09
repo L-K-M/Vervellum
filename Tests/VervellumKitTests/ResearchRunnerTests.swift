@@ -826,17 +826,22 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("````\nText.\n```"),
                        "````\nText.\n```")
 
-        // CRLF, which switched the whole function off. The split is on "\n" alone, so
-        // every line kept its carriage return, and the trim was `.whitespaces` — space
-        // and tab. The label read as "markdown\r" and the closer as four characters of
-        // which three were backticks.
+        // CRLF, which switched the whole function off — and not for the reason it
+        // looked like. A Swift `Character` is a grapheme cluster and CR-LF is one of
+        // them, so splitting on the character "\n" never matched a CRLF break at all:
+        // the answer arrived as a single line and the two-line guard turned the function
+        // into a no-op. Splitting by `isNewline` is what fixes it; no amount of trimming
+        // would have.
         XCTAssertEqual(
-            ResearchRunner.unwrappingWholeAnswerFence("```markdown\r\nText [1].\r\n```\r"),
+            ResearchRunner.unwrappingWholeAnswerFence("```markdown\r\nText [1].\r\n```"),
             "Text [1].")
+        // A lone trailing CR after the closing fence is still just a line terminator.
         XCTAssertEqual(
-            ResearchRunner.unwrappingWholeAnswerFence("```swift\r\nlet x = 1\r\n```\r"),
-            "```swift\r\nlet x = 1\r\n```",
-            "a code fence survives, CRLF or not")
+            ResearchRunner.unwrappingWholeAnswerFence("```\r\nText [1].\r\n```\r\n"),
+            "Text [1].")
+        let crlfCode = "```swift\r\nlet x = 1\r\n```"
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence(crlfCode), crlfCode,
+                       "a code fence survives, CRLF or not")
     }
 
     /// The unwrapper is pinned above; this pins that the revision path still calls it.

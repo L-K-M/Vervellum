@@ -853,7 +853,19 @@ final class ResearchRunner: ResearchRunning {
     /// made of nothing but backticks for the same reason, which covers the one-line
     /// spelling this cannot.
     static func unwrappingWholeAnswerFence(_ answer: String) -> String {
-        let lines = answer.split(separator: "\n", omittingEmptySubsequences: false)
+        // By `isNewline`, not by the character "\n". A Swift `Character` is a grapheme
+        // cluster and CR-LF is *one* of them, so a CRLF reply never matched the "\n"
+        // separator at all: the whole answer came back as a single line, `lines.count >=
+        // 2` failed, and the one function whose job is catching a fenced answer switched
+        // itself off for any provider or proxy that speaks CRLF. Trimming harder does not
+        // reach this — there were no lines to trim.
+        //
+        // Trimmed first, so a trailing line terminator does not leave an empty last line
+        // for the closer test to fail on. `revise` already hands this a trimmed string;
+        // doing it here too means the function is correct whoever calls it, rather than
+        // correct because of the order two lines happen to sit in.
+        let lines = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         guard lines.count >= 2, let first = lines.first, let last = lines.last
         else { return answer }
         // A fence is a *run* of three or more backticks, not exactly three — and reading
@@ -861,12 +873,9 @@ final class ResearchRunner: ResearchRunning {
         // A model reaches for the longer form when the thing it is wrapping contains its
         // own ``` block, which is the likeliest shape for a correction to arrive in and
         // the one reason it would think to fence the answer at all.
-        // `whitespacesAndNewlines`, not `whitespaces`: the split above is on "\n"
-        // alone, so a CRLF reply leaves a carriage return on the end of every line, and
-        // `.whitespaces` is space and tab. The label read as "markdown\r" and the closer
-        // as four characters of which three were backticks — both guards failed, and the
-        // one function whose whole job is catching a fenced answer switched itself off
-        // for any provider or proxy that speaks CRLF.
+        // `whitespacesAndNewlines` rather than `whitespaces` as well, which the split
+        // above already makes unnecessary for CR — belt and braces for any other line
+        // terminator that reaches a line's edge without having split it.
         let opener = first.trimmingCharacters(in: .whitespacesAndNewlines)
         let openingTicks = opener.prefix(while: { $0 == "`" }).count
         guard openingTicks >= 3 else { return answer }
