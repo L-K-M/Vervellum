@@ -289,6 +289,21 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// reading decodes to.
     var pagesAttempted: Int = 0
     var pagesRead: Int = 0
+    /// Whether a page fetch is in flight *right now*.
+    ///
+    /// Set by the runner around both reads — the question's links before the plan
+    /// exists, and the pages behind the search results after it — because "what is
+    /// happening at this moment" is a fact the runner has and `runningProgressLabel` was
+    /// previously inferring. The inference was `pagesAttempted > 0` once every search
+    /// had completed: true for the second read, and silent for the first, because the
+    /// links are read while the stage is still `.planning`. A question that began with a
+    /// pasted link therefore read "Planning searches" for as long as three fetches take,
+    /// which is up to half a minute of the one moment the label exists to explain.
+    ///
+    /// Transient, exactly like `searchesCompleted`: it describes a moment inside a run
+    /// and means nothing once the turn is terminal. It reaches disk only because the
+    /// whole turn does.
+    var isReadingPages: Bool = false
     /// The streamed markdown answer, with `[n]` citations.
     var answer: String = ""
     var findings: [Finding] = []
@@ -328,7 +343,7 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     // property, the existing round-trip test catches a field that goes missing from it.
     enum CodingKeys: String, CodingKey {
         case id, question, askedAt, stage, reading, searches, searchesCompleted, sources
-        case pagesAttempted, pagesRead
+        case pagesAttempted, pagesRead, isReadingPages
         case answer, findings, limitations, followups, notices, failure, duration, model
     }
 
@@ -344,6 +359,7 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         sources = try container.decode([Source].self, forKey: .sources)
         pagesAttempted = try container.decodeIfPresent(Int.self, forKey: .pagesAttempted) ?? 0
         pagesRead = try container.decodeIfPresent(Int.self, forKey: .pagesRead) ?? 0
+        isReadingPages = try container.decodeIfPresent(Bool.self, forKey: .isReadingPages) ?? false
         answer = try container.decode(String.self, forKey: .answer)
         findings = try container.decode([Finding].self, forKey: .findings)
         limitations = try container.decode(String.self, forKey: .limitations)
@@ -369,25 +385,32 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// "Searching the web · 2 of 3" rather than a static label for the whole stage.
     /// Terminal stages fall through to `stage.label`, which is also what logs use.
     ///
-    /// Page reading reports through the searching stage rather than through a stage of
-    /// its own. A new `ResearchStage` case would be an enum value an older build cannot
+    /// Page reading reports through `isReadingPages` rather than through a stage of its
+    /// own. A new `ResearchStage` case would be an enum value an older build cannot
     /// decode, and `ResearchStage` — unlike `TurnNotice` — has no lenient decoder, so it
-    /// would make a thread written here unreadable there. A label is not worth that.
+    /// would make a thread written here unreadable there. A label is not worth that; a
+    /// `Bool` that decodes to `false` costs nothing.
     var runningProgressLabel: String {
+        // Nothing below describes a turn that has stopped, and the flag is the runner's
+        // to clear — so the label refuses to speak for a terminal turn rather than
+        // trusting that it was cleared.
+        guard !stage.isTerminal else { return stage.label }
+        // A fetch in flight outranks everything, in either stage, because it is the one
+        // thing the reader is actually waiting on. Asked as a fact rather than inferred
+        // from `pagesAttempted`, which cannot tell "reading now" from "read already":
+        // both leave the same count behind.
+        //
+        // No "2 of 3" here, unlike the searches: the direct reader fetches the pages
+        // concurrently, so there is no meaningful running count to report — only how
+        // many are being read. The `> 0` is belt and braces, so no arrangement of the
+        // two fields can ever render "Reading 0 pages".
+        if isReadingPages, pagesAttempted > 0 {
+            return "Reading \(pagesAttempted) page\(pagesAttempted == 1 ? "" : "s")"
+        }
         guard case .searching = stage else { return stage.label }
-        // Searches first, while any are outstanding. `pagesAttempted` is no longer only
-        // set once the searching is done — a question carrying links has pages read
-        // before the plan even exists — so testing it first would report "Reading 2
-        // pages" over the whole search stage.
         if !searches.isEmpty, searchesCompleted < searches.count {
             let attempted = min(max(searchesCompleted, 1), searches.count)
             return "Searching the web · \(attempted) of \(searches.count)"
-        }
-        // No "2 of 3" here, unlike the searches: the direct reader fetches the pages
-        // concurrently, so there is no meaningful running count to report — only how
-        // many are being read.
-        if pagesAttempted > 0 {
-            return "Reading \(pagesAttempted) page\(pagesAttempted == 1 ? "" : "s")"
         }
         guard !searches.isEmpty else { return stage.label }
         return "Searching the web · \(searches.count) of \(searches.count)"

@@ -91,6 +91,18 @@ and they are built to have nothing worth stealing:
   evidence block as a snippet, under the same system prompt, and cannot become a
   citation: Vervellum still owns the numbered list, and the model still refers to
   evidence only by number.
+- **A private or loopback address you paste is fetched like any other.** There is no
+  block on `127.0.0.1`, `localhost`, `169.254.x` or the RFC 1918 ranges, and that is a
+  decision rather than an oversight: a self-hosted wiki, a local documentation server or
+  a machine on your own network is a legitimate thing to ask about, and refusing those
+  addresses would break the case without making the general one safer. Two things follow
+  from it, and neither is hidden. **The page's text leaves your machine** — it becomes
+  numbered evidence and is sent to your model provider like any other source, so a link
+  to an internal admin page discloses that page's contents to them. And **a search result
+  can redirect into private space**, at most twice and re-validated at each hop, which is
+  the one path here you did not type yourself. If either matters for how you run
+  Vervellum, set **Reading the page** to *Snippets only*: nothing is fetched at all, and
+  a question that carried a link says so in a notice rather than having it read for you.
 
 Setting **Reading the page** to *Use a reader service* moves the fetch to an MCP reader
 endpoint; setting it to *Snippets only* is the behaviour of every build before this one.

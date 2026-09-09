@@ -902,9 +902,17 @@ final class ResearchRunner: ResearchRunning {
         let asked = links.enumerated().map { offset, url in
             Source(number: offset + 1, url: url, title: Self.linkTitle(for: url), snippet: "")
         }
-        update { $0.pagesAttempted = asked.count }
+        // Flagged as well as counted, and cleared the moment the read returns. This one
+        // runs while the stage is still `.planning`, so without it the panel says
+        // "Planning searches" for as long as three fetches take — see
+        // `ResearchTurn.isReadingPages`.
+        update {
+            $0.pagesAttempted = asked.count
+            $0.isReadingPages = true
+        }
         let started = trace.elapsed
         let pages = await reader.read(asked)
+        update { $0.isReadingPages = false }
         trace.log("Read \(links.count) linked page(s) via \(reader.readerName) in "
                   + String(format: "%.1fs", trace.elapsed - started))
 
@@ -973,11 +981,15 @@ final class ResearchRunner: ResearchRunning {
         // the linked sources sit at the front of this list and arrive carrying their text.
         // Non-empty by the guard above, which is why there is no second check here.
         let targets = Array(sources.filter { !$0.wasRead }.prefix(budget))
-        update { $0.pagesAttempted += targets.count }
+        update {
+            $0.pagesAttempted += targets.count
+            $0.isReadingPages = true
+        }
         // Not `trace.stage`, which is for throwing work: reading never throws, because
         // a page that cannot be read is a source that keeps its snippet.
         let started = trace.elapsed
         let pages = await reader.read(targets)
+        update { $0.isReadingPages = false }
         // Interpolate the name, format only the number — the shape the other trace lines
         // in this file already use.
         trace.log("Read pages via \(reader.readerName) in "
