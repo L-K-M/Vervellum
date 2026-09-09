@@ -740,14 +740,55 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("```\nOne\nTwo\n```"),
                        "One\nTwo")
 
-        // A fence that names a language is a real code block, and an answer that is
-        // nothing but one has to survive: the reviser is told to return what it was
-        // given where the findings name nothing.
+        // A fence naming a *code* language — unlike the `markdown` wrapper the first
+        // assertion unwraps — is a real code block, and an answer that is nothing but one
+        // has to survive: the reviser is told to return what it was given where the
+        // findings name nothing.
         let code = "```swift\nlet x = 1\n```"
         XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence(code), code)
         // And a fence that closes in the middle is not a wrapper at all.
         let partial = "Text.\n```\nlet x = 1\n```\nMore text."
         XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence(partial), partial)
+
+        // A fence with nothing between its halves unwraps to nothing, which is what
+        // hands it to the emptiness guard. Left alone it was non-empty, different from
+        // the draft, and cited nothing for the validator to object to — so it cleared
+        // every check and replaced a read answer with two rows of backticks.
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("```\n```"), "")
+    }
+
+    /// The one-line spelling of the same degenerate reply, which unwrapping cannot see —
+    /// there is no closing line to pair the opening one with — so the guard that catches
+    /// it is the one asking whether anything but backticks came back.
+    func testAReplyOfNothingButFenceIsNotARevision() async throws {
+        let transport = revisionTransport(
+            verdict: "contradicted",
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .stream(["```"]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "Parallax is measured in degrees [1].")
+        XCTAssertNil(turn.draftAnswer)
+        XCTAssertTrue(turn.notices.contains(.revisionUnavailable), "\(turn.notices)")
+    }
+
+    /// Dropping every citation is the quiet half of breaking the citation rule: the prose
+    /// still reads as confident and now rests on nothing, and no check above this one has
+    /// a bad number to catch.
+    func testARevisionThatStripsEveryCitationIsDiscarded() async throws {
+        let transport = revisionTransport(
+            verdict: "mixed",
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .stream(["Parallax is measured in arcseconds, though sources vary."]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "Parallax is measured in degrees [1].")
+        XCTAssertNil(turn.draftAnswer)
+        XCTAssertTrue(turn.notices.contains(.revisionUnavailable), "\(turn.notices)")
     }
 
     /// The common case, and the one that decides whether this stage costs a call on
@@ -755,7 +796,11 @@ final class ResearchRunnerTests: XCTestCase {
     /// `insufficient` one is usually the check agreeing with a hedge the answer prompt
     /// asked for — neither is the answer being wrong about its evidence.
     func testAnAnswerTheCheckDidNotFaultIsNeverSentBackForRevision() async throws {
-        for verdict in ["supported", "insufficient", "opinion"] {
+        // Derived from the runner's own rule rather than listed here, so a sixth verdict
+        // is covered the day it is added: whichever side of `warrantsRevision` it lands
+        // on, it is either in this loop or in the test above, and cannot be in neither.
+        for verdict in Verdict.allCases.filter({ !ResearchRunner.warrantsRevision($0) })
+            .map(\.rawValue) {
             let transport = revisionTransport(
                 verdict: verdict,
                 answer: ["Parallax is measured in arcseconds [1]."],

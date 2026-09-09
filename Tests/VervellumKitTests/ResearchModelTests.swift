@@ -387,6 +387,10 @@ final class ResearchModelTests: XCTestCase {
         turn.sources = [Source(number: 1, url: "https://example.com", title: "T", snippet: "S")]
         turn.findings = [Finding(claim: "C", verdict: .mixed, reasoning: "R", sourceNumbers: [1])]
         turn.notices = [.contextTrimmed]
+        // The revision keeps the draft so the findings above stay readable. A field that
+        // went missing from the document would leave the table annotating prose that no
+        // longer makes the claims — the exact thing keeping it prevents.
+        turn.draftAnswer = "An answer that was wrong [1]."
         turn.searches = [try XCTUnwrap(PlannedSearch(purpose: "p", arguments: ["q": "x"]))]
         turn.duration = 12.5
 
@@ -402,6 +406,8 @@ final class ResearchModelTests: XCTestCase {
         let decoded = try decoder.decode(ThreadLibrary.self, from: encoder.encode(library))
 
         XCTAssertEqual(decoded.threads.first?.turns.first?.answer, "An answer [1].")
+        XCTAssertEqual(decoded.threads.first?.turns.first?.draftAnswer,
+                       "An answer that was wrong [1].")
         XCTAssertEqual(decoded.threads.first?.turns.first?.findings.first?.verdict, .mixed)
         XCTAssertEqual(decoded.threads.first?.turns.first?.notices, [.contextTrimmed])
         XCTAssertEqual(decoded.threads.first?.turns.first?.searches.first?.displayQuery, "x")

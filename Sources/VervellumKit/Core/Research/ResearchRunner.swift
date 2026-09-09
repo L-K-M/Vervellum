@@ -811,6 +811,21 @@ final class ResearchRunner: ResearchRunning {
         }
     }
 
+    /// Whether a finding is *shown* to the reviser, which is a wider set than the one
+    /// that wakes it.
+    ///
+    /// A switch for the reason the one above is: `!= .supported && != .opinion` says the
+    /// same thing today and would silently absorb a sixth verdict into "shown", which is
+    /// a decision somebody should have to make rather than inherit. The two questions are
+    /// separate — a claim can be worth mentioning to a rewrite already under way without
+    /// being worth starting one for — so they are two switches rather than one.
+    static func isShownToReviser(_ verdict: Verdict) -> Bool {
+        switch verdict {
+        case .contradicted, .mixed, .insufficient: return true
+        case .supported, .opinion: return false
+        }
+    }
+
     /// The answer with a fence that wraps the *whole* of it removed.
     ///
     /// The revise prompt forbids fencing the answer and models do it anyway — it is the
@@ -822,12 +837,20 @@ final class ResearchRunner: ResearchRunning {
     /// fenced revision validates as an answer that cites nothing at all.
     ///
     /// Only an *undecorated* opening fence is unwrapped: ``` or one labelled `markdown`
-    /// or `md`. A fence that names a language is a real code block, and an answer that is
-    /// genuinely nothing but one — rare, but the reviser is told to preserve what it was
-    /// given — must survive this untouched.
+    /// or `md`. A fence naming a code language is a real code block, and an answer that
+    /// is genuinely nothing but one — rare, but the reviser is told to preserve what it
+    /// was given — must survive this untouched.
+    ///
+    /// Two lines are enough, not three. A reply of nothing but an opening and closing
+    /// fence unwraps to the empty string and is caught by the emptiness guard in
+    /// `revise`; refusing to unwrap it left it non-empty, different from the draft, and
+    /// carrying no citation for the validator to object to — so it cleared every guard
+    /// and replaced a read answer with a bare fence. The `revise` guard rejects a reply
+    /// made of nothing but backticks for the same reason, which covers the one-line
+    /// spelling this cannot.
     static func unwrappingWholeAnswerFence(_ answer: String) -> String {
         let lines = answer.split(separator: "\n", omittingEmptySubsequences: false)
-        guard lines.count > 2,
+        guard lines.count >= 2,
               let first = lines.first, let last = lines.last,
               first.hasPrefix("```"), last.trimmingCharacters(in: .whitespaces) == "```"
         else { return answer }
@@ -868,7 +891,7 @@ final class ResearchRunner: ResearchRunning {
         // The trigger decides whether the call is worth making; once it is being made,
         // the reviser should see the whole of what the check was unsure about.
         let unsettled = findings
-            .filter { $0.verdict != .supported && $0.verdict != .opinion }
+            .filter { Self.isShownToReviser($0.verdict) }
             .map { finding -> [String: Any] in
                 ["claim": finding.claim,
                  "verdict": finding.verdict.rawValue,
@@ -924,10 +947,17 @@ final class ResearchRunner: ResearchRunning {
             return
         }
 
+        // The reply arrived; a Stop may have arrived with it. Everything below mutates
+        // the turn, and the catch above only covers a cancellation thrown *by* the call.
+        try Task.checkCancellation()
         let trimmed = Self.unwrappingWholeAnswerFence(
             revised.trimmingCharacters(in: .whitespacesAndNewlines))
-        guard !trimmed.isEmpty else {
-            // A reply with nothing in it is a call that failed and happened to return.
+        // Nothing in it, or nothing in it but fence. A reply of a lone ``` is not caught
+        // by unwrapping — there is no closing line to pair it with — and would otherwise
+        // read as a perfectly valid revision: non-empty, different from the draft, and
+        // citing nothing for the validator to object to.
+        guard trimmed.contains(where: { !$0.isWhitespace && $0 != "`" }) else {
+            // A reply with no content in it is a call that failed and happened to return.
             trace.warn("Revision unavailable: the reply was empty")
             update { $0.addNotice(.revisionUnavailable) }
             return
@@ -945,7 +975,18 @@ final class ResearchRunner: ResearchRunning {
         // the reader's trust in these numbers rests on. So it is checked before it is
         // accepted, and dropped whole rather than swapped in and annotated.
         let validation = CitationValidator.validate(answer: trimmed, sourceCount: sources.count)
-        guard validation.outOfRangeCitations.isEmpty, validation.literalURLs.isEmpty else {
+        // Un-citing is the quiet half of the same failure. A reviser that hedges a claim
+        // by dropping its `[n]` rather than weakening its words hands back prose that
+        // reads as confident and rests on nothing — and every check above would pass it,
+        // because there is no bad number to find. Measured against the draft, so an
+        // answer that never cited anything is not held to a standard it never met.
+        let draftCitedSomething = !CitationValidator
+            .validate(answer: answer, sourceCount: sources.count)
+            .citedSourceIndices.isEmpty
+        guard validation.outOfRangeCitations.isEmpty,
+              validation.literalURLs.isEmpty,
+              !draftCitedSomething || !validation.citedSourceIndices.isEmpty
+        else {
             trace.warn("Revision discarded: it broke the citation rule")
             update { $0.addNotice(.revisionUnavailable) }
             return

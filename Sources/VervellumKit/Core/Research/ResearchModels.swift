@@ -476,7 +476,13 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         // Below the fetches and above the stage, because it happens inside `.assessing`
         // and is the more specific truth while it lasts: the claims have been checked,
         // and the answer is being rewritten against what the check found.
-        if isRevising { return "Revising the answer" }
+        //
+        // Gated on the stage as well as the flag. The runner clears the flag on every
+        // way out of the revision, so a set flag outside `.assessing` is already a bug —
+        // and the cost of that bug is a turn that says it is revising for as long as it
+        // is on screen, which is a lie told by the one label that exists to say where the
+        // run actually is.
+        if isRevising, stage == .assessing { return "Revising the answer" }
         guard case .searching = stage else { return stage.label }
         if !searches.isEmpty, searchesCompleted < searches.count {
             let attempted = min(max(searchesCompleted, 1), searches.count)
