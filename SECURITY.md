@@ -84,6 +84,24 @@ and they are built to have nothing worth stealing:
   redirect; the reader reads the `Location` and starts a *fresh* credential-free request,
   at most twice, and re-validates every hop as an absolute `http(s)` URL. `file:` and
   `data:` targets are rejected at each hop rather than only at the first.
+- **A redirect cannot cross into private address space.** A chain that started on a
+  public address must stay on one. A hop to loopback, link-local, an RFC 1918 block or
+  carrier NAT ends the read, in IPv4 and in IPv6 alike — `::1`, `fc00::/7`, and
+  `fe80::/9`, which is link-local plus the deprecated site-local block above it,
+  and the forms that carry an IPv4 address inside them (`::ffff:192.168.1.1`, 6to4,
+  NAT64) are decided by what they actually name. So do the reserved local names
+  (`localhost`, `.local`, `.localdomain`), and so does any host that cannot be read as
+  either an ordinary name or a provably public literal: `http://2130706433/` and
+  `http://0x7f.0.0.0x1/` are `127.0.0.1` to a resolver, and `http://012.0.0.1/` is
+  `10.0.0.1` — a leading zero is octal there and decimal to most parsers. The rule is
+  "not provably public" rather than a list of the spellings anyone has thought of yet.
+- **What that check cannot see.** It reads the address the URL *states*, not the address
+  the connection reaches, so a *hostname* that resolves into private space still passes:
+  the name is resolved inside `URLSession`, where the answer is neither visible here nor
+  bindable to the socket that follows. Closing it means resolving the host first,
+  checking every address that comes back, and connecting to the checked address with the
+  original `Host` — a custom connection path, which is not built here. Until it is, this
+  boundary stops addresses, not names.
 - **Only text, and only some of it.** A non-text content type is skipped on its header
   rather than fetched and discarded, the body is capped, and the extracted text is
   truncated with a visible marker.
@@ -91,6 +109,23 @@ and they are built to have nothing worth stealing:
   evidence block as a snippet, under the same system prompt, and cannot become a
   citation: Vervellum still owns the numbered list, and the model still refers to
   evidence only by number.
+- **A private or loopback address you paste is fetched like any other.** There is no
+  block on `127.0.0.1`, `localhost`, `169.254.x` or the RFC 1918 ranges, and that is a
+  decision rather than an oversight: a self-hosted wiki, a local documentation server or
+  a machine on your own network is a legitimate thing to ask about, and refusing those
+  addresses would break the case without making the general one safer. Two things follow
+  from it, and neither is hidden. **The page's text leaves your machine** — it becomes
+  numbered evidence and is sent to your model provider like any other source, so a link
+  to an internal admin page discloses that page's contents to them. And the licence is
+  yours alone: **an address you did not type never reaches private space.** A search
+  result that names one is left unread with its snippet, and a page that answers a
+  redirect with one ends the read, so no page that wins a search slot can turn Vervellum
+  into a probe of your network by naming it. That sentence is deliberately about an
+  *address*: a **hostname** that resolves into private space is not caught, which is the
+  gap described three bullets up — nothing here sees what a name resolved to. If any of
+  this matters for how you run Vervellum, set **Reading the page** to
+  *Snippets only*: nothing is fetched at all, and a question that carried a link says so
+  in a notice rather than having it read for you.
 
 Setting **Reading the page** to *Use a reader service* moves the fetch to an MCP reader
 endpoint; setting it to *Snippets only* is the behaviour of every build before this one.
