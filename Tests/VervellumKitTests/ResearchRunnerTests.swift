@@ -283,6 +283,93 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertFalse(failure.contains("rate limited"), failure)
     }
 
+    // MARK: Address space
+
+    /// A search result is a URL nobody in this conversation typed, so it does not get to
+    /// point the reader at the user's own network. The source stays — it is still a
+    /// result, and it keeps its snippet like any page that could not be read — but the
+    /// request is never made, which is the difference between a page Vervellum declined
+    /// to read and a probe of a home router whose response text goes to the model
+    /// provider as evidence.
+    func testASearchResultOnAPrivateAddressIsNeverFetched() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
+                switch Self.stage(of: call) {
+                case .plan: return .completion(json: Self.plan("router admin page"))
+                case .assess: return .completion(json: Self.assessment)
+                default: return .unrouted
+                }
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "https://a.example/one", title: "One"),
+                                           (url: "http://192.168.1.1/admin", title: "Router")]))
+            case .fetch:
+                return .html("<p>The page text for \(call.url.path).</p>")
+            case .stream:
+                return .stream(["The public page says so [1]."])
+            default:
+                return .unrouted
+            }
+        }
+
+        let turn = await run("What does my router's admin page say?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.sources.map(\.url),
+                       ["https://a.example/one", "http://192.168.1.1/admin"],
+                       "the result should still be a source, just an unread one")
+        XCTAssertEqual(turn.pagesAttempted, 1)
+        XCTAssertEqual(turn.pagesRead, 1)
+        XCTAssertEqual(turn.sources.map(\.wasRead), [true, false])
+        // "Keeps its snippet" is the promise above, so it is asserted rather than
+        // assumed: an unread source that arrived with nothing would be a result the
+        // answer cannot use at all, which is a different outcome from not reading it.
+        XCTAssertEqual(turn.sources.last?.title, "Router")
+        XCTAssertFalse(turn.sources.last?.snippet.isEmpty ?? true)
+        XCTAssertEqual(transport.calls.filter { $0.kind == .fetch }.map { $0.url.absoluteString },
+                       ["https://a.example/one"],
+                       "only the public page may be fetched, and a private address never "
+                       + "requested at all")
+    }
+
+    /// And the turn where the filter takes everything: a search that returned only
+    /// addresses Vervellum will not fetch. Refusing earlier than the reader must not
+    /// also mean explaining less — before the filter existed these pages were fetched,
+    /// came back empty and raised the notice, so a turn that now refuses them without a
+    /// word would be the one turn where reading visibly did nothing and nothing said so.
+    func testATurnWhoseResultsAreAllPrivateSaysNoPageWasRead() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
+                switch Self.stage(of: call) {
+                case .plan: return .completion(json: Self.plan("router admin page"))
+                case .assess: return .completion(json: Self.assessment)
+                default: return .unrouted
+                }
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "http://192.168.1.1/admin", title: "Router")]))
+            case .stream:
+                return .stream(["The snippet is all there is [1]."])
+            default:
+                return .unrouted
+            }
+        }
+
+        let turn = await run("What does my router's admin page say?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertTrue(turn.notices.contains(.noPagesRead), "notices: \(turn.notices)")
+        // The other half of the same contract: a refused result is still a source, kept
+        // with its snippet, exactly as it is on the turn where only some were refused.
+        // Dropping them here would leave the answer's `[1]` pointing at nothing.
+        XCTAssertEqual(turn.sources.map(\.url), ["http://192.168.1.1/admin"])
+        XCTAssertFalse(turn.sources.first?.snippet.isEmpty ?? true)
+        XCTAssertEqual(turn.pagesAttempted, 0)
+        XCTAssertEqual(turn.pagesRead, 0)
+        XCTAssertTrue(transport.calls.allSatisfy { $0.kind != .fetch },
+                      "nothing may be fetched: \(transport.trail)")
+    }
+
     // MARK: Links in the question
 
     func testAQuestionsLinksAreReadBeforeThePlannerIsAsked() async throws {

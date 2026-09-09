@@ -910,7 +910,14 @@ final class ResearchRunner: ResearchRunning {
         let asked = links.enumerated().map { offset, url in
             Source(number: offset + 1, url: url, title: Self.linkTitle(for: url), snippet: "")
         }
-        update { $0.pagesAttempted = asked.count }
+        // Counted twice over: `pagesAttempted` for the turn's record, `pagesInFlight`
+        // for what is happening now. This read runs while the stage is still
+        // `.planning`, so without the second the panel says "Planning searches" for as
+        // long as three fetches take — see `ResearchTurn.pagesInFlight`.
+        update {
+            $0.pagesAttempted = asked.count
+            $0.pagesInFlight = asked.count
+        }
         let started = trace.elapsed
         let pages = await reader.read(asked)
         trace.log("Read \(links.count) linked page(s) via \(reader.readerName) in "
@@ -925,7 +932,15 @@ final class ResearchRunner: ResearchRunning {
             read.fullText = text
             sources.append(read)
         }
-        update { $0.pagesRead = sources.count }
+        // Zeroed here rather than the moment `read` returned, so that the one snapshot
+        // carries both the end of the fetch and its result. Clearing it on its own
+        // publishes a frame in which nothing is in flight and nothing has been read
+        // yet — a flicker back to the bare stage label — and costs an extra publish to
+        // do it.
+        update {
+            $0.pagesInFlight = 0
+            $0.pagesRead = sources.count
+        }
         trace.log("Linked pages read: \(sources.count) of \(asked.count)")
         if sources.count < asked.count { update { $0.addNotice(.linkNotRead) } }
         return (sources, asked.count)
@@ -957,13 +972,58 @@ final class ResearchRunner: ResearchRunning {
                       + "search-result pages left unread")
         }
         guard settings.pageReading != .off, !sources.isEmpty, budget > 0 else { return sources }
-        // Decided before the reader is built, not after. A turn whose links filled the
-        // budget — or a link-only turn, which an empty plan now produces — has nothing
-        // unread left, and the MCP reader's handshake is a real request: paying for one
-        // on a path that provably fetches nothing costs a round trip and invents a
-        // failure surface, since a handshake that fails would warn about reading this
-        // turn never intended to do.
-        guard sources.contains(where: { !$0.wasRead }) else { return sources }
+
+        // Which pages this will fetch, decided before the reader is built rather than
+        // after. A turn whose links filled the budget — or a link-only turn, which an
+        // empty plan now produces — has nothing unread left, and the MCP reader's
+        // handshake is a real request: paying for one on a path that provably fetches
+        // nothing costs a round trip and invents a failure surface, since a handshake
+        // that fails would warn about reading this turn never intended to do.
+        //
+        // Skipping what is already read is also what stops a linked page being fetched
+        // twice: the linked sources sit at the front of this list and arrive carrying
+        // their text.
+        //
+        // And a search result is a URL nobody in this conversation typed. The question's
+        // own links may point wherever the user pointed them, `http://localhost:3000`
+        // included — that is the feature working. A URL that arrived from a search
+        // engine has no such licence: fetching `http://192.168.1.1/admin` because a page
+        // won a search slot would probe the user's own network and hand what it found to
+        // the model provider as evidence. The address on the far side of a redirect is
+        // held to the same rule inside the reader, which is the only other way one
+        // arrives unasked.
+        // One consequence worth naming: a question's own link that failed in the linked
+        // pass (an empty text — a dev server that was briefly down) is unread, so it
+        // would otherwise be retried here. If it is private, it no longer is. That is
+        // the policy working rather than an oversight — this pass cannot tell the
+        // question's links from the search results — and it costs a retry the linked
+        // pass already had its chance at.
+        let targets = Array(sources.filter { source in
+            guard !source.wasRead else { return false }
+            // Two different skips, so the trace does not report a malformed URL as a
+            // private one and send whoever reads it looking in the wrong place.
+            guard let url = DirectPageReader.fetchableURL(source.url) else {
+                trace.log("Page read skipped: not a fetchable address")
+                return false
+            }
+            // The address itself stays out of the log, as in the reader's own refusal.
+            guard DirectPageReader.isPubliclyRoutable(url) else {
+                trace.log("Page read skipped: not a public address")
+                return false
+            }
+            return true
+        }.prefix(budget))
+        guard !targets.isEmpty else {
+            // Nothing survived the filter, so nothing will be fetched — and that is the
+            // one turn where reading visibly did nothing. It gets the sentence a reader
+            // that fetched and failed would get, rather than silence: before this pass
+            // learned to refuse an address, these pages reached the reader and came back
+            // empty, which is what raised the notice. Refusing earlier must not also
+            // mean explaining less. `alreadyRead` keeps it honest — a turn that read the
+            // page the user pasted is not a turn that read nothing.
+            if alreadyRead == 0 { update { $0.addNotice(.noPagesRead) } }
+            return sources
+        }
 
         let reader: PageReading?
         do {
@@ -977,11 +1037,10 @@ final class ResearchRunner: ResearchRunning {
         }
         guard let reader else { return sources }
 
-        // Skipping what is already read is what stops a linked page being fetched twice:
-        // the linked sources sit at the front of this list and arrive carrying their text.
-        // Non-empty by the guard above, which is why there is no second check here.
-        let targets = Array(sources.filter { !$0.wasRead }.prefix(budget))
-        update { $0.pagesAttempted += targets.count }
+        update {
+            $0.pagesAttempted += targets.count
+            $0.pagesInFlight = targets.count
+        }
         // Not `trace.stage`, which is for throwing work: reading never throws, because
         // a page that cannot be read is a source that keeps its snippet.
         let started = trace.elapsed
@@ -997,7 +1056,11 @@ final class ResearchRunner: ResearchRunning {
             enriched[index].fullText = text
         }
         let read = pages.values.filter { !$0.isEmpty }.count
-        update { $0.pagesRead += read }
+        // One snapshot for the end of the fetch and its result, as above.
+        update {
+            $0.pagesInFlight = 0
+            $0.pagesRead += read
+        }
         trace.log("Pages read: \(read) of \(targets.count)")
         if read == 0, alreadyRead == 0 { update { $0.addNotice(.noPagesRead) } }
         return enriched
