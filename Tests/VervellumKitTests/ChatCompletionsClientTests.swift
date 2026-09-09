@@ -265,9 +265,13 @@ final class ChatCompletionsClientTests: XCTestCase {
         let body = try XCTUnwrap(transport.calls.first?.body)
         let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
         // The text as well as the absence of the image: a rebuild that filtered the
-        // picture and lost the question with it would pass a nil check.
-        XCTAssertEqual(messages.last?["content"] as? String, "u",
-                       "the question was lost, or an image reached a provider without eyes")
+        // picture and lost the question with it would pass a bare nil check. Matched on
+        // the payload's own key rather than on an exact string, because what reaches
+        // `content` here is the encoded payload — pinning its spelling would be pinning
+        // `JSONSerialization`, not this behaviour.
+        let content = try XCTUnwrap(messages.last?["content"] as? String,
+                                    "an image reached a provider that has no eyes")
+        XCTAssertTrue(content.contains("\"q\""), "the question was lost: \(content)")
     }
 
     /// And the same client with the flag on sends it, so the guard above is a filter
