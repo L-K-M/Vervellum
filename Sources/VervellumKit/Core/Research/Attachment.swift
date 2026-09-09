@@ -104,9 +104,13 @@ struct Attachment: Codable, Equatable, Identifiable {
 
     /// The largest attachment of any kind, before base64.
     ///
-    /// Named for the image because that is the case the number was chosen against, but
-    /// it gates text too — a screenshot and a pasted log go down the same pipe into the
-    /// same context window, and one ceiling is the honest way to say so.
+    /// Of any kind, and named that way: this is the ceiling `make` applies before it has
+    /// looked at the bytes, so it is what refuses an oversized log exactly as it refuses
+    /// an oversized screenshot — and it is what the front ends check a dropped file
+    /// against before reading it. The number was chosen against the image case, but a
+    /// screenshot and a pasted log go down the same pipe into the same context window,
+    /// and one ceiling is the honest way to say so. A name that said `image` would have
+    /// to be disbelieved at every one of those call sites.
     ///
     /// Chosen against what happens next rather than against what a disk can hold: the
     /// bytes are base64-encoded into a JSON request body, which costs a third again, and
@@ -114,7 +118,7 @@ struct Attachment: Codable, Equatable, Identifiable {
     /// is a generous screenshot and a small photograph. Refusing above it, rather than
     /// scaling the image down, is deliberate — scaling needs an imaging framework, and
     /// nothing under `Core/` may import one.
-    static let maxImageBytes = 4 * 1024 * 1024
+    static let maxAttachmentBytes = 4 * 1024 * 1024
 
     /// The most text an attached file contributes to the question payload.
     ///
@@ -226,7 +230,7 @@ struct Attachment: Codable, Equatable, Identifiable {
         // Size first, so both kinds are refused for the same reason in the same words: a
         // 6 MB log told it is "not something Vervellum can attach" would send its owner
         // looking for a format problem that is not there.
-        guard data.count <= maxImageBytes else {
+        guard data.count <= maxAttachmentBytes else {
             return .failure(.tooLarge(name: display, byteCount: data.count))
         }
         if let mediaType = imageMediaType(sniffing: data) {
@@ -262,7 +266,7 @@ struct Attachment: Codable, Equatable, Identifiable {
                 let megabytes = Double(byteCount) / (1024 * 1024)
                 return String(format: "%@ is %.1f MB. An attachment can be at most "
                               + "%ld MB — scale it down, or attach a shorter file.",
-                              name, megabytes, Attachment.maxImageBytes / (1024 * 1024))
+                              name, megabytes, Attachment.maxAttachmentBytes / (1024 * 1024))
             case .unsupported(let name):
                 // "UTF-8", because that is what `text(from:)` accepts. A Latin-1 file
                 // refused as simply "not something Vervellum can attach" sends its owner

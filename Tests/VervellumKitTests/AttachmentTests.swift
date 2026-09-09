@@ -66,7 +66,7 @@ final class AttachmentTests: XCTestCase {
     /// that can be attached, and being told otherwise sends its owner looking for a
     /// format problem that is not there.
     func testAnOversizedTextFileIsRefusedForItsSizeRatherThanItsKind() {
-        let long = Data(String(repeating: "a", count: Attachment.maxImageBytes + 1).utf8)
+        let long = Data(String(repeating: "a", count: Attachment.maxAttachmentBytes + 1).utf8)
         guard case .failure(let reason) = Attachment.make(from: long, name: "huge.log") else {
             return XCTFail("accepted an oversized file")
         }
@@ -95,7 +95,7 @@ final class AttachmentTests: XCTestCase {
     /// `Core/` may import one. The message says what to do instead, because "too large"
     /// with no number is a dead end.
     func testAnImageOverTheCapIsRefusedWithItsSize() {
-        let huge = png(Attachment.maxImageBytes)
+        let huge = png(Attachment.maxAttachmentBytes)
         guard case .failure(let reason) = Attachment.make(from: huge, name: "shot.png") else {
             return XCTFail("accepted an oversized image")
         }
@@ -105,8 +105,8 @@ final class AttachmentTests: XCTestCase {
 
         // And a file of exactly the cap is fine — `png()` adds an eight-byte header — so
         // the boundary pinned here is the inclusive one the guard actually implements.
-        let exact = png(Attachment.maxImageBytes - 8)
-        XCTAssertEqual(exact.count, Attachment.maxImageBytes)
+        let exact = png(Attachment.maxAttachmentBytes - 8)
+        XCTAssertEqual(exact.count, Attachment.maxAttachmentBytes)
         // The happy path, said out loud. `XCTAssertNoThrow` proved only that nothing
         // threw — a regression that classified an accepted image as text, stamped the
         // wrong media type, or recorded the wrong size would have shipped green through
