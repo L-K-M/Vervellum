@@ -173,14 +173,21 @@ final class PageReadingTests: XCTestCase {
     /// second would make the test vacuous on a platform whose parser is stricter, and
     /// pinning only the first would break on one whose parser is more lenient.
     func testTheSpellingsThatHideALoopbackCannotBeFetched() {
+        var classified = 0
         for address in ["http://2130706433/", "http://0x7f000001/", "http://0177.0.0.1/",
                         "http://012.0.0.1/", "http://0x7f.1/", "http://0x7f.0x1/",
                         "http://0x7f.0.0.0x1/", "http://0177.0.0.0x1/", "http://127.1/",
                         "http://intranet/", "http://router/status"] {
             guard let url = DirectPageReader.fetchableURL(address) else { continue }
+            classified += 1
             XCTAssertFalse(DirectPageReader.isPubliclyRoutable(url), address)
         }
-        // And not vacuously: the same shape, with a name in it, is still reachable.
+        // Counted, because "every address was refused by the parser" and "the classifier
+        // was never asked" look identical from a green test. A stricter parser is a fine
+        // reason for a spelling to be skipped; it is not a reason for all of them to be.
+        XCTAssertGreaterThan(classified, 0, "no spelling reached the classifier at all")
+        // And not vacuously refusing everything: the same shape, with a name in it, is
+        // still reachable.
         XCTAssertNotNil(DirectPageReader.fetchableURL("https://0x7f.example.com/"))
         XCTAssertTrue(DirectPageReader.isPubliclyRoutable(
             URL(string: "https://0x7f.example.com/")!))
@@ -286,6 +293,27 @@ final class PageReadingTests: XCTestCase {
         XCTAssertEqual(stub.trail, ["fetch https://public.example.com/a"],
                        "only the public page may be fetched — a disguised loopback is "
                        + "still a loopback")
+    }
+
+    /// A `Location` need not carry a scheme — `//host/path` inherits the one it was
+    /// served over, and plenty of sites send exactly that. The hop is therefore resolved
+    /// against the page it came from *before* anything classifies it, and it is the
+    /// resolved address that has to be refused. A guard that read the header instead of
+    /// the merged URL would pass this one straight through.
+    func testASchemeRelativePrivateLocationIsAlsoRefused() async {
+        let stub = StubTransport { call in
+            guard call.url.absoluteString == "https://public.example.com/a" else { return .unrouted }
+            return .page(status: 302,
+                         headers: ["Location": "//169.254.169.254/latest/meta-data/"],
+                         text: "")
+        }
+        let reader = DirectPageReader(trace: ResearchTrace(sink: SilentLog()), transport: stub)
+        let source = Source(number: 1, url: "https://public.example.com/a", title: "T", snippet: "S")
+
+        let pages = await reader.read([source])
+        XCTAssertTrue(pages.isEmpty)
+        XCTAssertEqual(stub.trail, ["fetch https://public.example.com/a"],
+                       "the cloud metadata address was requested")
     }
 
     /// And the same refusal one hop later, because a chain that starts public must stay

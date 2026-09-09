@@ -208,6 +208,39 @@ final class ResearchRunnerTests: XCTestCase {
                        + "requested at all")
     }
 
+    /// And the turn where the filter takes everything: a search that returned only
+    /// addresses Vervellum will not fetch. Refusing earlier than the reader must not
+    /// also mean explaining less — before the filter existed these pages were fetched,
+    /// came back empty and raised the notice, so a turn that now refuses them without a
+    /// word would be the one turn where reading visibly did nothing and nothing said so.
+    func testATurnWhoseResultsAreAllPrivateSaysNoPageWasRead() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
+                switch Self.stage(of: call) {
+                case .plan: return .completion(json: Self.plan("router admin page"))
+                case .assess: return .completion(json: Self.assessment)
+                default: return .unrouted
+                }
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "http://192.168.1.1/admin", title: "Router")]))
+            case .stream:
+                return .stream(["The snippet is all there is [1]."])
+            default:
+                return .unrouted
+            }
+        }
+
+        let turn = await run("What does my router's admin page say?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertTrue(turn.notices.contains(.noPagesRead), "notices: \(turn.notices)")
+        XCTAssertEqual(turn.pagesAttempted, 0)
+        XCTAssertEqual(turn.pagesRead, 0)
+        XCTAssertTrue(transport.calls.allSatisfy { $0.kind != .fetch },
+                      "nothing may be fetched: \(transport.trail)")
+    }
+
     // MARK: Links in the question
 
     func testAQuestionsLinksAreReadBeforeThePlannerIsAsked() async throws {

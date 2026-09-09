@@ -298,6 +298,12 @@ final class DirectPageReader: PageReading {
                   label.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" })
             else { return false }
         }
+        // Unicode-aware here while `isNumericAddressPart` is ASCII-only, and the
+        // asymmetry is load-bearing rather than an oversight: `127.０.０.１` in fullwidth
+        // digits fails the ASCII numeric check above, and this is what then refuses it,
+        // because fullwidth digits are still `isNumber`. Tighten this to `isASCII` and
+        // that host comes back a "name" — which a resolver applying IDNA mapping would
+        // then read as the loopback.
         return !(labels.last?.allSatisfy(\.isNumber) ?? true)
     }
 
@@ -331,8 +337,9 @@ final class DirectPageReader: PageReading {
     static func ipv6Bytes(_ text: String) -> [UInt8]? {
         var body = text
         if body.hasPrefix("["), body.hasSuffix("]") { body = String(body.dropFirst().dropLast()) }
-        // A zone id names an interface on this machine; the address in front of it is
-        // what decides, and its presence at all means a link-local address.
+        // A zone id names an interface on this machine. A zone can ride on more than a
+        // link-local address (RFC 4007), so the `%` decides nothing: it is stripped and
+        // the address in front of it is judged on its bytes like any other.
         if let zone = body.firstIndex(of: "%") { body = String(body[..<zone]) }
         guard body.contains(":") else { return nil }
 
@@ -404,7 +411,10 @@ final class DirectPageReader: PageReading {
         }
         // 6to4 keeps the address in the second and third groups: `2002:c0a8:0101::`.
         if bytes[0] == 0x20, bytes[1] == 0x02 { return isPublicIPv4(Array(bytes[2..<6])) }
-        // NAT64 keeps it where a mapped address keeps it, at the end.
+        // NAT64 keeps it where a mapped address keeps it, at the end. Matched on the
+        // /32 rather than only the well-known /96 on purpose: a network doing local
+        // translation puts real IPv4 destinations under `64:ff9b:1::/48` too, and
+        // requiring the middle bytes to be zero would let those through as public.
         if bytes[0] == 0x00, bytes[1] == 0x64, bytes[2] == 0xff, bytes[3] == 0x9b {
             return isPublicIPv4(Array(bytes[12..<16]))
         }

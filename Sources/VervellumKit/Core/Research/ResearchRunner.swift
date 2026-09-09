@@ -1005,7 +1005,17 @@ final class ResearchRunner: ResearchRunning {
             }
             return true
         }.prefix(budget))
-        guard !targets.isEmpty else { return sources }
+        guard !targets.isEmpty else {
+            // Nothing survived the filter, so nothing will be fetched — and that is the
+            // one turn where reading visibly did nothing. It gets the sentence a reader
+            // that fetched and failed would get, rather than silence: before this pass
+            // learned to refuse an address, these pages reached the reader and came back
+            // empty, which is what raised the notice. Refusing earlier must not also
+            // mean explaining less. `alreadyRead` keeps it honest — a turn that read the
+            // page the user pasted is not a turn that read nothing.
+            if alreadyRead == 0 { update { $0.addNotice(.noPagesRead) } }
+            return sources
+        }
 
         let reader: PageReading?
         do {

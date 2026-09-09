@@ -90,10 +90,10 @@ and they are built to have nothing worth stealing:
   and the forms that carry an IPv4 address inside them (`::ffff:192.168.1.1`, 6to4,
   NAT64) are decided by what they actually name. So do the reserved local names
   (`localhost`, `.local`, `.localdomain`), and so does any host that cannot be read as
-  either an ordinary name or a provably public literal: `http://2130706433/`,
-  `http://0x7f.0.0.0x1/` and `http://012.0.0.1/` are all `127.0.0.1` to a resolver, and
-  the rule is "not provably public" rather than a list of the spellings anyone has
-  thought of yet.
+  either an ordinary name or a provably public literal: `http://2130706433/` and
+  `http://0x7f.0.0.0x1/` are `127.0.0.1` to a resolver, and `http://012.0.0.1/` is
+  `10.0.0.1` — a leading zero is octal there and decimal to most parsers. The rule is
+  "not provably public" rather than a list of the spellings anyone has thought of yet.
 - **What that check cannot see.** It reads the address the URL *states*, not the address
   the connection reaches, so a *hostname* that resolves into private space still passes:
   the name is resolved inside `URLSession`, where the answer is neither visible here nor
@@ -120,7 +120,7 @@ and they are built to have nothing worth stealing:
   reaches private space.** A search result that points at one is left unread with its
   snippet, and a page that answers a redirect with one ends the read, so no page that
   wins a search slot can turn Vervellum into a probe of your network by naming it. A
-  *hostname* is the exception, and it is the gap described two bullets up: a name that
+  *hostname* is the exception, and it is the gap described three bullets up: a name that
   resolves into private space is not caught, because nothing here sees what it resolved
   to. If any of this matters for how you run Vervellum, set **Reading the page** to
   *Snippets only*: nothing is fetched at all, and a question that carried a link says so
