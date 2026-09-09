@@ -13,6 +13,14 @@ enum SearchProviderKind: String, Codable, CaseIterable, Identifiable, Equatable 
     /// A SearXNG instance's own JSON API, with no MCP server in between. The instance
     /// must list `json` under `search.formats`; it is not enabled by default.
     case searxng
+    /// The `kagi` command-line tool, run on this machine. The only backend that is not a
+    /// server: Kagi sells its Search API separately, so the way to research against
+    /// Kagi's index is the one its subscribers already use from a terminal. The
+    /// credential belongs to the CLI (`kagi auth`), not to Vervellum.
+    ///
+    /// Its raw value is hyphenated rather than the case name, because it is also what a
+    /// human types into `settings.json` on Linux.
+    case kagiCLI = "kagi-cli"
 
     var id: String { rawValue }
 
@@ -20,6 +28,7 @@ enum SearchProviderKind: String, Codable, CaseIterable, Identifiable, Equatable 
         switch self {
         case .mcp: return "MCP server"
         case .searxng: return "SearXNG"
+        case .kagiCLI: return "Kagi CLI"
         }
     }
 
@@ -29,7 +38,10 @@ enum SearchProviderKind: String, Codable, CaseIterable, Identifiable, Equatable 
     var requiresKey: Bool {
         switch self {
         case .mcp: return true
-        case .searxng: return false
+        // The Kagi CLI holds its own credential — `kagi auth` puts it in the tool's
+        // config, where the user's terminal already reads it. Vervellum demanding a
+        // second copy would be asking for a secret it does not need.
+        case .searxng, .kagiCLI: return false
         }
     }
 
@@ -38,6 +50,44 @@ enum SearchProviderKind: String, Codable, CaseIterable, Identifiable, Equatable 
         switch self {
         case .mcp: return ProviderSettings.defaultSearchEndpoint
         case .searxng: return "https://searx.example.org"
+        // Not a URL at all: for this kind the field holds a command, looked up the way a
+        // shell would look it up, or an absolute path to one.
+        case .kagiCLI: return ProviderSettings.defaultKagiCommand
+        }
+    }
+
+    /// What the endpoint field holds, as a word for the label above it.
+    var endpointLabel: String {
+        switch self {
+        case .mcp: return "Endpoint"
+        case .searxng: return "Address"
+        case .kagiCLI: return "Command"
+        }
+    }
+
+    /// The label on its key field.
+    var keyLabel: String {
+        switch self {
+        case .mcp: return "Search key"
+        case .searxng: return "Token"
+        case .kagiCLI: return "API key"
+        }
+    }
+
+    /// What the key field's note says. Here rather than in the macOS settings pane
+    /// because it is a fact about the provider kind, and Linux has to be able to
+    /// document the same thing without a settings window to put it in.
+    var keyNote: String {
+        switch self {
+        case .mcp:
+            return "Required. Research cannot run without it."
+        case .searxng:
+            return "Optional — only for an instance behind an authenticating proxy. "
+                + "SearXNG itself takes no key."
+        case .kagiCLI:
+            return "Optional. `kagi auth` normally holds the credential, and Vervellum "
+                + "never sees it; a key stored here is passed to the tool as "
+                + "KAGI_API_KEY instead."
         }
     }
 }
@@ -52,7 +102,9 @@ struct SearchProfile: Codable, Equatable, Identifiable {
     var id: UUID
     var name: String
     var kind: SearchProviderKind
-    /// An MCP endpoint, or a SearXNG instance's address.
+    /// An MCP endpoint, a SearXNG instance's address, or — for `kagiCLI` — the command
+    /// to run. What it means is the `kind`'s business, which is why the picker sits
+    /// above it in the settings pane.
     var endpoint: String
     /// The `SecretAccount` raw value holding this provider's key.
     var keyAccount: String
@@ -250,6 +302,13 @@ struct ProviderSettings: Equatable, Codable {
     static let defaultModelFallback = true
 
     static let defaultSearchEndpoint = "https://api.z.ai/api/mcp/web_search_prime/mcp"
+
+    /// The command a Kagi provider uses when its field is left blank. A bare name,
+    /// resolved against `PATH` and the places a CLI installs itself — see
+    /// `CommandRunner.searchDirectories` for why `PATH` alone is not enough for an app
+    /// that `launchd` started.
+    static let defaultKagiCommand = "kagi"
+
     /// z.ai's Web Reader MCP server, documented at
     /// <https://docs.z.ai/devpack/mcp/reader-mcp-server>. Configurable so any MCP server
     /// advertising a compatible reader tool can stand in.
@@ -439,9 +498,16 @@ struct ProviderSettings: Equatable, Codable {
         for index in copy.searchProfiles.indices {
             let trimmed = copy.searchProfiles[index].endpoint
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            copy.searchProfiles[index].endpoint = trimmed.isEmpty && copy.searchProfiles[index].kind == .mcp
-                ? Self.defaultSearchEndpoint
-                : trimmed
+            switch (trimmed.isEmpty, copy.searchProfiles[index].kind) {
+            case (true, .mcp):
+                copy.searchProfiles[index].endpoint = Self.defaultSearchEndpoint
+            // A blank command is the *common* case here rather than a mistake: almost
+            // nobody renames the binary, so the field exists for the few who did.
+            case (true, .kagiCLI):
+                copy.searchProfiles[index].endpoint = Self.defaultKagiCommand
+            default:
+                copy.searchProfiles[index].endpoint = trimmed
+            }
         }
         return copy
     }
@@ -469,13 +535,25 @@ struct ProviderSettings: Equatable, Codable {
         }
         if requiresSearch {
             let kind = searchKind
-            let usable = kind == .searxng
-                ? Self.searxngSearchURL(from: searchEndpoint) != nil
-                : Self.validatedEndpointURL(searchEndpoint) != nil
-            if !usable {
-                problems.append(kind == .searxng
-                    ? "The SearXNG address must be an HTTPS URL (HTTP is allowed only for localhost)."
-                    : "The search endpoint must be an HTTPS URL.")
+            switch kind {
+            case .mcp:
+                if Self.validatedEndpointURL(searchEndpoint) == nil {
+                    problems.append("The search endpoint must be an HTTPS URL.")
+                }
+            case .searxng:
+                if Self.searxngSearchURL(from: searchEndpoint) == nil {
+                    problems.append("The SearXNG address must be an HTTPS URL (HTTP is "
+                                    + "allowed only for localhost).")
+                }
+            case .kagiCLI:
+                // Only that there is something to look for. Whether a program of that
+                // name exists is a question for the machine, and it is asked where the
+                // answer can be acted on — `SearchBackendFactory`, before the turn's
+                // first billable call — rather than here, where these settings may be
+                // being edited on a machine that is not the one that will run them.
+                if searchEndpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    problems.append("The Kagi command is empty.")
+                }
             }
             // A SearXNG instance is usually open, or fronted by a proxy rather than a
             // token; demanding a key there would block the most common self-hosted setup.

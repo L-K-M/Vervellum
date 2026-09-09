@@ -77,9 +77,11 @@ runs the searches and answers based on current sources.
   is left unread says so on the turn.
 - **`/direct`** answers with no search at all, and is clearly badged as unsourced.
 - **Bring your own providers.** An OpenAI-compatible Chat Completions endpoint, and
-  for search either an HTTP MCP server — recognized tools include z.ai, Brave, Tavily,
+  for search an HTTP MCP server — recognized tools include z.ai, Brave, Tavily,
   Exa and SearXNG, and only recognized tool names are accepted — or a **SearXNG
-  instance queried directly**, with no MCP bridge in between. Model replies must
+  instance queried directly**, with no MCP bridge in between, or **Kagi** through the
+  [`kagi` command-line tool](https://github.com/Microck/kagi-cli) you have already
+  signed in with. Model replies must
   finish with `finish_reason: stop`; malformed or unfinished replies remain
   incomplete. Keys live in your Keychain on macOS, one per configured provider.
 - **As many models as you want, chosen per question.** Configure several providers —
@@ -151,6 +153,21 @@ at the instance (its home page is enough — `/search` is appended):
   "searchEndpoint": "https://searx.example.org"
 }
 ```
+
+To search Kagi, install the [`kagi` CLI](https://github.com/Microck/kagi-cli), sign it
+in once with `kagi auth`, and select it as the provider:
+
+```json
+{
+  "searchProvider": "kagi-cli",
+  "searchEndpoint": "kagi"
+}
+```
+
+`searchEndpoint` is a command rather than an address here: leave it as `kagi` and it is
+found on `PATH` and in the usual install directories, or give the full path to the
+binary. The credential stays in the CLI — Vervellum never sees it, and needs no key of
+its own for this provider.
 
 Page reading is `pageReading`, one of `"off"`, `"direct"` or `"reader"` (default
 `"direct"`), with `readerEndpoint` for the reader service and its key in

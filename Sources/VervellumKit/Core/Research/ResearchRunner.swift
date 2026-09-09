@@ -226,6 +226,10 @@ final class ResearchRunner: ResearchRunning {
     private let environment: Environment
     private let trace: ResearchTrace
     private let transport: any HTTPTransporting
+    /// How a search backend that is a *program* rather than a server is run. Held
+    /// alongside the transport and for the same reason: it is the seam a test replaces to
+    /// drive a whole turn without the thing on the other side existing.
+    private let commandRunner: any CommandRunning
 
     /// The turn being run, and where to report it. Instance state rather than threaded
     /// through every stage: a runner executes exactly one turn, and passing an
@@ -235,10 +239,12 @@ final class ResearchRunner: ResearchRunning {
     private var report: ((ResearchTurn) -> Void)?
 
     init(environment: Environment, trace: ResearchTrace,
-         transport: any HTTPTransporting = HTTPTransport.shared) {
+         transport: any HTTPTransporting = HTTPTransport.shared,
+         commandRunner: any CommandRunning = CommandRunner.shared) {
         self.environment = environment
         self.trace = trace
         self.transport = transport
+        self.commandRunner = commandRunner
     }
 
     // MARK: Running
@@ -355,17 +361,19 @@ final class ResearchRunner: ResearchRunning {
         // before the (billable, slower) planning call, not after it.
         //
         // Which backend that is comes from the selected search provider: an MCP server
-        // that advertises its own tool, or a SearXNG instance answering its JSON API
-        // directly. Everything below this line is written against `SearchBackend` and
-        // does not know which — the planner writes arguments against whatever schema was
-        // advertised, and `EvidenceExtractor` walks any result shape.
+        // that advertises its own tool, a SearXNG instance answering its JSON API
+        // directly, or the Kagi command-line tool on this machine. Everything below this
+        // line is written against `SearchBackend` and does not know which — the planner
+        // writes arguments against whatever schema was advertised, and
+        // `EvidenceExtractor` walks any result shape.
         guard let searchProfile = settings.selectedSearch else {
             throw ResearchError("No web-search provider is configured. Check the provider settings.")
         }
         update { $0.stage = .planning }
         let search = try SearchBackendFactory.make(profile: searchProfile,
                                                   apiKey: environment.searchKey,
-                                                  trace: trace, transport: transport)
+                                                  trace: trace, transport: transport,
+                                                  commandRunner: commandRunner)
         try await search.connect()
         try Task.checkCancellation()
 
@@ -388,7 +396,7 @@ final class ResearchRunner: ResearchRunning {
                 do {
                     let spare = try SearchBackendFactory.make(
                         profile: profile, apiKey: environment.searchKeys[profile.id],
-                        trace: trace, transport: transport)
+                        trace: trace, transport: transport, commandRunner: commandRunner)
                     try await spare.connect()
                     engines.append(spare)
                 } catch is CancellationError {

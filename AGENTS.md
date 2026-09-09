@@ -161,9 +161,11 @@ VervellumTests/              macOS-only tests (hotkeys, panel geometry, Accessib
   `HTTPTransporting` — the seam every outbound call passes through, implemented in
   production by `HTTPTransport` and in `Tests/` by `StubTransport`, which is what lets
   a whole turn be run without a network — and search goes through the `SearchBackend`
-  seam —
-  `SearchMCPClient` for an MCP server, `SearXNGClient` for a SearXNG instance's own
-  JSON API, chosen by `SearchBackendFactory`. `MCPSession` is the shared
+  seam — `SearchMCPClient` for an MCP server, `SearXNGClient` for a SearXNG instance's
+  own JSON API, `KagiCLIClient` for the `kagi` command-line tool, chosen by
+  `SearchBackendFactory`. That last one is not a server: it runs a program through the
+  `CommandRunning` seam (`CommandRunner` in production, `StubCommandRunner` in `Tests/`),
+  which is to a subprocess what `HTTPTransporting` is to a request. `MCPSession` is the shared
   MCP-over-HTTP transport those clients and the page reader all speak; `PageReading`
   and `PageReaderFactory` (`DirectPageReader`, `ReaderMCPClient`) fetch the pages behind
   the top sources, and `HTMLTextExtractor` turns them into text.
@@ -266,10 +268,17 @@ dependency tree would end that.
   "optimise" that by keeping the text for display.
 - **A search backend never leaves the model guessing at a schema.** An MCP server
   advertises its tool and `SearchMCPClient` fetches it rather than assuming; a plain
-  JSON API has nothing to advertise, so `SearXNGClient` supplies a schema and checks
-  the model's arguments back against it. Both go through
-  `SearchBackend.validate(_:required:properties:)`. Do not add a backend that sends
-  model-written arguments unchecked.
+  JSON API and a CLI have nothing to advertise, so `SearXNGClient` and `KagiCLIClient`
+  supply a schema and check the model's arguments back against it. All of them go
+  through `SearchBackend.validate(_:required:properties:)`. Do not add a backend that
+  sends model-written arguments unchecked.
+- **A model-written value never becomes a command.** `KagiCLIClient` is the only
+  backend that runs a program, and three rules make that safe: no shell anywhere in
+  `CommandRunner` (an argument vector, never a command string), the query passed after
+  `--` so it cannot be read as a flag, and every other model-influenced value checked
+  against a fixed set *in the client* — `SearchBackend.validate` checks argument names,
+  and an `enum` in a JSON Schema is a description rather than a gate. A page found by
+  an earlier search is talking to that planner; treat its output accordingly.
 - **Keys live in the Keychain only.** Never in `UserDefaults`, never in a thread,
   never in a log line, never in a URL's userinfo. **One item per configured provider**:
   `SecretAccount.modelAPIKey` / `.searchAPIKey` are the accounts every pre-profiles

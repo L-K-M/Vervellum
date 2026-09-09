@@ -92,6 +92,40 @@ and they are built to have nothing worth stealing:
   citation: Vervellum still owns the numbered list, and the model still refers to
   evidence only by number.
 
+### Running a search command
+
+One search provider is not a server. Selecting **Kagi CLI** makes Vervellum run the
+`kagi` program on this machine for each search, because Kagi sells its Search API
+separately and the tool is how its subscribers already reach the index from a terminal.
+That is the only place Vervellum executes anything, and the query it carries is written
+by a *model* which, in deep research, has read pages an earlier search returned. So the
+rules are about the argument vector:
+
+- **There is no shell.** `CommandRunner` is given an executable and an array of
+  arguments, which reach the child as separate strings. No code path in Vervellum builds
+  a command *string*, so a semicolon, a backtick or a `$(…)` in a query is text.
+- **The query is passed after `--`**, where every argument parser stops reading flags.
+  A query that begins with a dash is a query, not an option — `--follow`, which would
+  make the tool fetch pages outside every rule above, is not reachable from one.
+- **Every other model-written value is checked against a fixed set** before it becomes
+  an argument. A recency window must be one Kagi defines; a region must be two letters.
+  A value that is neither is dropped and the search still runs. This check lives in the
+  client, not in the schema: an `enum` in a JSON Schema describes what a model *should*
+  write, and the shared argument validation checks names rather than values.
+- **The child gets a built environment, not this one.** `PATH`, `HOME`,
+  `XDG_CONFIG_HOME`, `LANG` and Kagi's own credential variables — nothing else. A
+  third-party binary is not handed the model key or the reader key.
+- **Bounded, and never quoted back.** Standard output is capped and the command is
+  terminated on a timeout. Standard error is attached to the null device and never read,
+  so a diagnostic that echoes a credential cannot reach a log line or the panel; a
+  failure is reported as an exit status and nothing more.
+
+The credential belongs to the tool. `kagi auth` stores it where the user's own terminal
+already reads it, and Vervellum neither asks for it nor keeps a copy — a key stored in
+Vervellum anyway is passed to the child as `KAGI_API_KEY`. Which program runs is the
+command in the provider settings: a bare name is resolved against `PATH` and the
+directories CLIs install into, and an absolute path is taken as written.
+
 Setting **Reading the page** to *Use a reader service* moves the fetch to an MCP reader
 endpoint; setting it to *Snippets only* is the behaviour of every build before this one.
 Either way, a source that was read says so in the panel and in a copied transcript, and

@@ -28,26 +28,40 @@ final class ResearchRunnerTests: XCTestCase {
     private static let modelURL = "https://model.test/v1/chat/completions"
     private static let searchEndpoint = "https://search.test"
 
-    private func settings(pageReading: PageReadingMode = .direct) -> ProviderSettings {
+    private func settings(pageReading: PageReadingMode = .direct,
+                          searchKind: SearchProviderKind = .searxng,
+                          searchEndpoint: String = Self.searchEndpoint) -> ProviderSettings {
         ProviderSettings(modelEndpoint: Self.modelEndpoint,
                          modelName: "test-model",
-                         searchEndpoint: Self.searchEndpoint,
-                         searchKind: .searxng,
+                         searchEndpoint: searchEndpoint,
+                         searchKind: searchKind,
                          pageReading: pageReading)
     }
 
-    private func environment(pageReading: PageReadingMode = .direct) -> ResearchRunner.Environment {
-        ResearchRunner.Environment(settings: settings(pageReading: pageReading),
+    private func environment(pageReading: PageReadingMode = .direct,
+                             searchKind: SearchProviderKind = .searxng,
+                             searchEndpoint: String = Self.searchEndpoint)
+        -> ResearchRunner.Environment {
+        ResearchRunner.Environment(settings: settings(pageReading: pageReading,
+                                                      searchKind: searchKind,
+                                                      searchEndpoint: searchEndpoint),
                                    modelKey: "model-key", searchKey: nil)
     }
 
     private func run(_ question: String,
                      mode: ResearchRunner.Mode = .research,
                      pageReading: PageReadingMode = .direct,
-                     transport: StubTransport) async -> ResearchTurn {
-        let runner = ResearchRunner(environment: environment(pageReading: pageReading),
+                     searchKind: SearchProviderKind = .searxng,
+                     searchEndpoint: String = Self.searchEndpoint,
+                     transport: StubTransport,
+                     commandRunner: StubCommandRunner = StubCommandRunner { _ in .unrouted })
+        async -> ResearchTurn {
+        let runner = ResearchRunner(environment: environment(pageReading: pageReading,
+                                                             searchKind: searchKind,
+                                                             searchEndpoint: searchEndpoint),
                                     trace: ResearchTrace(sink: SilentLog()),
-                                    transport: transport)
+                                    transport: transport,
+                                    commandRunner: commandRunner)
         return await runner.run(ResearchTurn(question: question), mode: mode,
                                 history: [], onUpdate: { _ in })
     }
@@ -157,6 +171,74 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(Self.stage(of: calls[4]), .answer)
         XCTAssertEqual(calls[4].kind, .stream)
         XCTAssertEqual(Self.stage(of: calls[5]), .assess)
+    }
+
+    // MARK: Kagi
+
+    /// The one search backend that is a program rather than a server, run end to end.
+    ///
+    /// Worth a whole-turn test rather than only a unit one because the interesting claims
+    /// are about the *seam*: that the planner's query reaches an argument vector rather
+    /// than a URL, that no search request goes out over HTTP at all, and that the rest of
+    /// the pipeline — numbering, page reading, citation — cannot tell the difference.
+    func testAKagiTurnSearchesByRunningTheCommand() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
+                switch Self.stage(of: call) {
+                case .plan: return .completion(json: Self.plan("stellar parallax"))
+                case .assess: return .completion(json: Self.assessment)
+                default: return .unrouted
+                }
+            case .fetch:
+                return .html("<p>The page text for \(call.url.path).</p>")
+            case .stream:
+                return .stream(["Parallax is measured in arcseconds [1]."])
+            default:
+                return .unrouted
+            }
+        }
+        let commands = StubCommandRunner { call in
+            guard call.arguments.first == "search" else { return .unrouted }
+            return .kagiResults([(url: "https://a.example/one", title: "One")])
+        }
+
+        let turn = await run("How is stellar parallax measured?",
+                             searchKind: .kagiCLI, searchEndpoint: "kagi",
+                             transport: transport, commandRunner: commands)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.sources.map(\.url), ["https://a.example/one"])
+        XCTAssertEqual(turn.sources.map(\.number), [1])
+        XCTAssertTrue(turn.sources.allSatisfy(\.wasRead), "the page behind a Kagi hit was not read")
+        XCTAssertEqual(turn.answer, "Parallax is measured in arcseconds [1].")
+
+        // The command was found by the name the settings hold, and run once with the
+        // planner's query as a positional argument after the separator.
+        XCTAssertEqual(commands.resolved, ["kagi"])
+        XCTAssertEqual(commands.calls.map(\.arguments),
+                       [["search", "--format", "json", "--", "stellar parallax"]])
+        // And nothing went looking for a search server: the only requests are the model's
+        // three stages and the page fetch.
+        XCTAssertEqual(transport.trail.filter { $0.contains("/search") }, [])
+        XCTAssertEqual(transport.calls.count, 4, transport.trail.description)
+    }
+
+    /// A tool that is not installed is a configuration problem, and it is reported before
+    /// the turn's first billable call rather than as a search that failed a minute in.
+    func testAMissingKagiToolFailsTheTurnBeforeTheModelIsAsked() async throws {
+        let transport = StubTransport { _ in .unrouted }
+        let commands = StubCommandRunner(executable: nil) { _ in .unrouted }
+
+        let turn = await run("How is stellar parallax measured?",
+                             searchKind: .kagiCLI, searchEndpoint: "kagi",
+                             transport: transport, commandRunner: commands)
+
+        XCTAssertEqual(turn.stage, .failed)
+        XCTAssertTrue(transport.calls.isEmpty,
+                      "the model was asked to plan a turn that could not search: "
+                      + transport.trail.description)
+        XCTAssertTrue(commands.calls.isEmpty)
     }
 
     // MARK: Links in the question

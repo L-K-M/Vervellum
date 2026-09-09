@@ -285,6 +285,43 @@ final class ProviderSettingsTests: XCTestCase {
         XCTAssertEqual(settings.problems(hasModelKey: true, hasSearchKey: false).count, 1)
     }
 
+    /// The Kagi backend is a command, not a URL, so the rule that every other search
+    /// provider is held to — an HTTPS address — is the wrong rule here. What has to be
+    /// true is only that there is something to look for; whether a program of that name
+    /// exists is asked on the machine that will run it.
+    func testAKagiProviderIsValidatedAsACommandRatherThanAURL() {
+        var settings = ProviderSettings(modelEndpoint: "https://api.example.com/v1", modelName: "m",
+                                        searchEndpoint: "kagi", searchKind: .kagiCLI)
+        XCTAssertTrue(settings.problems(hasModelKey: true, hasSearchKey: false).isEmpty)
+
+        // An absolute path is the other thing someone types here, and it is not a URL
+        // either.
+        settings.searchEndpoint = "/opt/homebrew/bin/kagi"
+        XCTAssertTrue(settings.problems(hasModelKey: true, hasSearchKey: false).isEmpty)
+
+        settings.searchEndpoint = "   "
+        XCTAssertEqual(settings.problems(hasModelKey: true, hasSearchKey: false),
+                       ["The Kagi command is empty."])
+    }
+
+    /// `kagi auth` holds the credential, and Vervellum never sees it. Demanding a second
+    /// copy would be asking for a secret the app does not need.
+    func testAKagiProviderDoesNotRequireAKey() {
+        XCTAssertFalse(SearchProviderKind.kagiCLI.requiresKey)
+        let settings = ProviderSettings(modelEndpoint: "https://api.example.com/v1", modelName: "m",
+                                        searchEndpoint: "kagi", searchKind: .kagiCLI)
+        XCTAssertTrue(settings.problems(hasModelKey: true, hasSearchKey: false).isEmpty)
+    }
+
+    /// The raw value is what a human types into `settings.json` on Linux, so it is
+    /// hyphenated rather than the case name — and it is pinned, because changing it later
+    /// would silently drop every configured Kagi provider back to the default.
+    func testTheKagiKindIsSpelledTheWayTheSettingsFileSpellsIt() {
+        XCTAssertEqual(SearchProviderKind.kagiCLI.rawValue, "kagi-cli")
+        XCTAssertEqual(SearchProviderKind(rawValue: "kagi-cli"), .kagiCLI)
+        XCTAssertTrue(SearchProviderKind.allCases.contains(.kagiCLI))
+    }
+
     /// An app with no search at all is worse than one pointed at the documented default
     /// — but a blank SearXNG address must stay blank, or the row would name one provider
     /// and research against another.
@@ -296,6 +333,13 @@ final class ProviderSettingsTests: XCTestCase {
         let searxng = ProviderSettings(modelEndpoint: "https://a.example.com/v1", modelName: "m",
                                        searchEndpoint: "   ", searchKind: .searxng).normalized()
         XCTAssertEqual(searxng.searchEndpoint, "")
+
+        // Kagi fills in, for the opposite reason to SearXNG's: there is exactly one name
+        // the tool installs itself under, so a blank field is the common case rather than
+        // an unfinished one, and filling it in names the provider the row already names.
+        let kagi = ProviderSettings(modelEndpoint: "https://a.example.com/v1", modelName: "m",
+                                    searchEndpoint: "   ", searchKind: .kagiCLI).normalized()
+        XCTAssertEqual(kagi.searchEndpoint, ProviderSettings.defaultKagiCommand)
     }
 
     func testSearchProfilesRoundTripThroughTheEncodedForm() throws {

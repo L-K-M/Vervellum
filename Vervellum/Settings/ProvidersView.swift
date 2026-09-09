@@ -448,18 +448,18 @@ struct ProvidersView: View {
                         .help("Remove this provider and, on Save, its stored key")
                 }
             }
-            LabeledContent(kind == .searxng ? "Address" : "Endpoint") {
+            LabeledContent(kind.endpointLabel) {
                 TextField(kind.endpointPlaceholder, text: profile.endpoint)
                     .textFieldStyle(.roundedBorder)
+                    // A command, not a URL, and macOS would otherwise offer to correct
+                    // its capitalisation on the way in.
+                    .autocorrectionDisabled(kind == .kagiCLI)
             }
-            keyRow(title: kind.requiresKey ? "Search key" : "Token",
+            keyRow(title: kind.keyLabel,
                    entry: Binding(get: { searchKeyEntries[id] ?? "" },
                                   set: { searchKeyEntries[id] = $0 }),
                    hasStored: storedSearchKeys.contains(id),
-                   note: kind.requiresKey
-                       ? "Required. Research cannot run without it."
-                       : "Optional — only for an instance behind an authenticating proxy. "
-                         + "SearXNG itself takes no key.") {
+                   note: kind.keyNote) {
                 try? keychain.delete(profile.wrappedValue.secretAccount)
                 storedSearchKeys.remove(id)
                 statusIsProblem = false
