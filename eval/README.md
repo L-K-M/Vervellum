@@ -24,6 +24,7 @@ that cannot move this score is not a quality improvement.
 swift build -c release --product vervellum
 eval/run.sh                      # .build/release/vervellum, fresh timestamped dir
 eval/run.sh .build/release/vervellum eval/runs/before   # named dir, for a pair
+eval/run.sh --only 09            # just 09-cobalt — a cheap smoke run
 ```
 
 Keys come from the normal settings, or from `VERVELLUM_MODEL_KEY` /
@@ -36,9 +37,16 @@ counts as a failed question rather than stalling the run. Output lands in
 ## Judging
 
 Feed `judge.md` plus one `.case.txt` to a capable model that is **not** the model
-being evaluated. Collect the JSON, average the axes, count the verdicts. A change
-ships if the after-run beats the before-run on factual + citation without losing
-calibration; everything else is taste.
+being evaluated, and save each reply as `<case>.json` in a judged directory —
+fences around the JSON are fine, the aggregator strips them. Then:
+
+```bash
+eval/aggregate.sh judged-before judged-after
+```
+
+which prints per-axis means and pass/fail counts for both. A change ships if the
+after-run beats the before-run on factual + citation without losing calibration;
+everything else is taste.
 
 ## Comparing runs
 
