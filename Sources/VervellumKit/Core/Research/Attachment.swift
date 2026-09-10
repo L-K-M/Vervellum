@@ -285,10 +285,15 @@ struct Attachment: Codable, Equatable, Identifiable {
         // the panel, and its name carried into every later turn's history — telling the
         // model about a file whose contents are nothing, which is an invitation to
         // explain the emptiness rather than answer the question.
-        guard let text = text(from: data),
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return .failure(.unsupported(name: display))
-        }
+        guard let text = text(from: data) else { return .failure(.unsupported(name: display)) }
+        // Whitespace *and* the characters that draw nothing: a file holding only a
+        // byte-order mark decodes to one scalar, survives a whitespace trim, and is
+        // attached as a file whose content the model receives as nothing at all — which
+        // is the case above with an extra step. (NUL-padded remains of a download that
+        // died never reach here: `text(from:)` refuses a NUL outright.)
+        let visible = text.trimmingCharacters(
+            in: CharacterSet.whitespacesAndNewlines.union(.controlCharacters))
+        guard !visible.isEmpty else { return .failure(.empty(name: display)) }
         let kept = truncated(text)
         let bytes = Data(kept.utf8)
         return .success((Attachment(kind: .text, name: display, mediaType: "text/plain",
@@ -303,6 +308,11 @@ struct Attachment: Codable, Equatable, Identifiable {
         /// attached, just not at that size.
         case tooLarge(name: String, byteCount: Int)
         case unsupported(name: String)
+        /// Nothing in it. Its own case for the reason `tooLarge` is one: "not something
+        /// Vervellum can attach" sends the owner of a `touch`ed file or a download that
+        /// died looking for a format problem in a file that has no format *because it
+        /// has no bytes*.
+        case empty(name: String)
 
         var message: String {
             switch self {
@@ -311,6 +321,8 @@ struct Attachment: Codable, Equatable, Identifiable {
                 return String(format: "%@ is %.1f MB. An attachment can be at most "
                               + "%ld MB — scale it down, or attach a shorter file.",
                               name, megabytes, Attachment.maxAttachmentBytes / (1024 * 1024))
+            case .empty(let name):
+                return "\(name) is empty."
             case .unsupported(let name):
                 // "UTF-8", because that is what `text(from:)` accepts. A Latin-1 file
                 // refused as simply "not something Vervellum can attach" sends its owner
@@ -320,5 +332,42 @@ struct Attachment: Codable, Equatable, Identifiable {
                     + "GIF, WebP) and UTF-8 text files are."
             }
         }
+    }
+}
+
+/// An attachment the user has added to a question they have not asked yet.
+///
+/// The record and its bytes together, held in memory by the composer until the question
+/// is sent. Nothing is written to `AttachmentStore` before then, and that is the point:
+/// the store is swept by reachability, so bytes written for a question still being typed
+/// would be bytes nothing refers to — and a sweep triggered by anything else in the
+/// meantime would delete them out from under the composer. Writing at send time makes
+/// "stored" and "referred to by a turn" the same moment.
+struct PendingAttachment: Identifiable, Equatable {
+    let attachment: Attachment
+    let data: Data
+
+    var id: UUID { attachment.id }
+
+    /// The record decides, not the bytes.
+    ///
+    /// Synthesized, `==` compared four megabytes at a time — and up to four of those per
+    /// question, on every SwiftUI diff of the composer's chips while an answer streams.
+    /// It also could not answer differently: both properties are `let`, the record is
+    /// made from the bytes in the same call, and every intake mints a fresh id. So the
+    /// comparison the synthesized version spends the memcmp on is one whose answer the
+    /// id already gave.
+    static func == (lhs: PendingAttachment, rhs: PendingAttachment) -> Bool {
+        lhs.attachment == rhs.attachment
+    }
+
+    init(attachment: Attachment, data: Data) {
+        self.attachment = attachment
+        self.data = data
+    }
+
+    /// The pending attachment these bytes are, or why they were refused.
+    static func make(from data: Data, name: String) -> Result<PendingAttachment, Attachment.Refusal> {
+        Attachment.make(from: data, name: name).map { PendingAttachment(attachment: $0.0, data: $0.1) }
     }
 }

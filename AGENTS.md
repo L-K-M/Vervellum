@@ -207,7 +207,14 @@ VervellumTests/              macOS-only tests (hotkeys, panel geometry, Accessib
   runner's callbacks onto the main queue; every rule lives in Core.
 - `Model/` — `Preferences` (the macOS-only settings, forwarding the shared ones to
   `CorePreferences`) and `HotkeyBinding`.
-- `Store/` — `ThreadStore`, an `ObservableObject` shell over `ThreadArchive`.
+- `Store/` — `ThreadStore`, an `ObservableObject` shell over `ThreadArchive`. It also
+  owns the `AttachmentStore` beside it and sweeps it where a thread can stop existing —
+  a delete, a prune, an erase, and once at launch.
+- `Attachments/` — `AttachmentIntake`, which turns what was pasted or dropped into
+  attachments. The one place that decides what wins when a pasteboard carries several
+  things, and the only layer allowed to re-encode a TIFF screenshot as PNG: `Core` may
+  not import an imaging framework, which is why it refuses an image it cannot identify
+  rather than converting one.
 - `Security/` — `KeychainStore`, the macOS `SecretStore`.
 - `Selection/` — `SelectedTextReader` (the Accessibility path).
 - `Hotkeys/` — `CarbonHotkey`, `KeyCodes`.

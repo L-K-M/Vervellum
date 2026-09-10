@@ -20,7 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let secrets: SecretStore = KeychainStore()
     private lazy var store = ThreadStore(historyEnabled: preferences.historyEnabled,
                                         keptThreads: preferences.keptThreads)
-    private lazy var engine = ResearchEngine(preferences: preferences.core, secrets: secrets)
+    // The store's own `AttachmentStore`, not the engine's default one. Two instances
+    // over one directory happen to agree today because the type keeps no state, but the
+    // engine writes the bytes and the store is what sweeps them — a pairing that should
+    // not rest on two computations of a path staying equal.
+    private lazy var engine = ResearchEngine(preferences: preferences.core, secrets: secrets,
+                                             attachmentStore: store.attachmentStore)
     private lazy var updateChecker = UpdateChecker(
         configuration: .init(owner: "L-K-M", repo: "Vervellum"))
 
@@ -52,9 +57,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // selection shortcut uses, which already appends to whatever is being typed.
         engine.onQueueReturned = { questions in
             guard !questions.isEmpty else { return }
+            // Their attachments travel with them. The bytes of a pasted screenshot are
+            // on no disk anywhere, so handing back the words alone would make a Stop the
+            // one gesture in the app that destroys something.
             NotificationCenter.default.post(
                 name: .vervellumSeedComposer, object: nil,
-                userInfo: ["text": questions.joined(separator: "\n\n")])
+                userInfo: ["text": questions.map(\.question).joined(separator: "\n\n"),
+                           "attachments": questions.flatMap(\.attachments)])
         }
 
         // Before the controller, not after: the panel's content reads the palette, so

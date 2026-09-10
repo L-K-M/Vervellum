@@ -115,11 +115,46 @@ struct TurnView: View, Equatable {
             RoundedRectangle(cornerRadius: 1, style: .continuous)
                 .fill(PanelTheme.Palette.accent)
                 .frame(width: 2)
-            Text(turn.question)
-                .font(PanelTheme.Font.question(textScale))
-                .foregroundStyle(PanelTheme.Palette.primaryText)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
+                Text(turn.question)
+                    .font(PanelTheme.Font.question(textScale))
+                    .foregroundStyle(PanelTheme.Palette.primaryText)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                // What was asked *with*, kept beside what was asked. A transcript that
+                // showed the words alone would leave a reader wondering what the answer
+                // was looking at, months later — and an answer about a screenshot reads
+                // as a non-sequitur without it. Names only: the picture was sent on this
+                // turn and is not re-sent, and a thumbnail here would mean reading the
+                // bytes back for every turn in the thread on every frame.
+                if !turn.attachments.isEmpty {
+                    ForEach(turn.attachments) { attachment in
+                        Label(attachment.name,
+                              systemImage: attachment.kind == .image ? "photo" : "doc.text")
+                            .font(PanelTheme.Font.caption(textScale))
+                            .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            // The name is the whole record of what the answer was
+                            // looking at, and middle truncation eats the part that
+                            // distinguishes one screenshot from the next. Hover has it.
+                            .help(attachment.name)
+                            // And selectable, like the question above it. Hover shows
+                            // the truncated part; only selection gets it into a search
+                            // box or a follow-up question.
+                            .textSelection(.enabled)
+                            // Named as an attachment, not merely named. The symbol is
+                            // decorative to VoiceOver, so this row read out as a bare
+                            // file name in the middle of a transcript — which is the
+                            // non-sequitur the paragraph above keeps out of the reading
+                            // for anyone who can see the icon. The label is read whole,
+                            // so the middle truncation does not reach it either.
+                            .accessibilityLabel("Attached "
+                                + (attachment.kind == .image ? "image" : "file")
+                                + ": " + attachment.name)
+                    }
+                }
+            }
             Spacer(minLength: 0)
         }
         .padding(.leading, PanelTheme.Space.hair)

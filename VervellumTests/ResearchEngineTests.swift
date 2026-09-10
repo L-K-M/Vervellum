@@ -10,7 +10,7 @@ final class ResearchEngineTests: XCTestCase {
         let engine = ResearchEngine(
             preferences: CorePreferences(store: MemorySettingsStore()),
             secrets: EphemeralSecretStore(), logSink: SilentLog(),
-            makeRunner: { _, _ in runner }, deliver: scheduler.enqueue, after: scheduler.after)
+            makeRunner: { _, _, _ in runner }, deliver: scheduler.enqueue, after: scheduler.after)
         engine.ask("Question")
         wait(for: [started], timeout: 3)
 
@@ -143,7 +143,7 @@ final class ResearchEngineTests: XCTestCase {
                             scheduler: ManualScheduler) -> ResearchEngine {
         ResearchEngine(preferences: CorePreferences(store: MemorySettingsStore()),
                        secrets: EphemeralSecretStore(), logSink: SilentLog(),
-                       makeRunner: { _, _ in runner },
+                       makeRunner: { _, _, _ in runner },
                        deliver: scheduler.enqueue, after: scheduler.after)
     }
 
@@ -213,7 +213,7 @@ final class ResearchEngineTests: XCTestCase {
         let scheduler = ManualScheduler()
         let engine = makeEngine(runner: runner, scheduler: scheduler)
         var returned: [String] = []
-        engine.onQueueReturned = { returned = $0 }
+        engine.onQueueReturned = { returned = $0.map(\.question) }
 
         engine.ask("Running")
         wait(for: [first], timeout: 3)
@@ -240,7 +240,7 @@ final class ResearchEngineTests: XCTestCase {
         let scheduler = ManualScheduler()
         let engine = makeEngine(runner: runner, scheduler: scheduler)
         var returned: [String] = []
-        engine.onQueueReturned = { returned = $0 }
+        engine.onQueueReturned = { returned = $0.map(\.question) }
 
         engine.ask("Running")
         wait(for: [first], timeout: 3)
@@ -266,7 +266,7 @@ final class ResearchEngineTests: XCTestCase {
         let scheduler = ManualScheduler()
         let engine = makeEngine(runner: runner, scheduler: scheduler)
         var returned: [String] = []
-        engine.onQueueReturned = { returned = $0 }
+        engine.onQueueReturned = { returned = $0.map(\.question) }
 
         engine.ask("Running")
         wait(for: [first], timeout: 3)

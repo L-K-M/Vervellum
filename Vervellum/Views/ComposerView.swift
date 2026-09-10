@@ -29,6 +29,21 @@ struct ComposerView: NSViewRepresentable {
     var onSubmit: () -> Void
     /// Return true to consume the key. Used for history recall on ↑/↓.
     var onArrow: (Bool) -> Bool = { _ in false }
+    /// How many attachments the question already carries, so a paste that would take it
+    /// past the limit can say so rather than silently dropping the extras.
+    ///
+    /// No default either, and for the reason below: one that read zero would let a call
+    /// site forget the count and quietly never reach the limit at all, which is the
+    /// same silence with a different shape.
+    var attachmentCount: Int
+    /// What a paste or a drop turned out to be carrying. Called only when it was
+    /// carrying something: an ordinary text paste never reaches here.
+    ///
+    /// No default, deliberately. `paste` consumes the pasteboard whenever the intake
+    /// claims it, so a composer built without this handler would swallow an image paste
+    /// entirely — no chip, and no text either. One call site wires it; the compiler is
+    /// what keeps that true for the second one.
+    var onAttach: (AttachmentIntake.Outcome) -> Void
 
     /// The composer's text size before the preference is applied.
     static let baseFontSize: CGFloat = 13
@@ -82,6 +97,18 @@ struct ComposerView: NSViewRepresentable {
         // prose but corrupts a pasted code snippet or URL in a question.
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
+        // Files and images dropped on the composer are attachments — added to what an
+        // NSTextView already accepts rather than put in its place.
+        //
+        // The union is the whole of it. `registerForDraggedTypes` *replaces* a view's
+        // registration; it does not add to it. An NSTextView registers its own text
+        // flavours when it is built, and a view registered for none of the types on a
+        // drag is never offered the drag at all — so passing this list alone would have
+        // taken text dropped from another app and made it land nowhere, with the
+        // fall-through in `performDragOperation` never reached because the drop never
+        // arrived. Reading the current list first keeps both halves.
+        textView.registerForDraggedTypes(
+            textView.registeredDraggedTypes + AttachmentIntake.draggedTypes)
         textView.string = text
 
         let scroll = NSScrollView()
@@ -229,9 +256,82 @@ struct ComposerView: NSViewRepresentable {
     }
 }
 
-/// Draws the placeholder, which `NSTextView` — unlike `NSTextField` — does not do.
+/// Draws the placeholder, and takes what is pasted or dropped on it that is not text.
+///
+/// `NSTextView` handles the text half of both gestures already and does it better than
+/// anything written here would; these overrides claim the cases it would otherwise turn
+/// into a file path or a "you can't drop that" bounce, and hand everything else back.
 private final class ComposerTextView: NSTextView {
     weak var coordinator: ComposerView.Coordinator?
+
+    // MARK: Pasting and dropping
+
+    /// A paste that is carrying a file or an image attaches it; anything else pastes.
+    ///
+    /// `AttachmentIntake` decides which of the two this is, and it is deliberately
+    /// conservative: a pasteboard carrying text as well as a picture pastes the text.
+    /// This override only routes.
+    ///
+    /// Every entry point, not only this one. `AppDelegate.installMainMenu` builds the
+    /// Edit menu by hand — Undo, Redo, Cut, Copy, Paste, Select All — so there is no
+    /// "Paste and Match Style" item to carry ⌥⇧⌘V, and it is tempting to conclude that
+    /// `pasteAsPlainText(_:)` therefore cannot be reached. It can: a key *binding* is
+    /// not a key equivalent. Anyone may map the selector to any key in
+    /// `~/Library/KeyBindings/DefaultKeyBinding.dict`, and that route runs through
+    /// `interpretKeyEvents` to this responder without consulting a menu at all.
+    ///
+    /// What a bypass costs is the reason to close it rather than argue about how likely
+    /// it is: the same pasteboard would attach or not depending on which key was
+    /// pressed, and the worse half is silent — an image-only board handed to
+    /// `super.pasteAsPlainText` inserts nothing, with no refusal to read.
+    ///
+    /// Forwarding is exact rather than approximate, because `isRichText` is false: a
+    /// plain-text view has one font for everything, so "paste", "paste and match style"
+    /// and "paste as rich text" are already the same paste. There is no styling for the
+    /// forward to flatten.
+    override func paste(_ sender: Any?) {
+        guard let coordinator else { return super.paste(sender) }
+        let outcome = AttachmentIntake.read(NSPasteboard.general,
+                                            existing: coordinator.parent.attachmentCount)
+        guard !outcome.isEmpty else { return super.paste(sender) }
+        coordinator.parent.onAttach(outcome)
+    }
+
+    override func pasteAsPlainText(_ sender: Any?) { paste(sender) }
+
+    override func pasteAsRichText(_ sender: Any?) { paste(sender) }
+
+    /// Says a drag is welcome before it lands, so the cursor shows a copy rather than the
+    /// "no" badge. Text drags still go to `super`, which has its own answer for them.
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        carries(sender) ? .copy : super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        carries(sender) ? .copy : super.draggingUpdated(sender)
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard let coordinator, carries(sender) else { return super.performDragOperation(sender) }
+        // `textWins: false`: `carries` has already said this drag is holding a picture
+        // or a file, and the text beside a dragged image is the page's address, not
+        // something anybody meant to paste.
+        let outcome = AttachmentIntake.read(sender.draggingPasteboard,
+                                            existing: coordinator.parent.attachmentCount,
+                                            textWins: false)
+        guard !outcome.isEmpty else { return super.performDragOperation(sender) }
+        coordinator.parent.onAttach(outcome)
+        return true
+    }
+
+    /// Whether a drag is carrying something this composer would attach.
+    ///
+    /// Asked before the drop as well as during it, because the answer decides what the
+    /// cursor promises — and a drag that showed a copy badge and then did nothing would
+    /// be worse than one that refused up front.
+    private func carries(_ sender: any NSDraggingInfo) -> Bool {
+        AttachmentIntake.carriesAttachment(sender.draggingPasteboard)
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
