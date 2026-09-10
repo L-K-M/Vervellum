@@ -18,7 +18,11 @@ and numbered sources.
 Score each axis from 0.0 to 1.0:
 
 - **factual** — are the claims true, and does the answer establish what `expect`
-  requires? Any assertion from `must-not` caps this at 0.3.
+  requires? Any assertion from `must-not` caps this at 0.3. If the case header's
+  `# Status:` is anything other than `ok`, return every axis 0.0 and verdict
+  `fail` — a failed run is a failed run, not a bad answer. For a case marked
+  `current: true`, judge "true" against the `# Run:` date in the header, not
+  your training data.
 - **citation** — does every load-bearing claim carry a citation, and does the
   cited source actually back it? A claim resting on a source that does not say it
   is worse than no citation: it manufactures trust.

@@ -1,4 +1,4 @@
 mode: research
 question: What is the half-life of carbon-14?
 expect: about 5,730 years
-must-not: a figure near 5,715 without noting it is a revised value some sources also carry
+must-not: Libby's original 5,568-year value given as the current figure without noting the revision

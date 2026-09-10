@@ -47,7 +47,7 @@ fail=0
 
 for file in eval/questions/*.txt; do
     id=$(basename "$file" .txt)
-    mode=$(grep -m1 '^mode: ' "$file" | cut -d' ' -f2- | xargs)
+    mode=$(grep -m1 '^mode: ' "$file" | cut -d' ' -f2- | tr -d '\r' | xargs)
     question=$(grep -m1 '^question: ' "$file" | cut -d' ' -f2- | tr -d '\r')
     # A typo'd or missing mode must not silently run as research: a deep question
     # measured as a cheap pass corrupts the before/after comparison this exists for.
@@ -66,17 +66,24 @@ for file in eval/questions/*.txt; do
     # A deep question is several billed round trips; a wedged one must become a
     # counted failure (timeout exits 124), not a stalled run. -k covers a binary
     # that ignores SIGTERM.
+    status="ok"
     if $TIMEOUT "$BINARY" "$flag" "$question" \
             > "$OUT/$id.transcript.txt" 2> "$OUT/$id.trace.txt"; then
         pass=$((pass + 1))
     else
+        status="failed (exit $?)"
         fail=$((fail + 1))
         echo "   failed (see $id.trace.txt)"
     fi
 
-    # The case file is the judge's whole input: rubric lives in judge.md.
+    # The case file is the judge's whole input: rubric lives in judge.md. The
+    # header is part of the contract: the status zeroes a failed case rather
+    # than grading a partial transcript as a bad answer, and the run date is
+    # what a `current: true` question is judged against.
     {
         echo "# Case $id"
+        echo "# Run: $STAMP"
+        echo "# Status: $status"
         echo
         cat "$file"
         echo
