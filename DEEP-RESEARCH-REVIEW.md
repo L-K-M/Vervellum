@@ -69,6 +69,9 @@ search rank), and `ResearchContext.evidence` kept a prefix when over budget, so
 round 2–3 sources — the gap-closers the extra rounds exist to find — were dropped
 first.
 
+Planner-ranked reads need the planner to be able to name specific sources, so this
+change depends on G5's stable digest numbering and lands with (or after) G2.
+
 ### G2 — Page selection was rank order, never judgment
 No relevance pass existed between "found" and "read". The follow-up planner is the
 natural judge, but the digest deliberately carried no URLs and renumbered entries
@@ -91,7 +94,8 @@ spine to hang on.
 ### G5 — The follow-up planner was half-blind
 It saw what was found, never what was tried and failed; a query that returned
 nothing was indistinguishable from one never run. And the digest renumbered sources
-1…40 locally, so nothing downstream could reference the turn's real numbering. The
+1…40 locally (40 is the digest's own cap, distinct from the evidence list's ≤24), so
+nothing downstream could reference the turn's real numbering. The
 answer payload's `searches_run` listed round 1's searches only, over evidence that
 included later rounds' results.
 
@@ -133,8 +137,8 @@ every degradation. Both positions are planned:
 
 ## Implemented changes
 
-Each gap above maps to a change below as it lands. Statuses: `open` (not yet
-started), `in review`, `landed`.
+Each gap above maps to a change below as it lands. The statuses are `open` (not
+yet started), `in review`, `landed`, and `declined` (deliberately not implemented).
 
 | Gap | Change | Status |
 |---|---|---|
@@ -142,9 +146,9 @@ started), `in review`, `landed`.
 | G2 | Planner-requested full-page reads | open |
 | G3 | A bounded evidence round on `insufficient` | open |
 | G4 | Sub-question decomposition in the plan | open |
-| G5 | Failed-query visibility + stable source numbers in the digest; `searches_run` covers every round | open |
+| G5 | Failed-query visibility + stable source numbers in the digest; `searches_run` covers every round | in review |
 | G6 | Parallel fan-out across engines and stateless backends | open |
 | G7 | Deep-mode answer structure from the sub-questions | open |
 | G8 | Per-domain diversity cap in evidence assembly | open |
 | G9 | Human plan checkpoint | declined — the system must work without intervention |
-| G10 | Answer-quality eval harness (question bank + LLM judge) | open |
+| G10 | Answer-quality eval harness (question bank + LLM judge) | in review |
