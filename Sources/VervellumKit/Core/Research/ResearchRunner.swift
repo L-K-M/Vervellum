@@ -733,9 +733,10 @@ final class ResearchRunner: ResearchRunning {
                         // result: a 200 with zero hits resolves fine, and treating it
                         // as an answer would leave the next round re-asking a barren
                         // query in new words — the exact waste `failedQueries` exists
-                        // to stop. The main pass re-extracts everything at once; the
-                        // cost of this look is one walk per result.
-                        if !EvidenceExtractor.sources(from: [result]).isEmpty {
+                        // to stop. Only deep rounds read the list, so only deep turns
+                        // pay the walk; the main pass re-extracts everything at once.
+                        if mode == .deep,
+                           !EvidenceExtractor.sources(from: [result]).isEmpty {
                             fruitful += 1
                         }
                     } catch is CancellationError {
@@ -760,9 +761,12 @@ final class ResearchRunner: ResearchRunning {
                 // model's own text, safe to hand back to it — the trace rule about not
                 // logging results is about content, and this never reaches the log.
                 // Deduped: a planner that re-asks a dead query anyway must not fill
-                // the next round's context with the same line twice.
-                if fruitful == 0, !asked.isEmpty, !failedQueries.contains(step.displayQuery) {
-                    failedQueries.append(step.displayQuery)
+                // the next round's context with the same line twice. Capped at the
+                // digest's snippet budget: the list is re-injected into every later
+                // round, and an unbounded model-written string would grow each one.
+                if mode == .deep, fruitful == 0, !asked.isEmpty {
+                    let query = String(step.displayQuery.prefix(200))
+                    if !failedQueries.contains(query) { failedQueries.append(query) }
                 }
                 // Counted whether the attempts succeeded or failed, and once per planned
                 // search rather than once per request: "2 of 3" is about the plan the
