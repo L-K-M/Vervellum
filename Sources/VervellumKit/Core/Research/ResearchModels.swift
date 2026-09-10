@@ -221,6 +221,26 @@ enum TurnNotice: String, Codable, Equatable {
     /// necessarily the *selected* provider: a turn can move on twice, and the second
     /// failure is a spare's. The turn's `model` is the one that actually answered.
     case modelFellBack
+    /// An image was attached, but the provider that answered was not configured to be
+    /// shown images — so it answered from the question's words alone. Said out loud
+    /// because an answer that ignores the picture, with nothing explaining why, reads as
+    /// a model that looked and did not understand.
+    case imagesNotSent
+    /// Something was attached, but its bytes could not be read — a library copied
+    /// between machines without its attachments folder, or a file removed by hand — so
+    /// the model answered without it. A separate case from `imagesNotSent` because the
+    /// remedy is different: no setting turns this on, the attachment has to be attached
+    /// again.
+    case attachmentMissing
+    /// A file was attached to *this* question and its bytes could not be written, so the
+    /// answer was produced with it but the thread will reopen without it.
+    ///
+    /// The opposite direction from `attachmentMissing`, which is about a turn that ran
+    /// without something it names. Here the model saw the file — the bytes it is sent
+    /// come from memory — and it is the record on disk that is short. Told at ask time
+    /// rather than discovered at reopen, because that is when the reader can still do
+    /// something about it.
+    case attachmentNotStored
     /// A notice written by a newer build that this one does not know. Kept rather than
     /// failing the whole document: a `notices` array that refused to decode used to make
     /// an older build start from an empty library and overwrite the newer file.
@@ -283,9 +303,38 @@ enum TurnNotice: String, Codable, Equatable {
             return "A model provider failed, so the next one configured answered instead, "
                 + "and the rest of this turn used it too. The model named on this turn is "
                 + "the one that answered."
+        case .attachmentNotStored:
+            return "An attachment could not be saved, so it will not be here when this "
+                + "thread is reopened. The answer was written with it — only the stored "
+                + "copy is missing."
+        case .attachmentMissing:
+            return "Something attached to this question could not be sent, so the answer "
+                + "was written without it. The file is listed above as a record of what "
+                + "was asked. Attach it again to have the model look at it; if it is "
+                + "still not sent, this version of Vervellum cannot send a file of that "
+                + "kind."
+        case .imagesNotSent:
+            return "An image was attached, but the model that answered is not set to be sent "
+                + "images, so it answered without seeing it. Turn on \"Send images\" for "
+                + "that provider in Settings to have it look."
         case .unknown:
             return "This turn carries a note recorded by a newer version of Vervellum."
         }
+    }
+}
+
+/// An `Attachment` that decodes to nil instead of throwing.
+///
+/// The wrapper exists so a turn's attachment list can be decoded element by element: a
+/// `[Attachment]` decoded whole fails entirely on one bad record, and `Attachment`'s own
+/// decoder cannot be made infallible because `id` names the bytes on disk and a minted
+/// one would point at another attachment's file. So the failure is contained here, where
+/// losing one record costs one record.
+private struct LenientAttachment: Decodable {
+    var attachment: Attachment?
+
+    init(from decoder: Decoder) throws {
+        attachment = try? Attachment(from: decoder)
     }
 }
 
@@ -296,6 +345,14 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     var askedAt: Date
     var stage: ResearchStage = .queued
 
+    /// What the user attached to the question, as records rather than bytes — see
+    /// `Attachment` for why the pictures live beside the thread instead of in it.
+    ///
+    /// Kept on the turn so a reopened thread can still show what was attached, and so a
+    /// copied transcript can say so. Not re-sent: `ResearchContext` puts the *names* into
+    /// the history it hands the model and nothing else, because an attachment is sent on
+    /// the turn it belongs to and on no other.
+    var attachments: [Attachment] = []
     /// One sentence stating how the model read the question.
     var reading: String = ""
     var searches: [PlannedSearch] = []
@@ -402,7 +459,7 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     // could not have protected it either way: the decoder zeroes it, so the test passes
     // whether or not the key is written.
     enum CodingKeys: String, CodingKey {
-        case id, question, askedAt, stage, reading, searches, searchesCompleted, sources
+        case id, question, askedAt, attachments, stage, reading, searches, searchesCompleted, sources
         case pagesAttempted, pagesRead
         case answer, draftAnswer, findings, limitations, followups, notices, failure
         case duration, model
@@ -413,6 +470,22 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         id = try container.decode(UUID.self, forKey: .id)
         question = try container.decode(String.self, forKey: .question)
         askedAt = try container.decode(Date.self, forKey: .askedAt)
+        // `try?` around the whole array, not only `decodeIfPresent`, which answers a
+        // missing key and nothing else. `Attachment`'s own decoder is lenient about every
+        // field but `id`, and an id that will not decode belongs to bytes nothing can
+        // look up anyway — so the cost of dropping the list is a turn that forgets what
+        // was attached to it, against the cost of not dropping it, which is the failure
+        // this file already paid once: a turn that would not decode, a library that came
+        // back empty, and an older build writing that emptiness over the newer file.
+        // Element by element, so one unreadable record drops itself rather than the
+        // list. `Attachment`'s own decoder is lenient about every field but `id` — and
+        // `id` is the one that cannot be defaulted, since it names the bytes on disk —
+        // so a record that still fails is a record with no usable identity. Decoded
+        // whole, that single failure took every *other* attachment on the turn with it,
+        // and the names of files a later turn's history refers to went with them.
+        attachments = ((try? container.decodeIfPresent([LenientAttachment].self,
+                                                       forKey: .attachments)) ?? [])
+            .compactMap(\.attachment)
         stage = try container.decode(ResearchStage.self, forKey: .stage)
         reading = try container.decode(String.self, forKey: .reading)
         searches = try container.decode([PlannedSearch].self, forKey: .searches)

@@ -50,4 +50,42 @@ final class ResearchPromptsTests: XCTestCase {
     func testTheCitationRuleStillForbidsURLs() {
         XCTAssertTrue(ResearchPrompts.answer.contains("may not write a URL"))
     }
+
+    /// An attachment has no citation number and cannot get one, so the prompts that
+    /// enforce numbering have to say what to do with it. Without this clause a model
+    /// told "every statement resting on a source must carry that source's number" either
+    /// invents a number for the picture or declines to mention it.
+    func testTheAnswerAndDirectPromptsSayWhatToDoWithAnAttachment() {
+        for (label, prompt) in [("answer", ResearchPrompts.answer),
+                                ("direct", ResearchPrompts.direct)] {
+            XCTAssertTrue(prompt.contains(ResearchPrompts.attachments),
+                          "the \(label) prompt is missing the attachment clause")
+        }
+        // And it does not reopen the citation rule it sits next to.
+        XCTAssertTrue(ResearchPrompts.attachments.contains("no citation number"))
+        XCTAssertFalse(ResearchPrompts.attachments.contains("http"))
+    }
+
+    /// Conditional, because a standing sentence about attachments on a turn with none is
+    /// a standing invitation to plan searches about a file nobody sent.
+    func testThePlanMentionsAttachmentsOnlyWhenThereAreSome() {
+        let without = ResearchPrompts.plan(maxSearches: 4, today: "2026-09-06")
+        XCTAssertFalse(without.lowercased().contains("attach"))
+
+        let with = ResearchPrompts.plan(maxSearches: 4, today: "2026-09-06",
+                                        hasAttachments: true)
+        XCTAssertTrue(with.contains("attached something to this question"))
+        // Additive, not substituted. A build that swapped the ordinary plan *for* the
+        // attachment sentence would satisfy the line above while dropping the search
+        // budget and the date grounding on exactly the turns that carry a file.
+        XCTAssertGreaterThan(with.count, without.count)
+        // And the plan itself is still there. The clause lands mid-prompt, on the TASK
+        // line, so the two strings share a prefix and then diverge — it is what comes
+        // *after* the insertion that a substitution would have taken with it.
+        XCTAssertTrue(with.contains("Work out which factual questions"), with)
+        // Named directly rather than inferred from the length: a longer string is weak
+        // evidence that the plan survived, and the date is the part of it a turn
+        // carrying a file would miss most quietly.
+        XCTAssertTrue(with.contains("2026-09-06"), with)
+    }
 }

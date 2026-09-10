@@ -201,13 +201,26 @@ struct ModelProfile: Codable, Equatable, Identifiable {
     var model: String
     /// The `SecretAccount` raw value holding this profile's API key.
     var keyAccount: String
+    /// Whether this provider is asked to look at attached images.
+    ///
+    /// A setting rather than a guess, and off by default, because getting it wrong is
+    /// not a graceful degradation: a text-only endpoint handed an `image_url` part
+    /// answers with a 400, so a turn that would have worked fails outright. There is no
+    /// reliable way to ask an OpenAI-compatible endpoint whether it has eyes — the model
+    /// list says nothing about it — so the person who configured the provider says.
+    ///
+    /// Text attachments ignore this: they are inlined into the question payload as text,
+    /// which every model can read.
+    var sendsImages: Bool
 
-    init(id: UUID = UUID(), name: String, endpoint: String, model: String, keyAccount: String) {
+    init(id: UUID = UUID(), name: String, endpoint: String, model: String, keyAccount: String,
+         sendsImages: Bool = false) {
         self.id = id
         self.name = name
         self.endpoint = endpoint
         self.model = model
         self.keyAccount = keyAccount
+        self.sendsImages = sendsImages
     }
 
     /// A new profile with a secret slot of its own.
@@ -231,7 +244,7 @@ struct ModelProfile: Codable, Equatable, Identifiable {
 
     // MARK: Codable
 
-    enum CodingKeys: String, CodingKey { case id, name, endpoint, model, keyAccount }
+    enum CodingKeys: String, CodingKey { case id, name, endpoint, model, keyAccount, sendsImages }
 
     /// Decoded leniently, for the reason `ResearchTurn` is: a field added later must not
     /// make an existing settings file unreadable, and the recovery from that is a user
@@ -245,6 +258,10 @@ struct ModelProfile: Codable, Equatable, Identifiable {
         model = try container.decodeIfPresent(String.self, forKey: .model) ?? ""
         keyAccount = try container.decodeIfPresent(String.self, forKey: .keyAccount)
             ?? SecretAccount.derived(from: .modelAPIKey, for: id).rawValue
+        // Absent means a settings file written before this existed, and the safe reading
+        // of that is "no": a provider nobody has said has eyes is one an image would
+        // fail on.
+        sendsImages = try container.decodeIfPresent(Bool.self, forKey: .sendsImages) ?? false
     }
 }
 

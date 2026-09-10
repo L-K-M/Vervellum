@@ -163,6 +163,77 @@ final class ThreadArchiveTests: XCTestCase {
 
         let reloaded = ThreadArchive(fileURL: fileURL, debounce: 0)
         XCTAssertFalse(reloaded.library.threads.isEmpty)
+        // A backup standing in is still the whole of what this launch will honour: the
+        // save it is behind by is lost either way, so bytes only that save named are
+        // orphaned, not in use, and the sweep may run.
+        //
+        // It reads like the case the flag exists to refuse — a document on disk holding
+        // threads this library does not — and the difference is that the broken primary
+        // is not repairable *by anything here*. `writeNow` rotates the primary into the
+        // `.bak` only when `primaryIsTrustworthy`, which a primary that failed to decode
+        // is not; so the next save overwrites those bytes without ever having read them,
+        // and nothing in this build will look at them again. Threads no code path can
+        // reach are not threads a sweep has to spare. Untrusting this case would instead
+        // mean a single truncated write stopped every later sweep for good, which is the
+        // unbounded direction.
+        XCTAssertTrue(reloaded.libraryIsTrustworthy)
+    }
+
+    /// The launch sweep deletes every attachment the library does not name, so it may
+    /// only run when the library that came back is the whole truth. A first launch has
+    /// nothing to protect and passes that test; a document that would not decode fails it.
+    func testAnAbsentLibraryIsTrustworthyAndAnUndecodableOneIsNot() throws {
+        // Absence, established rather than assumed: the sibling test below defends the
+        // same precondition, and without it a file left by an earlier state would turn
+        // the first assertion into "a decodable library is trustworthy" — true, and not
+        // what this test is named after.
+        try? FileManager.default.removeItem(at: fileURL)
+        XCTAssertTrue(ThreadArchive(fileURL: fileURL, debounce: 0).libraryIsTrustworthy)
+
+        try "{ not json".write(to: fileURL, atomically: true, encoding: .utf8)
+        XCTAssertFalse(ThreadArchive(fileURL: fileURL, debounce: 0).libraryIsTrustworthy)
+    }
+
+    /// A newer build's document must never vouch for a sweep, and nothing in the flag's
+    /// own expression says so: it falls out of `load` returning on the version stamp
+    /// before it decodes anything, which leaves the library nil beside a file that
+    /// existed. Two facts in two places agreeing by luck until something pins them — and
+    /// a `load` that ever decoded a newer document first would hand the sweep a library
+    /// this build had read only the legible half of.
+    func testANewerDocumentNeverVouchesForASweep() throws {
+        let future = #"{"version": 99, "threads": []}"#
+        try future.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        let archive = ThreadArchive(fileURL: fileURL, debounce: 0)
+        XCTAssertTrue(archive.isReadOnly, "a version this build does not know is read-only")
+        // Both halves of what the comment above claims, because they are two facts in
+        // two places and the sweep gate alone could go on reading false while `load`
+        // started decoding optimistically before the version check.
+        XCTAssertTrue(archive.library.threads.isEmpty,
+                      "a version this build does not know must not be half-decoded in")
+        XCTAssertFalse(archive.libraryIsTrustworthy,
+                       "read-only means the attachments beside it are not ours to sweep")
+    }
+
+    /// Unreadable is not absent, and only the second is safe. A document whose bytes
+    /// never arrive — a permissions change, an I/O error, a directory standing where the
+    /// file should be — leaves the archive holding an empty library exactly as a first
+    /// launch does. Reading that as "nothing was ever stored" is what would let the
+    /// launch sweep delete the attachments the unread document still names.
+    func testALibraryThatIsThereButCannotBeReadIsNotTrustworthy() throws {
+        // Anything left at the path first: a file from an earlier test would make this
+        // throw before its own assertions ran, and the error would name the wrong thing.
+        try? FileManager.default.removeItem(at: fileURL)
+        try FileManager.default.createDirectory(at: fileURL, withIntermediateDirectories: false)
+
+        let archive = ThreadArchive(fileURL: fileURL, debounce: 0)
+        XCTAssertTrue(archive.library.threads.isEmpty)
+        XCTAssertFalse(archive.libraryIsTrustworthy)
+        // Left as found. A directory standing at this path is exactly the leftover the
+        // sibling tests clear defensively before they can write here, and the safety
+        // against *this* test currently lives in *their* setup lines — which read like
+        // paranoia and would be the first thing simplified away.
+        try? FileManager.default.removeItem(at: fileURL)
     }
 
     /// "Off" has to mean the bytes are gone, not that they are hidden.

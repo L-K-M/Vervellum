@@ -178,6 +178,42 @@ Either way, a source that was read says so in the panel and in a copied transcri
 a page that was fetched but did not fit the model's context is listed as a summary —
 because that is what the answer actually had.
 
+### Attachments
+
+An image or file the user attaches is content Vervellum did not fetch and cannot
+vouch for, and it is handled on those terms:
+
+- **The type comes from the bytes.** A dropped file's name is the one part of it that
+  carries no evidence about what it is, so the media type announced to the provider is
+  sniffed from the file's own signature. A `.png` whose bytes are text is attached as
+  text.
+- **An attached file's text is untrusted data**, exactly like a page Vervellum read. It
+  reaches the model inside the same payload as the question, under the same system
+  prompt, and cannot become a citation — it has no source number, and the answer prompt
+  says so in as many words rather than leaving the model to invent one.
+- **Sent inline, never uploaded.** An image travels as a `data:` URL in the request body.
+  The alternative — putting the user's screenshot somewhere public to get a link for it
+  — is the opposite of what the rest of this document promises.
+- **Sent once.** An attachment goes with the turn it was attached to and no other. Later
+  turns in the thread carry its name only.
+- **Bounded.** Images are capped at 4 MB and refused above it rather than silently
+  scaled; an attached file contributes a bounded amount of text, truncated with a
+  visible marker so the model is never handed a fragment presented as a whole file.
+- **The file name is sanitised** before it is shown or put in the payload: control and
+  format characters out — which covers the bidi overrides and zero-width marks that make
+  one name render as another — the line and paragraph separators with them, and path
+  separators too. Nothing builds a path from it —
+  the store keys by the attachment's id — and keeping it that way is easier than proving
+  it is safe.
+- **A provider is shown images only if you said it can.** There is no way to ask an
+  OpenAI-compatible endpoint whether it has eyes, and guessing wrong fails the turn
+  outright, so it is a per-provider setting that is off until set. The filter is applied
+  where the request is built rather than by each caller, so a provider you did not tick
+  cannot be sent a picture by a code path that forgot.
+- **An attachment that could not be sent says so.** Bytes that have gone missing, or text
+  that no longer decodes, raise a notice on the turn rather than leaving an answer that
+  ignores a file for no visible reason.
+
 ### Captured text
 
 The optional "research the selection" shortcut reads the frontmost app's selection

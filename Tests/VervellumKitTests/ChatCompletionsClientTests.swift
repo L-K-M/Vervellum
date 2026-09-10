@@ -200,4 +200,132 @@ final class ChatCompletionsClientTests: XCTestCase {
                                                  headerFields: ["Content-Type": "application/json"]))
         XCTAssertFalse(HTTPTransport.isEventStream(json))
     }
+
+    // MARK: Attached images
+
+    /// The regression that matters most here. Plenty of the OpenAI-compatible servers
+    /// this app gets pointed at — a local llama.cpp, an older gateway — accept only a
+    /// string for `content` and reject an array outright, so a turn with nothing attached
+    /// has to send exactly the bytes it sent before images existed.
+    func testAMessageWithNoImagesKeepsAPlainStringContent() throws {
+        let body = ChatCompletionsClient.requestBody(model: "m", system: "s", userContent: "u",
+                                                     stream: false, optionalParameters: false)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.last?["content"] as? String, "u")
+    }
+
+    /// The same, with the empty list spelled out rather than defaulted: a caller that
+    /// maps "no attachments" to `images: []` must get the string form too, which is the
+    /// whole compatibility promise of this shape.
+    func testAnExplicitlyEmptyImageListAlsoKeepsAPlainStringContent() throws {
+        let body = ChatCompletionsClient.requestBody(model: "m", system: "s", userContent: "u",
+                                                     images: [], stream: false,
+                                                     optionalParameters: false)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.last?["content"] as? String, "u")
+    }
+
+    /// With images the newer parts shape is used, text first: the question is what the
+    /// pictures are *for*, and a model reading parts in order should have it before them.
+    func testImagesBecomePartsWithTheTextFirst() throws {
+        let images = [
+            ChatCompletionsClient.ImagePart(mediaType: "image/png", base64: "AAAA"),
+            ChatCompletionsClient.ImagePart(mediaType: "image/jpeg", base64: "BBBB"),
+        ]
+        let body = ChatCompletionsClient.requestBody(model: "m", system: "s", userContent: "u",
+                                                     images: images, stream: true,
+                                                     optionalParameters: false)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        let parts = try XCTUnwrap(messages.last?["content"] as? [[String: Any]])
+
+        // The *system* message stays a plain string. A build that array-ified every
+        // message when images were present would pass every other assertion here and
+        // still 400 on the string-only servers this shape exists for.
+        XCTAssertEqual(messages.first?["content"] as? String, "s")
+        XCTAssertEqual(parts.count, 3)
+        XCTAssertEqual(parts[0]["type"] as? String, "text")
+        XCTAssertEqual(parts[0]["text"] as? String, "u")
+        XCTAssertEqual(parts[1]["type"] as? String, "image_url")
+        XCTAssertEqual((parts[1]["image_url"] as? [String: Any])?["url"] as? String,
+                       "data:image/png;base64,AAAA")
+        XCTAssertEqual((parts[2]["image_url"] as? [String: Any])?["url"] as? String,
+                       "data:image/jpeg;base64,BBBB")
+    }
+
+    /// The guarantee is the client's, not the caller's. `ModelProfile.sendsImages` exists
+    /// because a text-only endpoint handed an `image_url` part answers 400 and the whole
+    /// question fails — so the filter lives where every request is built, and a caller
+    /// that hands over an image anyway cannot cost a turn.
+    func testAProviderWithoutEyesIsNeverSentAnImageEvenIfOneIsHandedOver() async throws {
+        let images = [ChatCompletionsClient.ImagePart(mediaType: "image/png", base64: "AAAA")]
+        let transport = StubTransport { _ in .completion(json: [:]) }
+        let client = ChatCompletionsClient(url: URL(string: "https://a.example/v1/chat/completions")!,
+                                           model: "m", apiKey: nil, sendsImages: false,
+                                           trace: ResearchTrace(sink: SilentLog()),
+                                           transport: transport)
+
+        _ = try await client.completeJSON(system: "s", payload: ["q": "?"], label: "Plan",
+                                          images: images)
+        let body = try XCTUnwrap(transport.calls.first?.body)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        // The text as well as the absence of the image: a rebuild that filtered the
+        // picture and lost the question with it would pass a bare nil check. Matched on
+        // the payload's own key rather than on an exact string, because what reaches
+        // `content` here is the encoded payload — pinning its spelling would be pinning
+        // `JSONSerialization`, not this behaviour.
+        let content = try XCTUnwrap(messages.last?["content"] as? String,
+                                    "an image reached a provider that has no eyes")
+        XCTAssertTrue(content.contains("\"q\""), "the question was lost: \(content)")
+        // The whole request, not only the message asserted above: the failure this test
+        // exists to prevent could return through a change of *placement* — an image part
+        // moved into the system message, or an extra message appended — and the check
+        // above is blind to exactly that.
+        let whole = try JSONSerialization.data(withJSONObject: body)
+        let text = String(decoding: whole, as: UTF8.self)
+        XCTAssertFalse(text.contains("image_url"),
+                       "an image reached a provider with no eyes")
+        // And the bytes themselves, which is the assertion that survives a change of
+        // wire shape: a leak through a renamed part type, a nested key, or base64
+        // smuggled into the prompt would keep `image_url` absent while the picture still
+        // travelled. The stub payload cannot occur in a legitimate body for this call.
+        XCTAssertFalse(text.contains("AAAA"),
+                       "the image's bytes reached a provider with no eyes")
+    }
+
+    /// And the same client with the flag on sends it, so the guard above is a filter
+    /// rather than a wall.
+    func testAProviderWithEyesIsSentTheImage() async throws {
+        let images = [ChatCompletionsClient.ImagePart(mediaType: "image/png", base64: "AAAA")]
+        let transport = StubTransport { _ in .completion(json: [:]) }
+        let client = ChatCompletionsClient(url: URL(string: "https://a.example/v1/chat/completions")!,
+                                           model: "m", apiKey: nil, sendsImages: true,
+                                           trace: ResearchTrace(sink: SilentLog()),
+                                           transport: transport)
+
+        _ = try await client.completeJSON(system: "s", payload: ["q": "?"], label: "Plan",
+                                          images: images)
+        let body = try XCTUnwrap(transport.calls.first?.body)
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        let parts = try XCTUnwrap(messages.last?["content"] as? [[String: Any]])
+        XCTAssertEqual(parts.count, 2)
+        // The count alone was the whole assertion, so a regression that swapped the two,
+        // sent two text parts, or mangled the `data:` prefix would have read as green
+        // here — and this is the unit-level home for that shape.
+        XCTAssertEqual(parts[0]["type"] as? String, "text")
+        XCTAssertEqual(parts[1]["type"] as? String, "image_url")
+        XCTAssertEqual((parts[1]["image_url"] as? [String: Any])?["url"] as? String,
+                       "data:image/png;base64,AAAA")
+    }
+
+    /// Inline rather than hosted. The alternative is uploading the user's screenshot
+    /// somewhere to get a link for it, which is the opposite of what this app promises
+    /// about where their data goes.
+    func testAnImagePartIsADataURLAndNotALink() {
+        let part = ChatCompletionsClient.ImagePart(mediaType: "image/webp", base64: "Zm8=")
+        XCTAssertEqual(part.dataURL, "data:image/webp;base64,Zm8=")
+        // Positively: the exact-match above already pins the whole string, so a "not
+        // http" check could never fail on its own. What the test is named for is that
+        // the bytes travel inline rather than as an address the provider fetches.
+        XCTAssertTrue(part.dataURL.hasPrefix("data:"))
+    }
 }

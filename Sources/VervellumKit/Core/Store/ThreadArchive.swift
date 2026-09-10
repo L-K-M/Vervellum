@@ -31,6 +31,27 @@ final class ThreadArchive {
     /// understands. In that case the archive never writes.
     let isReadOnly: Bool
 
+    /// Whether `library` is a true picture of what is stored — either the file decoded,
+    /// or there was no file to decode.
+    ///
+    /// False means a document exists and could not be read: a corrupt file, a partial
+    /// write, or one this build must not touch. It matters to anything that *deletes*
+    /// what the library does not mention. `AttachmentStore`'s sweep is exactly that, and
+    /// an empty library from a failed read would tell it to delete every attachment
+    /// while a repairable thread file — and its `.bak` — still name them.
+    ///
+    /// Two states look as though they should need a clause here and do not. A *read-only*
+    /// document — one stamped with a version this build does not know — never arrives
+    /// trustworthy, because `load` returns on the version stamp before it decodes
+    /// anything: the library is nil beside a file that existed, which is the false case
+    /// already. And with history *off*, `library` is deliberately empty while the file
+    /// may still be on disk — but the erase in `init` is what makes the disk agree, and a
+    /// sweep that then finds nothing live is that erase reaching the bytes rather than a
+    /// flag vouching for a picture it does not have. Gating this on `historyEnabled`
+    /// would undo it: the sweep is the only thing that clears attachment bytes when the
+    /// app launches with history already off.
+    let libraryIsTrustworthy: Bool
+
     /// Why the last erase left the file in place, in words fit for the interface; nil
     /// once an erase succeeds. "History off means the bytes are gone" is a promise
     /// Settings makes, and when the file system breaks it the user has to be told
@@ -126,6 +147,7 @@ final class ThreadArchive {
         // flag exists to prevent.
         let onDisk = Self.load(from: fileURL, fileManager: fileManager)
         isReadOnly = onDisk.newerVersion != nil
+        libraryIsTrustworthy = onDisk.library != nil || !onDisk.fileExisted
         library = historyEnabled ? (onDisk.library ?? ThreadLibrary()) : ThreadLibrary()
         primaryIsTrustworthy = onDisk.primaryDecoded
         if let newer = onDisk.newerVersion {
@@ -324,16 +346,33 @@ final class ThreadArchive {
         var newerVersion: Int?
         /// Whether the primary file decoded, as opposed to the backup standing in for it.
         var primaryDecoded = false
+        /// Whether a document is *there*, readable or not. Distinguishes "no library
+        /// yet" from "a library that would not decode", which look the same afterwards.
+        ///
+        /// Presence, deliberately, rather than "bytes came back": a file whose contents
+        /// cannot be read at all — a permissions change, an I/O error, a directory where
+        /// the file should be — leaves `candidates` empty exactly as an absent file
+        /// does, and calling that "nothing stored" is what would let a sweep delete
+        /// every attachment the unreadable file still names.
+        var fileExisted = false
     }
 
     private static func load(from url: URL, fileManager: FileManager) -> Loaded {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         var loaded = Loaded()
-        let candidates = [url, url.appendingPathExtension("bak")].compactMap { candidate -> (URL, Data)? in
+        // One expression for the backup's name, read by both the loader and the presence
+        // test below. Written twice they agreed today and would have disagreed silently
+        // the day one of them moved — and a `.bak` the presence test could not see would
+        // report an unreadable library as "nothing stored", which is the one answer that
+        // lets a sweep delete what it still names.
+        let backup = url.appendingPathExtension("bak")
+        let candidates = [url, backup].compactMap { candidate -> (URL, Data)? in
             guard let data = fileManager.contents(atPath: candidate.path) else { return nil }
             return (candidate, data)
         }
+        loaded.fileExisted = fileManager.fileExists(atPath: url.path)
+            || fileManager.fileExists(atPath: backup.path)
         // Inspect both stamps before adopting either file; rotation can erase a newer backup.
         for (_, data) in candidates {
             if let stamp = try? decoder.decode(VersionStamp.self, from: data),

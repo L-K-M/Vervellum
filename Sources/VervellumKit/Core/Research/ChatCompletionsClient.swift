@@ -32,17 +32,23 @@ final class ChatCompletionsClient {
     let url: URL
     let model: String
     let apiKey: String?
+    /// Whether this provider was configured to be shown images. Carried on the client
+    /// because the chain decides *which* provider answers, and a fallback that has no
+    /// eyes must be sent the same turn without the pictures rather than a request it
+    /// will reject — see `ModelProfile.sendsImages`.
+    let sendsImages: Bool
     let trace: ResearchTrace
     let transport: any HTTPTransporting
 
     /// Whether the endpoint has, so far, accepted the optional parameters.
     private var sendsOptionalParameters = true
 
-    init(url: URL, model: String, apiKey: String?, trace: ResearchTrace,
-         transport: any HTTPTransporting = HTTPTransport.shared) {
+    init(url: URL, model: String, apiKey: String?, sendsImages: Bool = false,
+         trace: ResearchTrace, transport: any HTTPTransporting = HTTPTransport.shared) {
         self.url = url
         self.model = model
         self.apiKey = apiKey
+        self.sendsImages = sendsImages
         self.trace = trace
         self.transport = transport
     }
@@ -52,17 +58,46 @@ final class ChatCompletionsClient {
         return ["Authorization": "Bearer " + apiKey]
     }
 
+    /// One image on the user message, already encoded.
+    ///
+    /// Built by the caller rather than read from disk here, so this file keeps knowing
+    /// nothing about where an attachment's bytes live.
+    struct ImagePart: Equatable {
+        let mediaType: String
+        let base64: String
+
+        /// The `data:` URL an OpenAI-compatible endpoint takes in place of a link.
+        /// Inline rather than hosted because the alternative is uploading the user's
+        /// screenshot somewhere to get a URL for it, which is the opposite of what this
+        /// app promises about where their data goes.
+        var dataURL: String { "data:\(mediaType);base64,\(base64)" }
+    }
+
+    /// The images this provider may actually be sent.
+    ///
+    /// Enforced here, where every request is built, rather than left to each caller. The
+    /// rule is one a caller could forget exactly once and lose a turn to: a text-only
+    /// endpoint handed an `image_url` part answers 400 and the whole question fails. A
+    /// caller may still filter earlier — `ResearchRunner` does, because it has to *know*
+    /// whether the pictures went in order to say so on the turn — and this makes the
+    /// guarantee structural rather than a matter of discipline.
+    private func allowed(_ images: [ImagePart]) -> [ImagePart] {
+        sendsImages ? images : []
+    }
+
     // MARK: Structured call
 
     /// Sends `system` plus a JSON-encoded `payload` and decodes the reply as a JSON
     /// object.
-    func completeJSON(system: String, payload: Any, label: String) async throws -> [String: Any] {
+    func completeJSON(system: String, payload: Any, label: String,
+                      images: [ImagePart] = []) async throws -> [String: Any] {
+        let images = allowed(images)
         guard let userContent = Self.encodeUserContent(payload)
         else { throw ResearchError.invalidContext }
 
         let response = try await withOptionalParameters(label: label) { optional in
             let body = Self.requestBody(model: self.model, system: system, userContent: userContent,
-                                        stream: false, optionalParameters: optional)
+                                        images: images, stream: false, optionalParameters: optional)
             // `"stream": false` above, so do not advertise SSE — see HTTPTransport.request.
             let request = try HTTPTransport.request(url: self.url, payload: body, headers: self.headers,
                                                     acceptsEventStream: false)
@@ -91,7 +126,9 @@ final class ChatCompletionsClient {
     func streamText(system: String,
                     payload: Any,
                     label: String,
+                    images: [ImagePart] = [],
                     onDelta: @escaping (String) -> Void) async throws -> String {
+        let images = allowed(images)
         guard let userContent = Self.encodeUserContent(payload)
         else { throw ResearchError.invalidContext }
 
@@ -101,7 +138,7 @@ final class ChatCompletionsClient {
         // the first frame, so no delta has reached the caller when it is thrown.
         let reply = try await withOptionalParameters(label: label) { optional in
             let body = Self.requestBody(model: self.model, system: system, userContent: userContent,
-                                        stream: true, optionalParameters: optional)
+                                        images: images, stream: true, optionalParameters: optional)
             let request = try HTTPTransport.request(url: self.url, payload: body, headers: self.headers,
                                                     acceptsEventStream: true)
             var reply = StreamingReply()
@@ -222,14 +259,28 @@ final class ChatCompletionsClient {
     static func requestBody(model: String,
                             system: String,
                             userContent: String,
+                            images: [ImagePart] = [],
                             stream: Bool,
                             optionalParameters: Bool) -> [String: Any] {
+        // A plain string when there are no images, and only then. The parts array is the
+        // newer shape and every vision-capable endpoint takes it, but plenty of the
+        // OpenAI-compatible servers this app is pointed at — a local llama.cpp, an older
+        // gateway — accept only a string and fail the request outright on an array. A
+        // turn with nothing attached must send exactly the bytes it sent before this
+        // feature existed.
+        let userContentValue: Any = images.isEmpty
+            ? userContent
+            : [["type": "text", "text": userContent] as [String: Any]]
+                + images.map { image in
+                    ["type": "image_url",
+                     "image_url": ["url": image.dataURL]] as [String: Any]
+                }
         var body: [String: Any] = [
             "model": model,
             "stream": stream,
             "messages": [
                 ["role": "system", "content": system],
-                ["role": "user", "content": userContent],
+                ["role": "user", "content": userContentValue],
             ],
         ]
         if optionalParameters {

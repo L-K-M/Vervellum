@@ -271,7 +271,10 @@ final class LinuxPanel {
         let history = thread.turns.dropLast().filter { !$0.question.isEmpty }
         let runner = ResearchRunner(
             environment: .init(preferences: environment.preferences, secrets: environment.secrets),
-            trace: ResearchTrace(sink: StandardErrorLog()))
+            trace: ResearchTrace(sink: StandardErrorLog()),
+            // Nothing can be attached on this front end yet; the GTK composer comes in a
+            // later change, and this is the line it will come through.
+            attachmentBytes: { _ in nil })
 
         runningTask = Task { [weak self] in
             let finished = await runner.run(turn, mode: mode, history: history) { snapshot in
