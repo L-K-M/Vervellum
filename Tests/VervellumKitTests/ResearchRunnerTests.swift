@@ -102,7 +102,7 @@ final class ResearchRunnerTests: XCTestCase {
     /// also a small guard on the prompts themselves: a stage that stopped sending the
     /// prompt it is named for would stop being routed here.
     private enum Stage {
-        case plan, deepPlan, answer, assess, revise
+        case plan, deepPlan, answer, assess, revise, regatherPlan
     }
 
     private static func stage(of call: StubTransport.Call) -> Stage? {
@@ -123,6 +123,9 @@ final class ResearchRunnerTests: XCTestCase {
         // it was for the answer", and a looser answer test would swallow it and feed the
         // revision the answer's script.
         if prompt.contains("TASK: correct an answer you are given") { return .revise }
+        if prompt.contains("TASK: the answer has been written and checked") {
+            return .regatherPlan
+        }
         return nil
     }
 
@@ -1522,6 +1525,116 @@ final class ResearchRunnerTests: XCTestCase {
                        "quick mode must not grow the deep answer's structure")
         XCTAssertFalse(answerCall.userContent?.contains("subquestions") == true)
     }
+
+    // MARK: Regather
+
+    /// The first assessment's two replies, told apart by which answer they grade.
+    private static func regatherTransport(secondAssessment: StubTransport.Reply)
+        -> StubTransport {
+        StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first { $0.name == "q" }?.value ?? ""
+                return .json(Self.searxng([(url: "https://\(query).example/hit",
+                                            title: "Hit for \(query)")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan:
+                    return .completion(json: Self.plan("first", purpose: "the opening question"))
+                case .deepPlan:
+                    let nothingLeft: [String: Any] = ["reading": "Nothing is missing.",
+                                                      "searches": [Any]()]
+                    return .completion(json: nothingLeft)
+                case .regatherPlan:
+                    return .completion(json: [
+                        "reading": "The claim can be settled.",
+                        "searches": [["purpose": "settle it", "arguments": ["q": "settle-it"]]],
+                    ])
+                case .assess:
+                    if call.userContent?.contains("First answer") == true {
+                        return .completion(json: Self.assessment(
+                            verdict: "insufficient",
+                            claim: "The evidence does not settle whether it holds.",
+                            sources: [],
+                            alongside: []))
+                    }
+                    return secondAssessment
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                if call.systemPrompt?.contains("STRUCTURE") == true { return .unrouted }
+                // Two answer calls: the first answers the plan's payload, the second the
+                // regather round's enlarged one. Told apart by size — the second carries
+                // both sources.
+                let carriesTwo = call.userContent?.contains("settle-it.example") == true
+                return .stream(carriesTwo ? ["Second answer [1, 2]."] : ["First answer [1]."])
+            }
+        }
+    }
+
+    /// The point of the round: claims the check could not settle send a deep turn back
+    /// for the evidence that settles them, and the answer is written again over it.
+    func testDeepResearchRegathersWhenTheCheckCannotSettleAClaim() async throws {
+        let secondAssessment = StubTransport.Reply.completion(json: Self.assessment(
+            verdict: "supported", claim: "Now the evidence carries it.", sources: [1, 2]))
+        let transport = Self.regatherTransport(secondAssessment: secondAssessment)
+
+        let turn = await run("Does it hold?", mode: .deep, transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "Second answer [1, 2].")
+        XCTAssertEqual(turn.draftAnswer, "First answer [1].",
+                       "the first answer is kept as the draft for comparison")
+        XCTAssertEqual(turn.sources.count, 2, "the regather round's hit joined the list")
+        XCTAssertTrue(turn.notices.contains(.answerRegathered))
+        XCTAssertEqual(turn.findings.first?.verdict, .supported,
+                       "the findings are the second check's — they grade what is on screen")
+        // The round's searches are on the turn like every other round's: they ran.
+        XCTAssertEqual(turn.searches.count, 2)
+        // And the second check saw the enlarged evidence.
+        let assesses = transport.calls.filter { Self.stage(of: $0) == .assess }
+        XCTAssertEqual(assesses.count, 2)
+        XCTAssertTrue(assesses.last?.userContent?.contains("settle-it.example") == true)
+    }
+
+    /// A regather that cannot finish adopts nothing: the first answer, the first
+    /// check's findings and the first source list stand. Anything else would be a
+    /// correction made against a check that never ran.
+    func testDeepResearchRegatherRestoresWhenTheSecondCheckFails() async throws {
+        let transport = Self.regatherTransport(
+            secondAssessment: .failure(ResearchError("provider is down")))
+
+        let turn = await run("Does it hold?", mode: .deep, transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "First answer [1].")
+        XCTAssertNil(turn.draftAnswer)
+        XCTAssertEqual(turn.sources.count, 1)
+        XCTAssertFalse(turn.notices.contains(.answerRegathered))
+        XCTAssertEqual(turn.findings.first?.verdict, .insufficient,
+                       "the first check's findings grade the answer they were written about")
+        // The round's searches are not rolled back: they did run.
+        XCTAssertEqual(turn.searches.count, 2)
+    }
+
+    /// The round is a deep-mode discipline: a quick turn's insufficient verdict is
+    /// the answer, not a reason to spend another round.
+    func testQuickResearchDoesNotRegather() async throws {
+        let transport = Self.regatherTransport(
+            secondAssessment: .completion(json: Self.assessment))
+
+        let turn = await run("Does it hold?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "First answer [1].")
+        XCTAssertFalse(transport.calls.contains { Self.stage(of: $0) == .regatherPlan },
+                       "quick mode must not plan a regather round")
+    }
+
     // MARK: Revision
 
     /// Everything the revision stage needs, with the answer and the revision scripted

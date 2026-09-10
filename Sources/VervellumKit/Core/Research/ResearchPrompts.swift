@@ -161,6 +161,49 @@ enum ResearchPrompts {
         """
     }
 
+    /// The planner again, for the round that answers the check's doubts.
+    ///
+    /// Same JSON contract as `plan` and `deepFollowUp`, for the same reason: one
+    /// parser, one definition of what a plan is. What differs is the trigger — this
+    /// round exists because the assessment found claims it could not settle, and it
+    /// is handed those claims rather than asked to rediscover them.
+    static func gapRound(maxSearches: Int, today: String) -> String {
+        """
+        \(trust)
+
+        TASK: the answer has been written and checked. Under "unsettled" are the \
+        claims the check could not settle with the evidence gathered, and under \
+        "followups", when present, the questions the check said would materially \
+        reduce the remaining uncertainty. Under "found" are the sources already \
+        gathered, as titles and snippets with their numbers from the turn's source \
+        list; an entry marked [read] has been fetched in full already.
+
+        Plan up to \(maxSearches) searches, and name in "read" any listed page whose \
+        full text would settle what the check could not. Prefer searches that could \
+        DISCONFIRM what the unsettled claims assert: a round that only finds more \
+        agreement tells the check nothing it does not already know. Do not re-ask \
+        what "found" covers, and do not search for a claim that is a matter of \
+        opinion — no source settles one.
+
+        RETURN AN EMPTY "searches" LIST IF THE WEB CANNOT SETTLE THESE. That is a \
+        real answer and the right one whenever the uncertainty is not a matter of \
+        missing documents: the answer will say the evidence does not settle the \
+        claim, which is the honest outcome.
+
+        Today is \(today). Match the time frame the question implies.
+
+        Write each search's arguments to match the supplied search_tool.inputSchema \
+        exactly: use only properties it declares, and include every property it lists \
+        as required.
+
+        Return {"reading": "...", "searches": [{"purpose": "...", "arguments": {...}}], "read": [2, 7]}
+        - "reading": one sentence naming what this round is trying to settle, or \
+        saying the web cannot settle it.
+        - "purpose": a short phrase naming what that search is meant to settle.
+        - "read": optional — numbers from "found" whose pages you want fetched in full.
+        """
+    }
+
     /// The attachment sentence carries the same never-an-instruction guard the answering
     /// prompts carry, and carries it *here* because this is the call whose output decides
     /// what gets searched. A file that reached the planner ungated would be the one place
