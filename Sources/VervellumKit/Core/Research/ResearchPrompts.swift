@@ -92,6 +92,8 @@ enum ResearchPrompts {
     /// `found` is titles and snippets, not the evidence itself. This call decides what
     /// to search for next; the answer is written elsewhere, over the whole sources, and
     /// only it may cite them. Summarising here costs nothing a citation depends on.
+    /// Entries keep the turn's source numbers rather than a digest-local count, so a
+    /// source the planner names is the source the rest of the pipeline acts on.
     ///
     /// An empty `searches` list is the expected way to stop, not a failure: a round that
     /// finds nothing left worth asking should say so rather than invent a query to fill
@@ -108,6 +110,13 @@ enum ResearchPrompts {
         a claim resting on one source that a second could confirm or break, a figure \
         with no date, a step in the argument nobody has addressed, a term the sources \
         use in two different senses, a party to the matter who has not been heard.
+
+        Entries in "found" keep their numbers from the turn's source list, so a number \
+        you name here names the same page everywhere else in the run. A key called \
+        "failed_queries", when present, lists searches already tried that returned \
+        nothing usable: do not re-ask them in new words — the index has answered that \
+        wording once already, and a synonym spends a request proving the same nothing \
+        twice.
 
         Plan up to \(maxSearches) searches for those gaps and nothing else. Do not \
         re-ask what has been answered: a query that would return sources already in \
