@@ -23,6 +23,24 @@ if [ ! -x "$BINARY" ]; then
     exit 1
 fi
 
+# A non-empty output dir mixes vintages: stale case files from a changed bank
+# would be judged and diffed as if they belonged to this run.
+if [ -d "$OUT" ] && [ -n "$(ls -A "$OUT" 2>/dev/null)" ]; then
+    echo "eval: $OUT exists and is not empty — use a fresh dir" >&2
+    exit 1
+fi
+
+# timeout is GNU; macOS has it only as gtimeout from coreutils. Without either,
+# run unbounded rather than fail every question with exit 127.
+TIMEOUT=""
+if command -v timeout >/dev/null 2>&1; then
+    TIMEOUT="timeout -k 10 ${VERVELLUM_EVAL_TIMEOUT:-900}"
+elif command -v gtimeout >/dev/null 2>&1; then
+    TIMEOUT="gtimeout -k 10 ${VERVELLUM_EVAL_TIMEOUT:-900}"
+else
+    echo "eval: no timeout(1) found — a wedged question will stall the run" >&2
+fi
+
 mkdir -p "$OUT"
 pass=0
 fail=0
@@ -30,7 +48,7 @@ fail=0
 for file in eval/questions/*.txt; do
     id=$(basename "$file" .txt)
     mode=$(grep -m1 '^mode: ' "$file" | cut -d' ' -f2- | xargs)
-    question=$(grep -m1 '^question: ' "$file" | cut -d' ' -f2-)
+    question=$(grep -m1 '^question: ' "$file" | cut -d' ' -f2- | tr -d '\r')
     # A typo'd or missing mode must not silently run as research: a deep question
     # measured as a cheap pass corrupts the before/after comparison this exists for.
     case "$mode" in
@@ -46,9 +64,9 @@ for file in eval/questions/*.txt; do
 
     echo "== $id ($mode) =="
     # A deep question is several billed round trips; a wedged one must become a
-    # counted failure (timeout exits 124), not a stalled run. macOS: gtimeout from
-    # coreutils.
-    if timeout "${VERVELLUM_EVAL_TIMEOUT:-900}" "$BINARY" "$flag" "$question" \
+    # counted failure (timeout exits 124), not a stalled run. -k covers a binary
+    # that ignores SIGTERM.
+    if $TIMEOUT "$BINARY" "$flag" "$question" \
             > "$OUT/$id.transcript.txt" 2> "$OUT/$id.trace.txt"; then
         pass=$((pass + 1))
     else

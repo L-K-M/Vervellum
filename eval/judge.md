@@ -38,4 +38,8 @@ calibration >= 0.7, otherwise exactly `fail`, both lowercase.
 Return one JSON object and nothing else, on one line so the output parses even
 when copied verbatim:
 
-{"factual": 0.0, "citation": 0.0, "coverage": 0.0, "source_quality": 0.0, "calibration": 0.0, "verdict": "pass", "notes": "one or two sentences: the strongest and weakest thing about this answer"}
+{"factual": 0.0, "citation": 0.0, "coverage": 0.0, "source_quality": 0.0, "calibration": 0.0, "verdict": "fail", "notes": "one or two sentences: the strongest and weakest thing about this answer"}
+
+The template's verdict is `fail` deliberately: an example is an anchor, and a
+judge that leans on it should err toward the verdict that triggers more scrutiny,
+not less.
