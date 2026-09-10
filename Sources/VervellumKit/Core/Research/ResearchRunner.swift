@@ -954,13 +954,16 @@ final class ResearchRunner: ResearchRunning {
                 var followExtra: [String: Any] = ["search_tool": search.toolDescriptor,
                                                   "found": Self.digest(of: soFar)]
                 if !failedQueries.isEmpty { followExtra["failed_queries"] = failedQueries }
-                // The read allowance left, stated rather than implied: a planner that
-                // can see two reads left asks for two pages, where one told only that
-                // reads "cost a share of the budget" would guess.
                 // Stated even at zero: a planner that can see the reads are spent
                 // stops asking for them, where an absent key leaves it guessing —
                 // and guessing costs a round.
                 followExtra["read_budget"] = pageBudget
+                // The first plan's decomposition, so the round plans against the
+                // sub-questions the evidence leaves open rather than re-deriving a
+                // map of the question from snippets.
+                if !plan.subquestions.isEmpty {
+                    followExtra["subquestions"] = plan.subquestions
+                }
                 let followContext = ResearchContext.assemble(
                     question: question, history: history, today: today, extra: followExtra)
                 // `try?`, because a later round failing to plan is not a reason to lose
@@ -1133,6 +1136,14 @@ final class ResearchRunner: ResearchRunning {
             "evidence": evidence,
             "highest_source_number": evidence.compactMap { $0["number"] as? Int }.max() ?? 0,
         ]
+        // The deep answer is structured by the first plan's decomposition; a quick
+        // turn's is not, because a quick question rarely has five load-bearing parts
+        // and headings for one part are scaffolding around a paragraph.
+        let answerPrompt = mode == .deep && !plan.subquestions.isEmpty
+            ? ResearchPrompts.answerDeep : ResearchPrompts.answer
+        if mode == .deep, !plan.subquestions.isEmpty {
+            answerExtra["subquestions"] = plan.subquestions
+        }
         if !attachments.payload.isEmpty { answerExtra["attachments"] = attachments.payload }
         let answerContext = ResearchContext.assemble(
             question: question, history: history, today: today, extra: answerExtra)
@@ -1169,7 +1180,7 @@ final class ResearchRunner: ResearchRunning {
             let payload = images.isEmpty ? (withheldContext ?? answerContext).payload
                                          : answerContext.payload
             let text = try await chat.streamText(
-                system: ResearchPrompts.answer, payload: payload,
+                system: answerPrompt, payload: payload,
                 withoutImages: images.isEmpty ? nil : withheldContext?.payload,
                 label: "Answer", images: images
             ) { [weak self] chunk in

@@ -1423,6 +1423,96 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(quickTurn.stage, .complete, quickTurn.failure ?? "no failure recorded")
         XCTAssertEqual(quickTurn.pagesRead, PageReaderFactory.maxPages)
     }
+
+    /// The first plan's decomposition must reach the two places that act on it: the
+    /// follow-up rounds, which plan against the unsettled sub-questions, and the
+    /// answer, which is structured by them in deep mode.
+    func testDeepResearchCarriesTheSubquestionsToRoundsAndAnswer() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "https://a.example/hit", title: "Hit")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan:
+                    return .completion(json: [
+                        "reading": "Two things must be settled.",
+                        "subquestions": ["Who owns it?", "Where is it?"],
+                        "searches": [["purpose": "the opening question",
+                                      "arguments": ["q": "first"]]],
+                    ])
+                case .deepPlan:
+                    let nothingLeft: [String: Any] = ["reading": "Nothing is missing.",
+                                                      "searches": [Any]()]
+                    return .completion(json: nothingLeft)
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["The answer, structured [1]."])
+            }
+        }
+
+        let turn = await run("What is still unsettled?", mode: .deep, transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        let roundTwo = try XCTUnwrap(transport.calls.first {
+            Self.stage(of: $0) == .deepPlan
+        }?.userContent)
+        XCTAssertTrue(roundTwo.contains("Who owns it?"), roundTwo)
+
+        let answerCall = try XCTUnwrap(transport.calls.first {
+            Self.stage(of: $0) == .answer
+        })
+        XCTAssertTrue(answerCall.userContent?.contains("subquestions") == true,
+                      answerCall.userContent ?? "no answer payload")
+        XCTAssertTrue(answerCall.systemPrompt?.contains("STRUCTURE — deep research") == true,
+                      "deep mode with subquestions must use the structured answer prompt")
+    }
+
+    /// The same decomposition in quick mode stays flat: a quick question rarely has
+    /// five load-bearing parts, and headings around one part are scaffolding around a
+    /// paragraph.
+    func testQuickResearchDoesNotUseTheDeepStructure() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "https://a.example/hit", title: "Hit")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan:
+                    return .completion(json: [
+                        "reading": "Two things must be settled.",
+                        "subquestions": ["Who owns it?", "Where is it?"],
+                        "searches": [["purpose": "the opening question",
+                                      "arguments": ["q": "first"]]],
+                    ])
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["The answer, flat [1]."])
+            }
+        }
+
+        let turn = await run("What is the answer?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        let answerCall = try XCTUnwrap(transport.calls.first {
+            Self.stage(of: $0) == .answer
+        })
+        XCTAssertFalse(answerCall.systemPrompt?.contains("STRUCTURE — deep research") == true,
+                       "quick mode must not grow the deep answer's structure")
+        XCTAssertFalse(answerCall.userContent?.contains("subquestions") == true)
+    }
     // MARK: Revision
 
     /// Everything the revision stage needs, with the answer and the revision scripted

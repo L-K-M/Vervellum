@@ -98,6 +98,33 @@ final class PlanParserTests: XCTestCase {
         XCTAssertEqual(plan.readRequests.count, PageReaderFactory.maxDeepPages)
     }
 
+    /// The decomposition the answer is structured by. Only strings count — a
+    /// sub-question is prose, and coercing something that is not one guesses at the
+    /// answer's skeleton.
+    func testParsesSubquestions() throws {
+        let object: [String: Any] = [
+            "searches": [Any](),
+            "subquestions": [" Who owns it? ", "", "  ", 7, "Where is it?"] as [Any],
+        ]
+        let plan = try PlanParser.parse(object, maxSearches: 4)
+        XCTAssertEqual(plan.subquestions, ["Who owns it?", "Where is it?"])
+    }
+
+    /// Sub-questions double as the answer's sections; a plan may not have more
+    /// sections than a reader can hold as a map.
+    func testSubquestionsAreCapped() throws {
+        let object: [String: Any] = ["searches": [Any](),
+                                     "subquestions": (1...9).map { "Part \($0)?" }]
+        let plan = try PlanParser.parse(object, maxSearches: 4)
+        XCTAssertEqual(plan.subquestions.count, PlanParser.maxSubquestions)
+    }
+
+    /// An absent key is a question too narrow to decompose, not an error.
+    func testNoSubquestionsKeyMeansAnUnstructuredAnswer() throws {
+        let plan = try PlanParser.parse(["searches": [Any]()], maxSearches: 4)
+        XCTAssertEqual(plan.subquestions, [])
+    }
+
     func testRejectsAnEntryWithNoArguments() {
         let searches: [[String: Any]] = [["purpose": "p"]]
         XCTAssertThrowsError(try PlanParser.parse(["searches": searches], maxSearches: 4))
