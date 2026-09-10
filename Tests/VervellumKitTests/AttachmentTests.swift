@@ -83,6 +83,22 @@ final class AttachmentTests: XCTestCase {
         XCTAssertEqual(reason, .tooLarge(name: "huge.log", byteCount: long.count))
     }
 
+    /// A file holding only a byte-order mark is empty too, and this is the input the
+    /// check in `make` is actually written for — `Data()` would be refused by a trim
+    /// that only knew about spaces.
+    ///
+    /// Pinned because it rests on a property of Foundation rather than one this code
+    /// states: `CharacterSet.controlCharacters` is Unicode categories Cc *and* Cf, and
+    /// U+FEFF is Cf. `testDisplayNameStripsWhatWouldDeceive` pins the same fact for a
+    /// file's name; this pins it for a file's contents, which is the half a reader of
+    /// `make` has to take on trust.
+    func testAFileHoldingOnlyAByteOrderMarkIsRefusedAsEmpty() {
+        guard case .failure(let reason) = Attachment.make(from: Data([0xEF, 0xBB, 0xBF]),
+                                                          name: "bom.txt")
+        else { return XCTFail("accepted a file whose only character draws nothing") }
+        XCTAssertEqual(reason, .empty(name: "bom.txt"))
+    }
+
     /// An empty file is refused rather than attached. It would otherwise be stored,
     /// listed, and its name carried into every later turn — telling the model about a
     /// file whose contents are nothing.
@@ -93,7 +109,13 @@ final class AttachmentTests: XCTestCase {
         // through some other case — or with a message that stopped naming the file —
         // would leave the reader with a sentence they cannot act on, and the assertion
         // above would still be green.
+        XCTAssertEqual(reason, .empty(name: "empty.txt"))
         XCTAssertTrue(reason.message.contains("empty.txt"), reason.message)
+        // And in its own words. Refused as "unsupported", a `touch`ed file or a download
+        // that died sends its owner looking for a format problem in a file whose only
+        // problem is that there is nothing in it.
+        XCTAssertFalse(reason.message.contains("not something Vervellum can attach"),
+                       reason.message)
     }
 
     func testAnUnsupportedFileIsRefusedByName() {

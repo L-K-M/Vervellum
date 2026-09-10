@@ -226,6 +226,17 @@ struct ProvidersView: View {
             LabeledContent("Model") {
                 modelRow(profile)
             }
+            // Off by default and asked rather than guessed. There is no way to ask an
+            // OpenAI-compatible endpoint whether it can see, the model list says nothing
+            // about it, and guessing wrong is not a soft failure: a text-only endpoint
+            // handed an image part answers 400 and the question fails outright. Text
+            // attachments are unaffected — they are inlined as text, which every model
+            // reads — so this switch is about pictures only, as its help says.
+            Toggle("Send attached images to this provider", isOn: profile.sendsImages)
+                .help("Only turn this on for a model that can look at images. A "
+                    + "text-only endpoint rejects the whole question when one is "
+                    + "attached. Attached text files are sent either way; with this "
+                    + "off, an attached image is left out of the question.")
             keyRow(title: "API key",
                    entry: Binding(get: { keyEntries[id] ?? "" },
                                   set: { keyEntries[id] = $0 }),

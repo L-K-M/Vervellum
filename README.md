@@ -81,6 +81,15 @@ runs the searches and answers based on current sources.
   turn's first numbered source, so the answer can cite it — and "summarise this" needs
   no search at all. Up to three links, and only while page reading is on; a link that
   is left unread says so on the turn.
+- **Attach a screenshot or a file.** Paste or drag an image or a text file onto the
+  composer and it goes with the question: images as inline data, text files inlined
+  into the payload. Up to four per question, 4 MB each; what a file *is* is decided by
+  its bytes rather than its name. An attachment is sent on the turn it was attached to
+  and on no other — later turns in the thread know its name, so the model can say it
+  can no longer see it instead of inventing what was in it. Images go only to a
+  provider you have ticked **Send attached images** for, because there is no way to ask
+  an endpoint whether it can see and a text-only one rejects the whole question; a turn
+  whose image was withheld says so. On Linux, attaching is not available yet.
 - **`/direct`** answers with no search at all, and is clearly badged as unsourced.
 - **Bring your own providers.** An OpenAI-compatible Chat Completions endpoint, and
   for search an HTTP MCP server — recognized tools include z.ai, Brave, Tavily,

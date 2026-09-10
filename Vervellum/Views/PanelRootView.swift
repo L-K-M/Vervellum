@@ -27,6 +27,13 @@ struct PanelRootView: View {
     var onClose: () -> Void
 
     @State private var draft = ""
+    /// What is attached to the question being typed, bytes and all.
+    ///
+    /// Held here rather than written to disk as it arrives, because a question that is
+    /// still being typed has no turn to refer to it — see `PendingAttachment`. It is
+    /// cleared exactly where the draft is: a question that was taken has taken these
+    /// with it, and one that was refused keeps both.
+    @State private var attachments: [PendingAttachment] = []
     @State private var showsHistory = false
     /// Markdown shown above the thread in place of a turn — `/help`, and the `/model`
     /// listing. One slot rather than a flag per command: they are mutually exclusive by
@@ -153,6 +160,12 @@ struct PanelRootView: View {
             // the selection shortcut meant to add to it.
             draft = draft.isEmpty ? text : draft + "\n\n" + text
             redactionNote = (note.userInfo?["redactions"] as? Int).flatMap { $0 > 0 ? $0 : nil }
+            // A question handed back from the queue brings what was attached to it. The
+            // bytes of a pasted screenshot exist nowhere else, so returning the words
+            // alone would be the one part of a Stop that could not be undone.
+            if let returned = note.userInfo?["attachments"] as? [PendingAttachment] {
+                receive(AttachmentIntake.Outcome(accepted: returned), restoring: true)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .vervellumPanelDidShow)) { _ in
             refreshConfiguredState()
@@ -328,6 +341,16 @@ struct PanelRootView: View {
             if !engine.queue.isEmpty {
                 QueuedQuestionsView(queued: engine.queue) { engine.removeQueued($0) }
             }
+            if !attachments.isEmpty {
+                AttachedFilesView(attachments: attachments) { id in
+                    // Named, like every other attachment transition: this one destroys
+                    // bytes that are on no disk anywhere, and a reader who cannot see
+                    // the chip vanish has only the button's own click to go on.
+                    guard let removed = attachments.first(where: { $0.id == id }) else { return }
+                    attachments.removeAll { $0.id == id }
+                    announce("Removed \(removed.attachment.name)")
+                }
+            }
             if let completions = visibleCompletions {
                 CommandCompletionsView(completions: completions,
                                        selected: effectiveCompletionIndex,
@@ -353,7 +376,14 @@ struct PanelRootView: View {
                              // Shift-Return here instead. Whatever key sends a question
                              // is the key that takes the highlighted command.
                              onSubmit: { submitFromComposer() },
-                             onArrow: moveThroughCompletionsOrHistory)
+                             onArrow: moveThroughCompletionsOrHistory,
+                             attachmentCount: attachments.count,
+                             // Wrapped rather than passed by name: `receive` gained a
+                             // second parameter with a default, and a function *value*
+                             // in Swift carries no defaults — a bare `receive` here is
+                             // `(Outcome, Bool) -> Void` and does not fit. This is the
+                             // intake gesture, so the default is the one it wants.
+                             onAttach: { receive($0) })
                     // The composer's height for its content, laid out at the width the
                     // row will actually give it: the measured row width minus what the
                     // send button and its spacing take. Measured rather than derived
@@ -380,7 +410,7 @@ struct PanelRootView: View {
                 }
                 CircularComposerButton(symbol: "arrow.up",
                                        tint: PanelTheme.Palette.accent,
-                                       help: unfinishedCommandHelp
+                                       help: askDisabledHelp
                                            ?? (engine.isRunning ? "Ask next" : "Ask"),
                                        isEnabled: isAskable,
                                        action: { submit(draft) })
@@ -421,7 +451,14 @@ struct PanelRootView: View {
     /// The same sentence `submit` speaks, deliberately: grey says a button is off, never
     /// what would turn it on, and a reader who cannot hear the announcement is exactly
     /// the one left looking at it.
-    private var unfinishedCommandHelp: String? {
+    ///
+    /// Two reasons now. An attachment is not a question — the planner searches the words
+    /// and the answer is written to them — so a composer holding a screenshot and no
+    /// text cannot be sent. That was true before this and said nothing: the chip
+    /// appeared, the button went dim, and the one thing the reader had just done was
+    /// apparently the thing that broke it.
+    private var askDisabledHelp: String? {
+        if isDraftBlank, !attachments.isEmpty { return Self.questionlessCopy }
         guard !isDraftBlank, ComposerCommand.isHalfTypedCommand(draft) else { return nil }
         return Self.unfinishedCommandCopy
     }
@@ -429,6 +466,8 @@ struct PanelRootView: View {
     /// Said twice — once to the eye as a tooltip, once to VoiceOver from `submit` — and
     /// the comment there already promised they were the same sentence. Now they are.
     private static let unfinishedCommandCopy = "Finish the command name"
+    /// The other reason the send button is dim, said in the same two places.
+    private static let questionlessCopy = "Ask something to go with the attachment"
     /// Spoken by both ways out of the list — Escape, and ↑ off the top. Named because
     /// two literals for one transition is how a screen reader ends up describing the
     /// same thing two ways after somebody tunes the wording at one of them.
@@ -497,10 +536,30 @@ struct PanelRootView: View {
                             .lineLimit(1)
                             .truncationMode(.tail)
                         Spacer(minLength: 0)
+                        if !item.attachments.isEmpty {
+                            // Asking clears the chips, and a queued question's files are
+                            // then invisible for the whole wait — so the one question
+                            // carrying the screenshot looks like the two that are not,
+                            // and the only way to find out is to let it run.
+                            Label("\(item.attachments.count)", systemImage: "paperclip")
+                                .font(PanelTheme.Font.at(9, textScale))
+                                .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                                .help(item.attachments.map(\.attachment.name).joined(separator: ", "))
+                                .accessibilityLabel("\(item.attachments.count) "
+                                    + "attachment\(item.attachments.count == 1 ? "" : "s")")
+                        }
                         Button { onRemove(item.id) } label: {
                             Image(systemName: "xmark")
                                 .font(PanelTheme.Font.at(8, textScale, weight: .semibold))
                                 .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                                // A frame before the shape, because `contentShape` makes
+                                // the *label's* bounds hittable — and an 8-point glyph's
+                                // bounds are about ten points square. That is a fiddly
+                                // target for a gesture whose whole meaning is "not this
+                                // one", in a stack where the neighbouring row is a
+                                // different question. Scaled with the text, so it stays
+                                // wider than the mark at every size.
+                                .frame(width: 16 * textScale, height: 16 * textScale)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -514,7 +573,83 @@ struct PanelRootView: View {
                                                      style: .continuous))
                 }
             }
+            // `.contain` for the reason the attachment stack needs it: a `VStack` is not
+            // an accessibility element, so the label below was read by nobody.
+            .accessibilityElement(children: .contain)
             .accessibilityLabel("\(queued.count) question\(queued.count == 1 ? "" : "s") waiting")
+        }
+    }
+
+    /// What is attached to the question being typed, one row each.
+    ///
+    /// Deliberately the same chip as a waiting question: both are things the composer is
+    /// holding on the user's behalf, and both are removed the same way.
+    private struct AttachedFilesView: View {
+
+        @Environment(\.panelTextScale) private var textScale
+        let attachments: [PendingAttachment]
+        var onRemove: (UUID) -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
+                ForEach(attachments) { item in
+                    HStack(spacing: PanelTheme.Space.small) {
+                        Image(systemName: item.attachment.kind == .image ? "photo" : "doc.text")
+                            .font(PanelTheme.Font.at(9, textScale))
+                            .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                        Text(item.attachment.name)
+                            .font(PanelTheme.Font.caption(textScale))
+                            .foregroundStyle(PanelTheme.Palette.secondaryText)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            // Middle truncation keeps both ends of a name and loses the
+                            // part that usually tells two screenshots apart. Hover is
+                            // where the whole of it lives, the way it already does for
+                            // the remove button beside it.
+                            .help(item.attachment.name)
+                        // The size, because an attachment is about to be sent to a
+                        // provider that charges for it, and "1.4 MB" is the difference
+                        // between a screenshot and a photograph nobody meant to send.
+                        Text(Self.size(item.attachment.byteCount))
+                            .font(PanelTheme.Font.caption(textScale))
+                            .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                        Spacer(minLength: 0)
+                        Button { onRemove(item.id) } label: {
+                            Image(systemName: "xmark")
+                                .font(PanelTheme.Font.at(8, textScale, weight: .semibold))
+                                .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                                // Sized past the glyph for the reason the queue's own
+                                // remove button is, and here the neighbour is a different
+                                // file rather than a different question.
+                                .frame(width: 16 * textScale, height: 16 * textScale)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        // Named, like the label beside it. With several screenshots
+                        // attached, "this attachment" is the one thing a pointer hovering
+                        // over one ✕ of four cannot work out — and the reader using
+                        // VoiceOver is already told which.
+                        .help("Remove \(item.attachment.name)")
+                        .accessibilityLabel("Remove \(item.attachment.name)")
+                    }
+                    .padding(.horizontal, PanelTheme.Space.small)
+                    .padding(.vertical, 3)
+                    .background(PanelTheme.Palette.chipFill,
+                                in: RoundedRectangle(cornerRadius: PanelTheme.Radius.chip,
+                                                     style: .continuous))
+                }
+            }
+            // `.contain` rather than a bare label: a `VStack` is not an accessibility
+            // element, so the label below was being read by nobody. Combining would have
+            // made it one at the cost of hiding every chip's own Remove button inside it;
+            // containing keeps the children reachable and gives the group a name to
+            // arrive at.
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("\(attachments.count) attachment\(attachments.count == 1 ? "" : "s")")
+        }
+
+        static func size(_ bytes: Int) -> String {
+            ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
         }
     }
 
@@ -650,6 +785,17 @@ struct PanelRootView: View {
             announce(Self.unfinishedCommandCopy)
             return
         }
+        // And an attachment with nothing to ask about it. `parse` answers nil for an
+        // empty question, so Return did nothing at all — the same dead key the guard
+        // above exists to prevent, reached by the gesture this panel just learned.
+        // Asked of `text` rather than the draft: a suggested follow-up is submitted
+        // straight from the button while the composer is empty, and it is a question.
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || attachments.isEmpty else {
+            notice = Self.questionlessCopy
+            announce(Self.questionlessCopy)
+            return
+        }
         recallIndex = nil
         redactionNote = nil
         queueFullNote = false
@@ -661,15 +807,15 @@ struct PanelRootView: View {
             // The composer is live while the history list is open, and a question
             // asked from there must not run invisibly behind it.
             showsHistory = false
-            handle(engine.ask(question, mode: .research))
+            handle(engine.ask(question, mode: .research, attachments: attachments))
         case .direct(let question):
             notice = nil
             showsHistory = false
-            handle(engine.ask(question, mode: .direct))
+            handle(engine.ask(question, mode: .direct, attachments: attachments))
         case .deepResearch(let question):
             notice = nil
             showsHistory = false
-            handle(engine.ask(question, mode: .deep))
+            handle(engine.ask(question, mode: .deep, attachments: attachments))
         case .newThread:
             draft = ""
             newThread()
@@ -714,6 +860,85 @@ struct PanelRootView: View {
         notice = ComposerCommand.modelListing(settings)
     }
 
+    /// Takes what a paste or a drop turned out to be carrying.
+    ///
+    /// Anything refused is said once, in the panel's own notice line. A file that
+    /// vanishes on being dropped is indistinguishable from a drop target that does not
+    /// work, and the reader is owed the difference.
+    ///
+    /// The room check is repeated here even though `AttachmentIntake` already made it,
+    /// because this is also where questions handed back from the queue arrive — three
+    /// waiting questions can between them carry more attachments than one question may.
+    /// `restoring` is what tells those two apart, and `AttachmentIntake.admitted` is
+    /// where the difference between declining a file and destroying one is written down.
+    private func receive(_ outcome: AttachmentIntake.Outcome, restoring: Bool = false) {
+        var refusals = outcome.refusals
+        let admitted = AttachmentIntake.admitted(existing: attachments.count,
+                                                 incoming: outcome.accepted.count,
+                                                 restoring: restoring)
+        if let note = admitted.note { refusals.append(note) }
+        attachments.append(contentsOf: outcome.accepted.prefix(admitted.taken))
+
+        guard !refusals.isEmpty else {
+            if admitted.taken > 0 {
+                notice = nil
+                // Split on `restoring` for the same reason the cap is: one of these is
+                // something the user just did, and the other is something being given
+                // back to them. A reader who pressed Stop and heard "Attached 2 files"
+                // is told an action was performed that nobody performed — and this
+                // announcement is the only place they learn what came back at all.
+                //
+                // "to the composer" rather than "with the question", because a Stop can
+                // hand back several questions at once and `AppDelegate` flattens their
+                // attachments into one outcome: the count here is of files, and nothing
+                // on this side knows how many questions they came from.
+                // Bound rather than defaulted: `arrival` cannot answer nil above a
+                // count of zero, and `?? ""` would post an announcement carrying
+                // nothing — which VoiceOver reads as an interruption saying nothing.
+                if let arrived = arrival(admitted.taken, restoring: restoring) {
+                    announce(arrived)
+                }
+            }
+            return
+        }
+        // A blank line between them, not a newline. `notice` is drawn by `MarkdownBody`,
+        // whose parser gathers consecutive lines into one paragraph — two sentences about
+        // two different files are two statements, and the block parser is the thing that
+        // has to be told so rather than an inline parsing option that happens to keep the
+        // newline inside the single paragraph it was handed.
+        let message = refusals.joined(separator: "\n\n")
+        notice = message
+        // Both halves, when both happened. A drop of three onto a question with room for
+        // one takes one *and* says the rest were left out, and this branch is the one it
+        // lands in — so announcing only the refusal told a reader who cannot see the
+        // chips that nothing was attached. The notice itself stays the refusal alone: the
+        // files that arrived are on screen, and the line beside the composer is for the
+        // ones that did not.
+        announce(arrival(admitted.taken, restoring: restoring)
+            .map { "\($0). \(message)" } ?? message)
+    }
+
+    /// What just reached the composer, in the words the gesture earns — or nothing at
+    /// all when nothing did.
+    ///
+    /// One function because there were two, and only one of them made the distinction.
+    /// The branch above splits on `restoring` so a reader who pressed Stop is not told
+    /// they attached something nobody attached; the branch below it — a restore that
+    /// also went past the cap, which is the *only* way that branch is reached while
+    /// restoring — went on saying "Attached" anyway, and then appended a sentence
+    /// explaining that these came back from questions that were waiting. A distinction
+    /// worth making is worth making on every path that can reach it.
+    ///
+    /// "to the composer" rather than "with the question", because a Stop can hand back
+    /// several questions at once and `AppDelegate` flattens their attachments into one
+    /// outcome: the count here is of files, and nothing on this side knows how many
+    /// questions they came from.
+    private func arrival(_ count: Int, restoring: Bool) -> String? {
+        guard count > 0 else { return nil }
+        guard restoring else { return "Attached \(count) file\(count == 1 ? "" : "s")" }
+        return "\(count) attachment\(count == 1 ? "" : "s") came back to the composer"
+    }
+
     /// Clears the composer only when the question was actually taken.
     ///
     /// A full queue keeps the text: emptying the field for a question that was refused
@@ -722,6 +947,10 @@ struct PanelRootView: View {
         switch outcome {
         case .started, .queued:
             draft = ""
+            // With the draft, for the same reason: the question that was taken took them
+            // with it, and leaving them behind would attach the same screenshot to the
+            // next question as well.
+            attachments = []
         case .queueFull:
             queueFullNote = true
         case .ignored:
@@ -730,8 +959,9 @@ struct PanelRootView: View {
     }
 
     /// What Escape does, in the order a user expects to be able to undo things:
-    /// leave the history list, then clear a draft, then close the panel. Closing on
-    /// the first press would throw away a half-typed question.
+    /// leave the history list, then clear a draft and whatever is attached to it, then
+    /// close the panel. Closing on the first press would throw away a half-typed
+    /// question.
     private func backOut() {
         if effectiveCompletionIndex != nil {
             // Undoes the highlight before anything else, so Escape steps back out of the
@@ -750,8 +980,22 @@ struct PanelRootView: View {
             showsHistory = false
         } else if notice != nil {
             notice = nil
-        } else if !draft.isEmpty {
+        } else if !draft.isEmpty || !attachments.isEmpty {
+            // Said, because it cannot be undone. Every other attachment transition here
+            // announces itself, and this is the only one that destroys something: the
+            // bytes of a pasted screenshot are on no disk anywhere, and Escape is a
+            // reflex key — the third press closes the panel, so the first two are
+            // pressed without looking.
+            if !attachments.isEmpty {
+                announce("Cleared \(attachments.count) "
+                         + "attachment\(attachments.count == 1 ? "" : "s")"
+                         + (draft.isEmpty ? "" : " and the draft"))
+            }
             draft = ""
+            // With the draft, because they are one composer: an Escape that emptied the
+            // field and left a screenshot attached would send it with the next question.
+            // A chip also has its own ✕ for removing one without clearing everything.
+            attachments = []
             redactionNote = nil
             queueFullNote = false
             // Dropping the draft also ends the recall walk, so the next ↑ starts at the
@@ -779,9 +1023,25 @@ struct PanelRootView: View {
     /// nobody confirmed would be the wrong trade, and the text view's own undo can put
     /// the draft back.
     private func askFollowup(_ question: String) {
-        guard draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        // Attachments count as something typed, for the same reason and more strongly.
+        // A question asked from here carries whatever the composer is holding, and the
+        // send clears it — so a screenshot pasted for a question the reader had not
+        // finished writing would go to the provider under one they never paired it with,
+        // and then be gone: its bytes are on no disk anywhere. Loading the suggestion
+        // into the field instead leaves both there, and one Return sends them together
+        // if that is what was meant.
+        guard draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              attachments.isEmpty else {
             draft = question
             recallIndex = nil
+            // Said, because the button now does something invisible. Before this it
+            // submitted, and the run announced itself; a suggestion that lands in a
+            // field the reader cannot see is a button that did nothing to anyone
+            // listening rather than looking.
+            if !attachments.isEmpty {
+                announce("Put in the composer — Return sends it with the attachment"
+                         + (attachments.count == 1 ? "" : "s"))
+            }
             return
         }
         submit(question)
@@ -791,6 +1051,7 @@ struct PanelRootView: View {
         notice = nil
         showsHistory = false
         queueFullNote = false
+        attachments = []
         // The engine first: `startNewThread` drops any waiting questions, and doing it
         // after clearing the draft keeps the two from racing over the composer.
         engine.startNewThread()
@@ -998,6 +1259,11 @@ struct PanelRootView: View {
     /// chokepoint rather than a key handler, so it holds today only because the send
     /// button greys itself out on the same predicate and cannot reach the guard. A
     /// caller added later that is not a keystroke would need to say so.
+    ///
+    /// `receive` is that caller, and is the one deliberate exception. A paste is a key,
+    /// but a drop is not — and either way the whole result of the gesture is a chip and
+    /// a line of text appearing somewhere the focus is not. Silence there would leave a
+    /// reader unable to tell an attached file from a refused one.
     private func announce(_ message: String) {
         NSAccessibility.post(element: NSApp as Any,
                              notification: .announcementRequested,
