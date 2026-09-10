@@ -374,6 +374,16 @@ final class ResearchRunner: ResearchRunning {
                 // and nothing else: an image that cannot be sent has to be named to the
                 // model as unavailable, exactly as a lost one is.
                 imageNames.append(attachment.name)
+                // And named when it *is* sent, which was the asymmetry: a withheld
+                // image was announced by name while a delivered one arrived as
+                // anonymous pixels. A question is written about files the way the user
+                // sees them — "compare a.png and b.png", "the top left of the second
+                // screenshot" — and with four allowed per question, a model given
+                // pictures in order and no names cannot resolve either one.
+                //
+                // `sent` rather than a bare entry, so the withheld merges below can tell
+                // the two apart and never list one image as both sent and unavailable.
+                payload.append(["name": attachment.name, "sent": "yes"])
             case .text:
                 // Re-decoded rather than trusted: the record says what the bytes were
                 // when they were stored, and the bytes are what is being sent now. A
@@ -405,6 +415,26 @@ final class ResearchRunner: ResearchRunning {
                   + (lost.isEmpty ? "" : ", \(lost.count) that could not be sent"))
         if !lost.isEmpty { update { $0.addNotice(.attachmentMissing) } }
         return (payload, images, imageNames)
+    }
+
+    /// The `extra` for an attempt that will carry no images: every picture named as
+    /// unavailable rather than as sent.
+    ///
+    /// One function rather than three copies, because it encodes a policy and not a
+    /// shape. The sent markers come off first — this payload belongs to a request with
+    /// no image parts in it, so each one is about to be listed the other way, and a file
+    /// named twice with opposite answers is worse than one named neither way. Spelled
+    /// out three times, an edit to either marker that reached two sites would leave the
+    /// third quietly telling the model something else.
+    private static func namingImagesUnavailable(
+        _ base: [String: Any],
+        _ attachments: (payload: [[String: String]],
+                        images: [ChatCompletionsClient.ImagePart],
+                        imageNames: [String])) -> [String: Any] {
+        base.merging([
+            "attachments": attachments.payload.filter { $0["sent"] == nil }
+                + attachments.imageNames.map { ["name": $0, "unavailable": "yes"] },
+        ]) { _, new in new }
     }
 
     private func execute(question: String, mode: Mode, history: [ResearchTurn]) async throws {
@@ -564,10 +594,7 @@ final class ResearchRunner: ResearchRunning {
         // picture exists and is unavailable is what lets it plan around the fact.
         let withheldPlanContext = planImages.isEmpty ? nil : ResearchContext.assemble(
             question: question, history: history, today: today,
-            extra: planExtra.merging([
-                "attachments": attachments.payload
-                    + attachments.imageNames.map { ["name": $0, "unavailable": "yes"] },
-            ]) { _, new in new })
+            extra: Self.namingImagesUnavailable(planExtra, attachments))
         // Recorded, not logged, inside the closure: the closure runs once per provider
         // attempt, so a chain falling back through two providers without eyes wrote the
         // line twice and made one decision look like two. Same shape as the answer
@@ -896,10 +923,7 @@ final class ResearchRunner: ResearchRunning {
         // fire on.
         let withheldContext = answerImages.isEmpty ? nil : ResearchContext.assemble(
             question: question, history: history, today: today,
-            extra: answerExtra.merging([
-                "attachments": attachments.payload
-                    + attachments.imageNames.map { ["name": $0, "unavailable": "yes"] },
-            ]) { _, new in new })
+            extra: Self.namingImagesUnavailable(answerExtra, attachments))
         let answer = try await chain.perform("Answer", beforeRetry: { [weak self] in
             self?.update { $0.answer = "" }
         }) { chat in
@@ -1263,10 +1287,7 @@ final class ResearchRunner: ResearchRunning {
         // with the picture *named as unavailable* rather than with nothing at all.
         let withheldContext = attachments.images.isEmpty ? nil : ResearchContext.assemble(
             question: question, history: history, today: today,
-            extra: directExtra.merging([
-                "attachments": attachments.payload
-                    + attachments.imageNames.map { ["name": $0, "unavailable": "yes"] },
-            ]) { _, new in new })
+            extra: Self.namingImagesUnavailable(directExtra, attachments))
         // Same reset as the research path's answer stage, for the same reason.
         var sentImages = false
         _ = try await chain.perform("Direct answer", beforeRetry: { [weak self] in

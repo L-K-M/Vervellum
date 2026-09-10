@@ -83,5 +83,9 @@ final class ResearchPromptsTests: XCTestCase {
         // line, so the two strings share a prefix and then diverge — it is what comes
         // *after* the insertion that a substitution would have taken with it.
         XCTAssertTrue(with.contains("Work out which factual questions"), with)
+        // Named directly rather than inferred from the length: a longer string is weak
+        // evidence that the plan survived, and the date is the part of it a turn
+        // carrying a file would miss most quietly.
+        XCTAssertTrue(with.contains("2026-09-06"), with)
     }
 }

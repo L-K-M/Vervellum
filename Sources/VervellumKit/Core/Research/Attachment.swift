@@ -244,7 +244,12 @@ struct Attachment: Codable, Equatable, Identifiable {
             .components(separatedBy: CharacterSet(charactersIn: "/\\")).joined(separator: "_")
             .trimmingCharacters(in: .whitespaces)
         guard !cleaned.isEmpty else { return fallback }
-        return String(cleaned.prefix(120))
+        // Trimmed again after the cut, not only before it. `prefix(120)` of an
+        // already-trimmed name can still end in a space, and that was the one input for
+        // which a second pass was not a no-op — which the decoder relies on when it says
+        // a name this build wrote comes back unchanged. Non-empty survives: `cleaned` is
+        // trimmed and non-empty, so its first 120 characters cannot be all whitespace.
+        return String(cleaned.prefix(120)).trimmingCharacters(in: .whitespaces)
     }
 
     // MARK: Building one

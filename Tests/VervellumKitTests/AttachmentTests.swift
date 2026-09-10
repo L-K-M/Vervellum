@@ -23,6 +23,12 @@ final class AttachmentTests: XCTestCase {
         XCTAssertEqual(Attachment.imageMediaType(sniffing: png()), "image/png")
         XCTAssertEqual(Attachment.imageMediaType(sniffing: Data([0xFF, 0xD8, 0xFF, 0xE0])),
                        "image/jpeg")
+        // The signature is the three bytes before the APPn marker, and that is what
+        // makes it a signature rather than a JFIF one: every photograph a phone takes is
+        // Exif, whose fourth byte is E1. A four-byte match would have refused all of
+        // them as unsupported, and nothing here would have said so.
+        XCTAssertEqual(Attachment.imageMediaType(sniffing: Data([0xFF, 0xD8, 0xFF, 0xE1])),
+                       "image/jpeg")
         XCTAssertEqual(Attachment.imageMediaType(sniffing: Data("GIF89a...".utf8)), "image/gif")
 
         var webp = Data("RIFF".utf8) + Data([0x20, 0x00, 0x00, 0x00]) + Data("WEBP".utf8)
@@ -58,8 +64,12 @@ final class AttachmentTests: XCTestCase {
     func testBinaryWithANulIsNotText() {
         XCTAssertNil(Attachment.text(from: Data("head\0tail".utf8)))
         XCTAssertNotNil(Attachment.text(from: Data("head\ttail\n".utf8)))
-        // Invalid UTF-8 is not text either.
-        XCTAssertNil(Attachment.text(from: Data([0xFF, 0xFE, 0x00, 0x01])))
+        // Invalid UTF-8 is not text either — and with no NUL in it, so that is the only
+        // thing wrong with it. A fixture that broke both rules would have gone on
+        // passing with the UTF-8 check deleted outright, since the NUL rule above
+        // already covers its own case.
+        XCTAssertNil(Attachment.text(from: Data([0xFF, 0xFE, 0x21])),
+                     "invalid UTF-8, with nothing else wrong with it")
     }
 
     /// A long text file is too *large*, not unsupported: it is exactly the sort of thing
@@ -265,6 +275,47 @@ final class AttachmentTests: XCTestCase {
         XCTAssertEqual(decoded.mediaType, "application/octet-stream")
         XCTAssertEqual(decoded.byteCount, 0)
         XCTAssertFalse(decoded.name.isEmpty, "something has to be shown in the panel")
+    }
+
+    /// Sanitising a sanitised name changes nothing, which is what lets the decoder run
+    /// every name through `displayName` without the one it wrote coming back different.
+    ///
+    /// The cut is the case worth pinning: a trimmed name whose 120th character is a
+    /// space came back with a trailing one, so the name attached and the name shown
+    /// after reopening differed by exactly that.
+    func testSanitisingASanitisedNameChangesNothing() {
+        let awkward = String(repeating: "a", count: 119) + "   tail.png"
+        let once = Attachment.displayName(for: awkward)
+        XCTAssertEqual(Attachment.displayName(for: once), once)
+        XCTAssertFalse(once.hasSuffix(" "), once)
+        XCTAssertFalse(once.isEmpty)
+    }
+
+    /// One unreadable record costs one record, not the whole list.
+    ///
+    /// `id` is the field that cannot be defaulted — it names the bytes on disk, and a
+    /// minted one would point at another attachment's file — so a record without a
+    /// usable one is not a record. Decoded whole, that single failure took every *other*
+    /// attachment on the turn with it, and with them the names a later turn's history
+    /// refers to: "the second one" stops meaning anything.
+    func testOneUnreadableAttachmentDoesNotTakeTheOthersWithIt() throws {
+        let good = UUID()
+        let json = """
+            {"id":"\(UUID().uuidString)","question":"Q","askedAt":"2026-01-01T00:00:00Z",
+             "stage":"complete","reading":"","searches":[],"sources":[],"answer":"A",
+             "findings":[],"limitations":"","followups":[],"notices":[],"model":"m",
+             "attachments":[
+               {"id":"not-a-uuid","name":"broken.png","kind":"image",
+                "mediaType":"image/png","byteCount":1},
+               {"id":"\(good.uuidString)","name":"kept.png","kind":"image",
+                "mediaType":"image/png","byteCount":2}]}
+            """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let turn = try decoder.decode(ResearchTurn.self, from: Data(json.utf8))
+
+        XCTAssertEqual(turn.attachments.map(\.id), [good])
+        XCTAssertEqual(turn.attachments.map(\.name), ["kept.png"])
     }
 
     /// A turn written before attachments existed still loads, with none.

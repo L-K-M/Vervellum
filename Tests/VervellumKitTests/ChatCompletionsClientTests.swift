@@ -323,6 +323,9 @@ final class ChatCompletionsClientTests: XCTestCase {
     func testAnImagePartIsADataURLAndNotALink() {
         let part = ChatCompletionsClient.ImagePart(mediaType: "image/webp", base64: "Zm8=")
         XCTAssertEqual(part.dataURL, "data:image/webp;base64,Zm8=")
-        XCTAssertFalse(part.dataURL.hasPrefix("http"))
+        // Positively: the exact-match above already pins the whole string, so a "not
+        // http" check could never fail on its own. What the test is named for is that
+        // the bytes travel inline rather than as an address the provider fetches.
+        XCTAssertTrue(part.dataURL.hasPrefix("data:"))
     }
 }

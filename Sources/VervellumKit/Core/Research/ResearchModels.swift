@@ -304,6 +304,21 @@ enum TurnNotice: String, Codable, Equatable {
     }
 }
 
+/// An `Attachment` that decodes to nil instead of throwing.
+///
+/// The wrapper exists so a turn's attachment list can be decoded element by element: a
+/// `[Attachment]` decoded whole fails entirely on one bad record, and `Attachment`'s own
+/// decoder cannot be made infallible because `id` names the bytes on disk and a minted
+/// one would point at another attachment's file. So the failure is contained here, where
+/// losing one record costs one record.
+private struct LenientAttachment: Decodable {
+    var attachment: Attachment?
+
+    init(from decoder: Decoder) throws {
+        attachment = try? Attachment(from: decoder)
+    }
+}
+
 /// One question and everything the research produced for it.
 struct ResearchTurn: Codable, Identifiable, Equatable {
     var id: UUID = UUID()
@@ -424,8 +439,15 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         // was attached to it, against the cost of not dropping it, which is the failure
         // this file already paid once: a turn that would not decode, a library that came
         // back empty, and an older build writing that emptiness over the newer file.
-        attachments = (try? container.decodeIfPresent([Attachment].self,
-                                                      forKey: .attachments)) ?? []
+        // Element by element, so one unreadable record drops itself rather than the
+        // list. `Attachment`'s own decoder is lenient about every field but `id` — and
+        // `id` is the one that cannot be defaulted, since it names the bytes on disk —
+        // so a record that still fails is a record with no usable identity. Decoded
+        // whole, that single failure took every *other* attachment on the turn with it,
+        // and the names of files a later turn's history refers to went with them.
+        attachments = ((try? container.decodeIfPresent([LenientAttachment].self,
+                                                       forKey: .attachments)) ?? [])
+            .compactMap(\.attachment)
         stage = try container.decode(ResearchStage.self, forKey: .stage)
         reading = try container.decode(String.self, forKey: .reading)
         searches = try container.decode([PlannedSearch].self, forKey: .searches)

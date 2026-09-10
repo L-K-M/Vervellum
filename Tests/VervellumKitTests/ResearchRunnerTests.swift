@@ -418,6 +418,16 @@ final class ResearchRunnerTests: XCTestCase {
         // the words would be the most visible bug this feature could have.
         let text = try XCTUnwrap(parts.first?["text"] as? String)
         XCTAssertTrue(text.contains("What is this?"), text)
+        // And the picture's *name*, which was the asymmetry worth closing: a withheld
+        // image was announced by name while a delivered one arrived as anonymous
+        // pixels. A question is written about files the way the user sees them, and a
+        // model handed four pictures in order with no names can resolve none of them.
+        XCTAssertTrue(text.contains("shot.png"), text)
+        XCTAssertTrue(text.contains("\"sent\""), text)
+        // Never both. `sent` and `unavailable` are opposite answers about one file, and
+        // the withheld payload replaces the first with the second rather than adding to
+        // it — see the merges in `ResearchRunner`.
+        XCTAssertFalse(text.contains("unavailable"), text)
         // The part's `type` as well as its payload: a part carrying the right data URL
         // under a missing or misspelled type passes every other assertion here and is
         // refused by the provider, which is a failure that arrives in production rather
@@ -456,6 +466,17 @@ final class ResearchRunnerTests: XCTestCase {
                            as: UTF8.self)
         XCTAssertFalse(whole.contains("image_url"),
                        "an image reached a provider that cannot see")
+        // Named, and named once. The picture is announced as unavailable so the model
+        // can say what it could not see — and *only* as unavailable, because the sent
+        // marker it would otherwise carry is the opposite answer about the same file.
+        //
+        // Asked of the user content rather than of `whole`: the system prompt explains
+        // both markers by name, so a whole-body search finds the words in the
+        // instructions and proves nothing about the payload.
+        let content = try XCTUnwrap(messages.last?["content"] as? String)
+        XCTAssertTrue(content.contains("shot.png"), content)
+        XCTAssertTrue(content.contains("unavailable"), content)
+        XCTAssertFalse(content.contains("\"sent\""), content)
     }
 
     /// An attached text file is inlined into the payload, so a model with no eyes at all
@@ -520,6 +541,11 @@ final class ResearchRunnerTests: XCTestCase {
 
         XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
         XCTAssertTrue(turn.notices.contains(.attachmentMissing), "notices: \(turn.notices)")
+        // And not `.imagesNotSent`, which `sendsImages: true` here makes the point of:
+        // the picture is absent because its bytes are unreadable, not because a setting
+        // withheld it — and that notice tells the reader to go and flip the setting.
+        XCTAssertFalse(turn.notices.contains(.imagesNotSent),
+                       "no setting would have made this one arrive")
         let body = try XCTUnwrap(transport.calls.first?.body)
         let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
         XCTAssertNotNil(messages.last?["content"] as? String,

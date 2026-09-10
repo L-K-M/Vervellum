@@ -229,6 +229,11 @@ final class ThreadArchiveTests: XCTestCase {
         let archive = ThreadArchive(fileURL: fileURL, debounce: 0)
         XCTAssertTrue(archive.library.threads.isEmpty)
         XCTAssertFalse(archive.libraryIsTrustworthy)
+        // Left as found. A directory standing at this path is exactly the leftover the
+        // sibling tests clear defensively before they can write here, and the safety
+        // against *this* test currently lives in *their* setup lines — which read like
+        // paranoia and would be the first thing simplified away.
+        try? FileManager.default.removeItem(at: fileURL)
     }
 
     /// "Off" has to mean the bytes are gone, not that they are hidden.
