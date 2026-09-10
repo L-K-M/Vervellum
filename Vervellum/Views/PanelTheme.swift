@@ -73,6 +73,34 @@ enum PanelTheme {
 
     // MARK: Type
 
+    /// Every point size in the panel, once.
+    ///
+    /// Two families of font read these — SwiftUI's, for everything drawn by a `Text`,
+    /// and AppKit's in `PanelTheme+AppKit`, for the answer prose that had to move to an
+    /// `NSTextView` so a citation could answer a hover. Neither can be built from the
+    /// other and a SwiftUI `Font` cannot be asked its size, so no test can catch the two
+    /// drifting apart. This is the only thing that can: one literal, read twice.
+    ///
+    /// Weights are not here, because `SwiftUI.Font.Weight` and `NSFont.Weight` are
+    /// unrelated types with no shared spelling. They are stated at both call sites, and
+    /// there are four of them.
+    enum Metrics {
+        static let body: CGFloat = 13
+        static let bodyEmphasis: CGFloat = 13
+        static let heading1: CGFloat = 16
+        static let heading2: CGFloat = 14.5
+        static let heading3: CGFloat = 13
+        static let code: CGFloat = 11.5
+        static let citation: CGFloat = 10.5
+        static let label: CGFloat = 10
+        static let caption: CGFloat = 11
+        static let question: CGFloat = 13.5
+        static let previewTitle: CGFloat = 12
+        static let previewMeta: CGFloat = 10.5
+        static let previewSnippet: CGFloat = 10.5
+        static let previewFootnote: CGFloat = 9.5
+    }
+
     enum Font {
         /// The theme's family for prose. Code and citations do not use it: they are
         /// monospaced because alignment carries meaning there, not because of taste.
@@ -99,23 +127,29 @@ enum PanelTheme {
             .system(size: size * scale, weight: weight, design: design)
         }
 
-        static func body(_ scale: Double) -> SwiftUI.Font { at(13, scale) }
-        static func bodyEmphasis(_ scale: Double) -> SwiftUI.Font { at(13, scale, weight: .semibold) }
+        static func body(_ scale: Double) -> SwiftUI.Font { at(Metrics.body, scale) }
+        static func bodyEmphasis(_ scale: Double) -> SwiftUI.Font {
+            at(Metrics.bodyEmphasis, scale, weight: .semibold)
+        }
         static func heading(_ level: Int, _ scale: Double) -> SwiftUI.Font {
             switch level {
-            case 1: return at(16, scale, weight: .semibold)
-            case 2: return at(14.5, scale, weight: .semibold)
-            default: return at(13, scale, weight: .semibold)
+            case 1: return at(Metrics.heading1, scale, weight: .semibold)
+            case 2: return at(Metrics.heading2, scale, weight: .semibold)
+            default: return at(Metrics.heading3, scale, weight: .semibold)
             }
         }
-        static func code(_ scale: Double) -> SwiftUI.Font { at(11.5, scale, design: .monospaced) }
+        static func code(_ scale: Double) -> SwiftUI.Font {
+            at(Metrics.code, scale, design: .monospaced)
+        }
         static func citation(_ scale: Double) -> SwiftUI.Font {
-            at(10.5, scale, weight: .medium, design: .monospaced)
+            at(Metrics.citation, scale, weight: .medium, design: .monospaced)
         }
         /// Section labels: small, uppercase, tracked out.
-        static func label(_ scale: Double) -> SwiftUI.Font { at(10, scale, weight: .semibold) }
-        static func caption(_ scale: Double) -> SwiftUI.Font { at(11, scale) }
-        static func question(_ scale: Double) -> SwiftUI.Font { at(13.5, scale, weight: .medium) }
+        static func label(_ scale: Double) -> SwiftUI.Font { at(Metrics.label, scale, weight: .semibold) }
+        static func caption(_ scale: Double) -> SwiftUI.Font { at(Metrics.caption, scale) }
+        static func question(_ scale: Double) -> SwiftUI.Font {
+            at(Metrics.question, scale, weight: .medium)
+        }
     }
 
     // MARK: Colour

@@ -98,9 +98,15 @@ enum PangoMarkup {
         let mask = CitationMask(text, sourceCount: sources.count)
         let citations = mask.sourceIndices.map { indices -> String in
             let cited = indices.map { sources[$0] }
+            // A grouped marker links and describes its *first* source, the same rule the
+            // macOS chip follows: a tooltip is a line about one page, not a list, and
+            // `[3,7]` still shows both numbers and still has both rows in the source
+            // list under the answer. What it must not become is a summary of two pages
+            // in one line — least of all one line saying "page read" for a pair where
+            // only one was.
             guard let first = cited.first else { return "" }
             let label = cited.map { String($0.number) }.joined(separator: ",")
-            return "<a href=\"\(GTK.escape(first.url))\">"
+            return "<a href=\"\(GTK.escape(first.url))\" title=\"\(GTK.escape(preview(of: first)))\">"
                 + "<span size=\"small\" font_family=\"monospace\">[\(label)]</span></a>"
         }
 
@@ -112,6 +118,101 @@ enum PangoMarkup {
         }
         return result
     }
+
+    /// What hovering a citation says about the source it names.
+    ///
+    /// Pango's `title` on an `<a>` is GTK's own link tooltip, so this costs one attribute
+    /// rather than a hit test — the macOS panel has to draw its prose through an
+    /// `NSTextView` to answer the same gesture, because a SwiftUI `Text` has no per-run
+    /// hit testing at all.
+    ///
+    /// Three facts, in the order the source list gives them, and the third is the one
+    /// that matters: a citation to a page that was read is worth more than one to a
+    /// search summary, and the number in the prose cannot say which. Deliberately not the
+    /// snippet — a tooltip is a line, not a card, and GTK will not wrap it well.
+    static func preview(of source: Source) -> String {
+        // The title, flattened and *then* capped. A page's own `<title>` is unbounded and
+        // a headline written for a search engine runs to a few hundred characters, which
+        // would push the three facts after it — and the read-versus-summary one most of
+        // all — off the end of a one-line tooltip. Sixty-four is enough to tell two
+        // sources apart.
+        //
+        // Flattened first because the cap has to count what the reader will see. A
+        // `<title>` is usually a line break and the indentation around it, as the `.map`
+        // below says — so counting the raw string measures the whitespace, and a title
+        // that fits comfortably gets cut mid-word and stamped with an ellipsis for
+        // padding nobody was going to be shown. Deeply indented, it could be cut to
+        // nothing but the ellipsis.
+        //
+        // And the two fields after it are capped too, at a shorter length. The title is
+        // the one that runs long by design, but a domain and a date are whatever the
+        // search backend put in them — the `.map` below already treats the date as
+        // possibly a bare space — and either could be returned long enough to push the
+        // read-versus-summary fact off the end, which is the whole failure the title cap
+        // was written to stop. A cap on one field only holds while the others behave.
+        // Led by the number, because a grouped marker links its first source only: the
+        // label reads `[3,7]` and everything after this describes 3, so a reader hovering
+        // it could otherwise attribute "page read" to 7 — the misattribution the
+        // read-versus-summary fact exists to prevent. The macOS card has always opened
+        // with the number for the same reason; this is the GTK half of that.
+        let capped = clipped(source.title, to: maxTooltipTitle)
+        var parts = ["[\(source.number)] \(capped)", clippedHost(source.domain)]
+        if let published = source.publishedAt {
+            parts.append(clipped(published, to: maxTooltipField))
+        }
+        parts.append(source.wasRead ? "page read" : "search summary")
+        return parts
+            // Every part is flattened before it is judged empty, because a title is
+            // whatever a page's own `<title>` held — a line break and the indentation
+            // around it, most often — and a date is whatever the search backend put in
+            // the field, which is sometimes a space. Unflattened, the first would break
+            // a one-line tooltip across two, and the second would pass the emptiness
+            // test below and leave a bare `·  ·` in the middle of the line.
+            .map(flattened)
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
+    /// `text` flattened to one line and cut to `limit` visible characters.
+    ///
+    /// Flattened first, so the cut counts what the reader will be shown rather than the
+    /// whitespace a page's own `<title>` wraps itself in.
+    private static func clipped(_ text: String, to limit: Int) -> String {
+        let flat = flattened(text)
+        return flat.count > limit ? String(flat.prefix(limit)) + "…" : flat
+    }
+
+    /// A host cut to the same length, but from the front.
+    ///
+    /// A domain identifies itself by its tail. Cut from the other end,
+    /// `cdn.assets.internal.widgets.example.com` becomes
+    /// `cdn.assets.internal.widgets.exam…`, which names no site the reader can place and
+    /// reads identically to every sibling under the same long prefix — while the part
+    /// that would have told them apart, and told them whose page this is, is the part
+    /// thrown away. The whole reason the tooltip carries a domain at all is to answer
+    /// "whose page is `[21]`", so the answer is the end of it.
+    private static func clippedHost(_ domain: String) -> String {
+        let flat = flattened(domain)
+        return flat.count > maxTooltipField
+            ? "…" + String(flat.suffix(maxTooltipField)) : flat
+    }
+
+    /// One line's worth of whatever a page or a search backend put in a field.
+    ///
+    /// Idempotent, which is what lets the title go through it twice — once before the
+    /// cap, so the cap counts visible characters, and once with everything else.
+    private static func flattened(_ text: String) -> String {
+        text.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    /// How much of a source's title a tooltip will carry.
+    private static let maxTooltipTitle = 64
+
+    /// And of a domain or a date, which are shorter by nature and longer only when
+    /// something upstream has gone wrong.
+    private static let maxTooltipField = 32
 
     /// The inline markdown Pango can express: bold, italic and code.
     ///
