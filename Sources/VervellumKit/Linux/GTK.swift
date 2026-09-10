@@ -105,6 +105,154 @@ enum GTK {
                    unsafeBitCast(trampoline, to: GCallback.self), box, releaseLinkBox)
     }
 
+    // MARK: Drops and pastes
+
+    /// What a drop or a paste turned out to be carrying.
+    ///
+    /// Paths rather than bytes for files: reading them is `AttachmentIntake`'s job on
+    /// both platforms, and it refuses an oversized file from its directory entry rather
+    /// than after loading it.
+    enum Dropped: Equatable {
+        case files([String])
+        case image(Data)
+    }
+
+    /// Makes `widget` accept a drop of files or an image.
+    ///
+    /// The handler returns whether the drop was taken; a false lets GTK fall back to
+    /// whatever the widget did before — a text drag onto the composer still inserts
+    /// text, because a drag carrying only text never reaches here at all.
+    static func onDrop(_ widget: Widget, _ handler: @escaping (Dropped) -> Bool) {
+        // A nil here is a failed `g_object_new`, and losing drag-and-drop is not worth
+        // taking the window down for: the composer still accepts a paste and a typed
+        // question.
+        guard let controller = vv_drop_target_new() else { return }
+        let box = Unmanaged.passRetained(DropBox(handler)).toOpaque()
+        let trampoline: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<GValue>?,
+                                        Double, Double,
+                                        UnsafeMutableRawPointer?) -> gboolean = { _, value, _, _, data in
+            guard let data, let value, let dropped = GTK.dropped(from: value) else { return 0 }
+            let taken = Unmanaged<DropBox>.fromOpaque(data).takeUnretainedValue().call(dropped)
+            return taken ? 1 : 0
+        }
+        vv_connect(UnsafeMutableRawPointer(controller), "drop",
+                   unsafeBitCast(trampoline, to: GCallback.self), box, releaseDropBox)
+        gtk_widget_add_controller(widget, controller)
+    }
+
+    /// Reads the clipboard for something to attach, and calls back on the main loop.
+    ///
+    /// Files win, then words, then pictures — the order the pasteboard uses, decided
+    /// here for the same reasons.
+    ///
+    /// Text is answered by returning false *without calling the handler*: the caller
+    /// reads that as "not mine" and lets GTK paste the words itself. A clipboard
+    /// carrying a web page's words *and* its picture is a copy of the words.
+    ///
+    /// But not when it is carrying a file. A file manager offers the copied file as
+    /// `text/uri-list` *and* as text — GDK will serialise a file list into a string for
+    /// anyone who asks for one, which is what `has_text` asks — so a text-first guard
+    /// answers yes for the commonest way there is to paste a file, and Ctrl-V drops
+    /// `file:///home/…` into the question instead of attaching anything. Nothing about
+    /// the words-over-picture rule argues for words over a file, and the macOS side has
+    /// always read it the other way round.
+    ///
+    /// Otherwise exactly one asynchronous read is started, because the formats on the
+    /// clipboard are known up front and trying all three in turn would mean two
+    /// failures per paste.
+    static func readClipboard(_ widget: Widget, _ handler: @escaping (Dropped?) -> Void) -> Bool {
+        guard let clipboard = vv_widget_clipboard(widget) else { return false }
+
+        let wantsFiles = vv_clipboard_has_files(clipboard) != 0
+        guard wantsFiles || vv_clipboard_has_text(clipboard) == 0 else { return false }
+        guard wantsFiles || vv_clipboard_has_texture(clipboard) != 0 else { return false }
+        // A read has to ask for the type the clipboard advertises. Most apps put a file
+        // *list* on it even for one file, but an app that put a single `G_TYPE_FILE`
+        // there answers "type not contained" to a request for a list — and the paste
+        // would fail for a file that is plainly on the clipboard.
+        let wantsList = vv_clipboard_has_file_list(clipboard) != 0
+
+        // The contract this release depends on: each `vv_clipboard_read_*` below is a
+        // one-line wrapper around `gdk_clipboard_read_value_async`, which GLib
+        // guarantees calls its callback exactly once — on failure included. A shim that
+        // grew an early return without calling back would leak this box and everything
+        // the handler captured; one that called back twice would over-release it. Both
+        // are fixed in the shim, never with a defensive release here.
+        let box = Unmanaged.passRetained(ClipboardBox(handler)).toOpaque()
+        let callback: GAsyncReadyCallback = { source, result, data in
+            guard let data else { return }
+            // Retained once and released here: a read answers exactly once, and the
+            // closure has nothing to be kept alive for afterwards.
+            let handler = Unmanaged<ClipboardBox>.fromOpaque(data).takeRetainedValue().call
+            guard let source, let result, let value = vv_clipboard_read_finish(source, result)
+            else { return handler(nil) }
+            handler(GTK.dropped(from: value))
+        }
+        switch (wantsFiles, wantsList) {
+        case (true, true): vv_clipboard_read_files(clipboard, callback, box)
+        case (true, false): vv_clipboard_read_file(clipboard, callback, box)
+        // Spelled out rather than `default`, and `(false, true)` is unreachable — but
+        // by the shim, not by anything here: `vv_clipboard_has_files` is
+        // `can_provide(GDK_TYPE_FILE_LIST) || can_provide(G_TYPE_FILE)` (shim.h:235), so
+        // a clipboard holding a list always answers yes to both. Naming the pair that
+        // way keeps the compiler honest if the tuple grows, and says where to look if
+        // the two shim predicates ever stop nesting — the fix would be there, as it is
+        // for the callback contract above, rather than a defensive branch here.
+        case (false, _): vv_clipboard_read_texture(clipboard, callback, box)
+        }
+        return true
+    }
+
+    /// Turns a dropped or pasted `GValue` into paths or PNG bytes.
+    ///
+    /// The `GValue` is borrowed in both cases and must not be unset here: a signal
+    /// argument belongs to the emitter, and `gdk_clipboard_read_value_finish` is
+    /// documented `transfer none` — "the returned data is owned by the instance". A
+    /// `g_value_unset` on either would be a free of something still in use.
+    private static func dropped(from value: UnsafePointer<GValue>) -> Dropped? {
+        if vv_value_is_texture(value) != 0 {
+            guard let bytes = vv_texture_png(value) else { return nil }
+            // Transfer full, unlike the `GValue` this came out of: `vv_texture_png` ends
+            // at `gdk_texture_save_to_png_bytes`, which encodes into a fresh `GBytes`
+            // rather than lending one the texture owns. So this release is a release and
+            // not the double free the paragraph above is about.
+            defer { g_bytes_unref(bytes) }
+            // `gsize`, not `Int`: it is unsigned and platform-width, and a mismatch
+            // here is a pointer type error rather than a conversion.
+            var size: gsize = 0
+            guard let raw = g_bytes_get_data(bytes, &size), size > 0 else { return nil }
+            return .image(Data(bytes: raw, count: Int(size)))
+        }
+        guard let array = vv_value_file_paths(value) else { return nil }
+        // Transfer full, and the one place this file frees memory it did not allocate:
+        // `vv_value_file_paths` builds a fresh NUL-terminated `strv` of copied paths
+        // rather than handing back anything owned by the `GValue`. A shim that ever
+        // "simplified" that into a borrowed pointer would turn this into a double free —
+        // which is why the shim says so at its own end too.
+        defer { g_strfreev(array) }
+        var paths: [String] = []
+        var cursor = array
+        while let entry = cursor.pointee {
+            paths.append(String(cString: entry))
+            cursor += 1
+        }
+        return paths.isEmpty ? nil : .files(paths)
+    }
+
+    private final class DropBox {
+        let call: (Dropped) -> Bool
+        init(_ call: @escaping (Dropped) -> Bool) { self.call = call }
+    }
+    private static let releaseDropBox: GClosureNotify = { data, _ in
+        guard let data else { return }
+        Unmanaged<DropBox>.fromOpaque(data).release()
+    }
+
+    private final class ClipboardBox {
+        let call: (Dropped?) -> Void
+        init(_ call: @escaping (Dropped?) -> Void) { self.call = call }
+    }
+
     private final class KeyBox {
         let call: (UInt32, UInt32) -> Bool
         init(_ call: @escaping (UInt32, UInt32) -> Bool) { self.call = call }
@@ -278,6 +426,32 @@ enum GTK {
     }
 
     static func isEscape(_ keyval: UInt32) -> Bool { keyval == vv_key_escape() }
+    /// Control-V. The paste that GTK would otherwise handle by itself, intercepted only
+    /// when the clipboard is carrying something a text view cannot show.
+    ///
+    /// Both spellings of the key, because a keyval follows the effective lock state: with
+    /// Caps Lock on, Ctrl-V arrives as `GDK_KEY_V`, and matching only the lowercase one
+    /// would make pasting a screenshot fail for exactly the users who could never work
+    /// out why.
+    ///
+    /// Shift disqualifies the gesture whichever spelling arrives, and that is the whole
+    /// of the rule: plain Ctrl-V never carries Shift, while Ctrl-Shift-V — a gesture of
+    /// its own in most applications — arrives capitalised with Caps Lock *off* and in
+    /// lowercase with it *on*, because the two locks cancel. Guarding only the capital
+    /// left the second of those looking exactly like a plain paste.
+    ///
+    /// Both spellings are Latin ones, and that is a known gap rather than an oversight.
+    /// A keyval follows the active keyboard group, so under a Cyrillic or Greek layout
+    /// the same physical key arrives as its native letter even with Control held, and
+    /// this answers false. The paste is then GTK's, which inserts the clipboard's text
+    /// flavour — for a copied file that is the `file:///…` URI, which is the thing the
+    /// interception exists to keep out of a question. Closing it means matching the
+    /// event's hardware keycode instead of its keyval, which is a value this does not
+    /// receive; it belongs to whatever revisits how keys reach here.
+    static func isPaste(_ keyval: UInt32, _ modifiers: UInt32) -> Bool {
+        guard hasControl(modifiers), !hasShift(modifiers) else { return false }
+        return keyval == vv_key_v() || keyval == vv_key_capital_v()
+    }
     static func hasShift(_ modifiers: UInt32) -> Bool { modifiers & vv_mask_shift() != 0 }
     static func hasControl(_ modifiers: UInt32) -> Bool { modifiers & vv_mask_control() != 0 }
 

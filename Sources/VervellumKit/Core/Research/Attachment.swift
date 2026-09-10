@@ -75,6 +75,25 @@ struct Attachment: Codable, Equatable, Identifiable {
     /// The size of the stored bytes, so the panel can say "1.4 MB" without reading them.
     var byteCount: Int
 
+    /// "1.4 MB", for a chip that has to say what a question is about to send.
+    ///
+    /// Here rather than in either panel, and hand-rolled rather than
+    /// `ByteCountFormatter`, for a reason beyond sharing one wording: that formatter's
+    /// `.file` style counts a kilobyte as 1000 bytes, while `maxAttachmentBytes` is 4 MiB. A
+    /// file *at* the cap would read as "4.2 MB" on the chip and be refused above "4 MB"
+    /// in the same breath. These units are the cap's units.
+    var sizeDescription: String {
+        let kilobyte = 1024.0
+        let size = Double(byteCount)
+        if size < kilobyte { return byteCount == 1 ? "1 byte" : "\(byteCount) bytes" }
+        // The tier is chosen from the *rounded* figure, not the raw one. Rounding after
+        // choosing put 1,048,575 bytes in the kilobyte tier and printed it as "1024 KB",
+        // one byte below the file that prints "1.0 MB".
+        let kilobytes = (size / kilobyte).rounded()
+        if kilobytes < kilobyte { return String(format: "%.0f KB", kilobytes) }
+        return String(format: "%.1f MB", size / (kilobyte * kilobyte))
+    }
+
     init(id: UUID = UUID(), kind: Kind, name: String, mediaType: String, byteCount: Int) {
         self.id = id
         self.kind = kind

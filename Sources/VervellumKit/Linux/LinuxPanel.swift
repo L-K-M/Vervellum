@@ -30,8 +30,17 @@ final class LinuxPanel {
     private let composer: GTK.Widget
     private let sendButton: GTK.Widget
     private let statusLabel: GTK.Widget
+    /// One row per attached file, above the composer. Rebuilt rather than diffed, like
+    /// the thread: there are at most four of them.
+    private let attachmentBox: GTK.Widget
 
     private var thread = ResearchThread()
+    /// What is attached to the question being typed, bytes and all.
+    ///
+    /// Held here rather than written as it arrives: a question still being typed has no
+    /// turn to refer to it, and the store is swept by reachability — see
+    /// `PendingAttachment`. `ask` writes them at the moment a turn exists.
+    private var pendingAttachments: [PendingAttachment] = []
     private var runningTask: Task<Void, Never>?
     private var isRunning = false
     /// Which turn the running task belongs to. A run cancelled by "New" still reports
@@ -58,6 +67,7 @@ final class LinuxPanel {
         threadBox = GTK.verticalBox(spacing: 18)
         composer = GTK.textView()
         statusLabel = GTK.markupLabel("")
+        attachmentBox = GTK.verticalBox(spacing: 4)
         // Created without a handler: `wireComposer` attaches the real one once `self`
         // is fully initialised. Connecting a placeholder here and another later would
         // leave *both* attached, and the placeholder would still fire.
@@ -74,6 +84,9 @@ final class LinuxPanel {
         GTK.addStyle(threadBox, "thread")
         GTK.applyStylesheet(Self.stylesheet(textScale: environment.preferences.textScale))
         wireComposer()
+        // Draws the (empty) attachment row once, which is what hides it: GTK4 shows a
+        // widget by default, and an empty box still takes its spacing.
+        renderAttachments()
         render()
     }
 
@@ -124,6 +137,7 @@ final class LinuxPanel {
 
         GTK.addStyle(statusLabel, "status")
         GTK.append(footer, statusLabel)
+        GTK.append(footer, attachmentBox)
 
         let row = GTK.horizontalBox(spacing: 8)
         // The composer grows with its content and then scrolls. Those two scrolled-window
@@ -142,17 +156,62 @@ final class LinuxPanel {
         GTK.onSignal(UnsafeMutableRawPointer(sendButton), "clicked") { [weak self] in
             self?.submitOrStop()
         }
+        // A file or an image dropped on the composer is an attachment. A drag carrying
+        // only text never reaches here — the target asks for files and images alone — so
+        // dragging a selection into the field still inserts it.
+        GTK.onDrop(composer) { [weak self] dropped in
+            guard let self else { return false }
+            // What was actually taken, not an unconditional yes. The return value is the
+            // drag's answer to its *source*, and a source offering a move reads a yes as
+            // permission to delete the original — so claiming a drop this panel refused
+            // in full could take the user's only copy of a file it would not attach. It
+            // is also what decides whether GTK shows the drop-failed feedback, which a
+            // refusal has earned: the notice in the thread says why, and the cursor
+            // should not have said otherwise on the way in.
+            return self.receive(dropped)
+        }
         GTK.observeKeys(composer) { [weak self] keyval, modifiers in
             guard let self else { return false }
             if GTK.isEscape(keyval) {
                 // Escape clears a draft first and only then closes, so a half-typed
                 // question is never thrown away by a reflex key press.
-                if GTK.text(of: self.composer).isEmpty {
+                if GTK.text(of: self.composer).isEmpty, self.pendingAttachments.isEmpty {
                     gtk_widget_set_visible(self.window, 0)
                 } else {
                     GTK.setText(self.composer, "")
+                    // With the draft, because they are one composer: an Escape that
+                    // emptied the field and left a screenshot attached would send it
+                    // with the next question.
+                    self.pendingAttachments = []
+                    self.renderAttachments()
                 }
                 return true
+            }
+            // Control-V, but only when the clipboard is carrying something a text view
+            // cannot show. `readClipboard` answers false for text, and the key then goes
+            // to GTK, which pastes it exactly as it always did.
+            //
+            // Text wins outright, which is a decision and not an oversight. Browsers and
+            // office suites put a text or HTML flavour on the clipboard *beside* a copied
+            // picture, so preferring the image would turn "copy this paragraph" into "attach
+            // a screenshot of it" — a paste that silently does something else is worse than
+            // one that cannot reach a flavour. Dragging the image instead is unaffected: a
+            // drop offers files and textures alone.
+            if GTK.isPaste(keyval, modifiers) {
+                return GTK.readClipboard(self.composer) { [weak self] dropped in
+                    guard let self else { return }
+                    guard let dropped else {
+                        // The key was taken — the clipboard said it was holding a file
+                        // or a picture — and then the read produced nothing: it changed
+                        // under us, or what it held could not be encoded. Said out loud,
+                        // because a Ctrl-V that does nothing at all is the worst of the
+                        // three outcomes.
+                        self.appendNotice("The clipboard's contents could not be read. "
+                                          + "Try copying it again.")
+                        return
+                    }
+                    self.receive(dropped)
+                }
             }
             guard GTK.isReturn(keyval) else { return false }
             // With submit-on-Return, a bare Return sends and Shift-Return adds a line;
@@ -186,6 +245,8 @@ final class LinuxPanel {
         isRunning = false
         thread = ResearchThread()
         GTK.setText(composer, "")
+        pendingAttachments = []
+        renderAttachments()
         render()
     }
 
@@ -201,7 +262,14 @@ final class LinuxPanel {
     private func submit() {
         guard !isRunning else { return }
         let text = GTK.text(of: composer).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty else {
+            // A dropped file with nothing asked about it was a Return that did nothing
+            // whatsoever — the chip sitting there being, as far as the reader could
+            // tell, what broke the key. The macOS panel says the same sentence, from the
+            // same constant.
+            if !pendingAttachments.isEmpty { appendNotice(AttachmentIntake.questionlessMessage) }
+            return
+        }
 
         switch ComposerCommand.parse(text) {
         case .none:
@@ -224,13 +292,13 @@ final class LinuxPanel {
             selectModel(named: name)
         case .ask(let question):
             GTK.setText(composer, "")
-            ask(question, mode: .research)
+            ask(question, mode: .research, attaching: takePendingAttachments())
         case .direct(let question):
             GTK.setText(composer, "")
-            ask(question, mode: .direct)
+            ask(question, mode: .direct, attaching: takePendingAttachments())
         case .deepResearch(let question):
             GTK.setText(composer, "")
-            ask(question, mode: .deep)
+            ask(question, mode: .deep, attaching: takePendingAttachments())
         }
     }
 
@@ -253,12 +321,47 @@ final class LinuxPanel {
         appendNotice(ComposerCommand.modelListing(settings))
     }
 
-    private func ask(_ question: String, mode: ResearchRunner.Mode) {
+    /// - Parameters:
+    ///   - attached: what goes with this question. Passed in rather than read from
+    ///     `pendingAttachments`, because a retry asks with the *old turn's* files while
+    ///     the composer may be holding files staged for a different question — and
+    ///     taking those would destroy them.
+    ///   - lostAttachments: whether this question was asked with something attached that
+    ///     could not be brought along — only a retry can be, and only when the bytes are
+    ///     no longer stored.
+    private func ask(_ question: String, mode: ResearchRunner.Mode,
+                     attaching attached: [PendingAttachment],
+                     lostAttachments: Bool = false) {
         var draft = ResearchTurn(question: question)
         draft.model = environment.preferences.providerSettings.modelName
         if mode == .direct { draft.notices = [.noEvidence] }
+        if lostAttachments { draft.addNotice(.attachmentMissing) }
+        draft.attachments = attached.map { $0.attachment }
+        // Written at the one moment a turn that refers to them exists, and only when the
+        // library is being kept: "history off" means the bytes are gone, and a
+        // screenshot in a directory beside an erased thread file would be the loudest
+        // way to break that. The turn runs with the picture either way — what it is sent
+        // is the map below, held in memory for the length of the run.
+        if environment.preferences.historyEnabled {
+            for pending in attached {
+                do {
+                    try environment.attachments.write(pending.data, for: pending.attachment)
+                } catch {
+                    // No path and no error text: a failure here names a file under the
+                    // user's home, and this log records shape rather than content.
+                    StandardErrorLog().write(.warning, "An attachment could not be stored, "
+                        + "so it will not be there when this thread is reopened.")
+                    // And said where the reader is looking. The log is for whoever runs
+                    // this from a terminal; the notice is for the person who is about to
+                    // believe their screenshot is part of the saved thread.
+                    draft.addNotice(.attachmentNotStored)
+                }
+            }
+        }
         // Immutable from here: the task's closure cannot capture a mutable variable.
         let turn = draft
+        let bytes = Dictionary(attached.map { ($0.id, $0.data) },
+                               uniquingKeysWith: { first, _ in first })
         thread.turns.append(turn)
         runningTurnID = turn.id
         isRunning = true
@@ -272,9 +375,7 @@ final class LinuxPanel {
         let runner = ResearchRunner(
             environment: .init(preferences: environment.preferences, secrets: environment.secrets),
             trace: ResearchTrace(sink: StandardErrorLog()),
-            // Nothing can be attached on this front end yet; the GTK composer comes in a
-            // later change, and this is the line it will come through.
-            attachmentBytes: { _ in nil })
+            attachmentBytes: { bytes[$0.id] })
 
         runningTask = Task { [weak self] in
             let finished = await runner.run(turn, mode: mode, history: history) { snapshot in
@@ -325,8 +426,26 @@ final class LinuxPanel {
     private func retry(_ turn: ResearchTurn) {
         guard !isRunning else { return }
         let mode: ResearchRunner.Mode = turn.wasAskedDirectly ? .direct : .research
+        // Asked again means asked with what it was asked with. The bytes are still in
+        // the store — the turn being retried is what keeps them reachable — and one
+        // whose bytes have gone is dropped rather than listed on a turn that could not
+        // see it.
+        // Into a local, never into `pendingAttachments`: the composer may be holding
+        // files staged for the question the user is typing, and a retry that took them
+        // would ask an old question with them and destroy them in the same gesture.
+        let again = turn.attachments.compactMap { attachment in
+            environment.attachments.data(for: attachment).map {
+                PendingAttachment(attachment: attachment, data: $0)
+            }
+        }
+        // What did not come back is said on the new turn. A turn asked with history off
+        // never had its bytes written — they lived for the length of that run and no
+        // longer — so a retry seconds later would otherwise quietly re-ask the question
+        // without the picture. The same notice the runner raises for bytes that have
+        // gone, because it is the same fact about the same question.
+        let lost = again.count < turn.attachments.count
         if thread.turns.last?.id == turn.id { thread.turns.removeLast() }
-        ask(turn.question, mode: mode)
+        ask(turn.question, mode: mode, attaching: again, lostAttachments: lost)
     }
 
     /// A message from the panel itself — `/help`, or a command this platform lacks —
@@ -334,6 +453,76 @@ final class LinuxPanel {
     ///
     /// Such turns are rendered but never persisted and never sent as history; both
     /// `persistableThread` and `ResearchContext` key off the empty question.
+    // MARK: Attachments
+
+    /// Takes what a drop or a paste turned out to be carrying.
+    ///
+    /// Anything refused is said in the thread, as a notice: a file that vanishes on
+    /// being dropped is indistinguishable from a window that does not accept drops, and
+    /// the reader is owed the difference.
+    ///
+    /// - Returns: whether anything was attached, which a drop answers to its source and
+    ///   a paste has no use for.
+    @discardableResult
+    private func receive(_ dropped: GTK.Dropped) -> Bool {
+        let existing = pendingAttachments.count
+        let outcome: AttachmentIntake.Outcome
+        switch dropped {
+        case .files(let paths):
+            outcome = AttachmentIntake.read(files: paths.map { URL(fileURLWithPath: $0) },
+                                            existing: existing)
+        case .image(let data):
+            // An image on a clipboard has no name of its own, so it is given the one
+            // the macOS side gives it.
+            outcome = AttachmentIntake.outcome(
+                from: [AttachmentIntake.Candidate(data, name: AttachmentIntake.pastedImageName)],
+                existing: existing)
+        }
+        pendingAttachments.append(contentsOf: outcome.accepted)
+        renderAttachments()
+        if !outcome.refusals.isEmpty {
+            appendNotice(outcome.refusals.joined(separator: "\n\n"))
+        }
+        return !outcome.accepted.isEmpty
+    }
+
+    /// Hands over what the composer is holding and lets go of it, which is what makes
+    /// sending and retrying different: a sent question takes the files with it, a retried
+    /// one brings its own and leaves these where they are.
+    private func takePendingAttachments() -> [PendingAttachment] {
+        defer {
+            pendingAttachments = []
+            renderAttachments()
+        }
+        return pendingAttachments
+    }
+
+    /// Draws one row per attached file, with a way to take each one off again.
+    ///
+    /// Rebuilt rather than diffed, like the thread and for the same reason: there are at
+    /// most `AttachmentIntake.maximumPerQuestion` of them.
+    private func renderAttachments() {
+        GTK.removeAllChildren(of: attachmentBox)
+        gtk_widget_set_visible(attachmentBox, pendingAttachments.isEmpty ? 0 : 1)
+        for pending in pendingAttachments {
+            let row = GTK.horizontalBox(spacing: 8)
+            let glyph = pending.attachment.kind == .image ? "🖼" : "📄"
+            let label = GTK.markupLabel(
+                "<span size=\"small\">\(glyph) \(GTK.escape(pending.attachment.name)) "
+                + "<span alpha=\"60%\">\(GTK.escape(pending.attachment.sizeDescription))</span></span>")
+            gtk_widget_set_hexpand(label, 1)
+            gtk_label_set_xalign(vv_label(label), 0)
+            GTK.append(row, label)
+            let id = pending.id
+            GTK.append(row, GTK.button("✕") { [weak self] in
+                guard let self else { return }
+                self.pendingAttachments.removeAll { $0.id == id }
+                self.renderAttachments()
+            })
+            GTK.append(attachmentBox, row)
+        }
+    }
+
     private func appendNotice(_ markdown: String) {
         var turn = ResearchTurn(question: "")
         turn.answer = markdown
