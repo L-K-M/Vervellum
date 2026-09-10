@@ -1,0 +1,4 @@
+mode: deep
+question: Does drinking coffee extend your lifespan?
+expect: observational studies associate moderate coffee consumption with lower mortality, but causation is not established; the answer must convey the associative nature of the evidence rather than promising extra years
+must-not: a causal promise ("coffee makes you live longer") without qualification

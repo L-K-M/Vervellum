@@ -1,0 +1,5 @@
+mode: research
+current: true
+question: What is the current population of the city of Paris, and how does it differ from the metropolitan figure?
+expect: the city proper is about 2.1 million; the metro area is around 12-13 million; the answer must distinguish the two rather than give one figure
+must-not: a single figure presented as "the population of Paris" with no city/metro distinction

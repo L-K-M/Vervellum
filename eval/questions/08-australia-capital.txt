@@ -1,0 +1,4 @@
+mode: research
+question: What is the capital of Australia, and why was it chosen?
+expect: Canberra; a compromise between Sydney and Melbourne
+must-not: Sydney or Melbourne named as the capital

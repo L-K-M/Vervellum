@@ -1,0 +1,4 @@
+mode: research
+question: Which countries have landed humans on the Moon?
+expect: only the United States; the Soviet Union flew uncrewed missions only
+must-not: the USSR/Russia or China credited with a crewed landing

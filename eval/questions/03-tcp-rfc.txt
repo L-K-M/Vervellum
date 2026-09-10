@@ -1,0 +1,4 @@
+mode: research
+question: Which RFC first specified TCP, and in what year?
+expect: RFC 793; 1981
+must-not: RFC 791 (that is IP) given as the TCP specification

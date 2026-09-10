@@ -39,13 +39,19 @@ public enum VervellumLinuxApp {
                 FileHandle.standardError.write(Data("usage: vervellum --ask \"your question\"\n".utf8))
                 return 2
             }
-            return runHeadless(question: arguments.dropFirst().joined(separator: " "), direct: false)
+            return runHeadless(question: arguments.dropFirst().joined(separator: " "), mode: .research)
+        case "--deep":
+            guard arguments.count > 1 else {
+                FileHandle.standardError.write(Data("usage: vervellum --deep \"your question\"\n".utf8))
+                return 2
+            }
+            return runHeadless(question: arguments.dropFirst().joined(separator: " "), mode: .deep)
         case "--direct":
             guard arguments.count > 1 else {
                 FileHandle.standardError.write(Data("usage: vervellum --direct \"your question\"\n".utf8))
                 return 2
             }
-            return runHeadless(question: arguments.dropFirst().joined(separator: " "), direct: true)
+            return runHeadless(question: arguments.dropFirst().joined(separator: " "), mode: .direct)
         case "--gapplication-service":
             // D-Bus activation passes this. GLib's own convention, and it must not be
             // treated as an unknown option: the session bus starts the app this way when
@@ -67,6 +73,8 @@ public enum VervellumLinuxApp {
             USAGE
               vervellum                    start the panel (or toggle a running one)
               vervellum --ask "question"    research a question and print the answer
+              vervellum --deep "question"   research over several rounds, following up
+                                            what the first pass missed
               vervellum --direct "question" answer without searching, badged as unsourced
               vervellum --install-shortcut  bind the summon shortcut in your desktop
               vervellum --version
@@ -87,13 +95,13 @@ public enum VervellumLinuxApp {
     // MARK: Headless
 
     /// Runs one turn and prints it. Returns a shell-style exit code.
-    private static func runHeadless(question: String, direct: Bool) -> Int32 {
+    private static func runHeadless(question: String, mode: ResearchRunner.Mode) -> Int32 {
         let environment = LinuxEnvironment()
         let settings = environment.preferences.providerSettings
         let problems = settings.problems(
             hasModelKey: environment.secrets.hasModelKey(for: settings),
             hasSearchKey: environment.secrets.hasSearchKey(for: settings),
-            requiresSearch: !direct)
+            requiresSearch: mode.searches)
         guard problems.isEmpty else {
             FileHandle.standardError.write(Data(
                 ("vervellum: not configured. " + problems.joined(separator: " ") + "\n").utf8))
@@ -110,7 +118,7 @@ public enum VervellumLinuxApp {
             attachmentBytes: { _ in nil })
         var draft = ResearchTurn(question: question)
         draft.model = environment.preferences.providerSettings.modelName
-        if direct { draft.notices = [.noEvidence] }
+        if mode == .direct { draft.notices = [.noEvidence] }
         // Immutable from here: the task's closure cannot capture a mutable variable.
         let turn = draft
 
@@ -127,7 +135,7 @@ public enum VervellumLinuxApp {
             // No history: a one-shot command-line question is its own thread. Feeding
             // it the last GUI conversation would silently change the answer and cost
             // context the user did not ask to spend.
-            output.turn = await runner.run(turn, mode: direct ? .direct : .research,
+            output.turn = await runner.run(turn, mode: mode,
                                            history: []) { snapshot in
                 // Progress goes to stderr so stdout stays a clean answer that can be
                 // piped. Only stage *changes* are reported, or a streamed answer would

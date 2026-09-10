@@ -1,0 +1,4 @@
+mode: research
+question: At closest approach, which comes nearer to Earth — Mars or Venus — and roughly how close does each get?
+expect: Venus is nearer, at roughly 38-40 million km; Mars's closest is roughly 55 million km
+must-not: Mars named as the closer of the two

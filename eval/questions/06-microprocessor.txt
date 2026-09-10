@@ -1,0 +1,4 @@
+mode: research
+question: What was the first commercial microprocessor, who made it, and in what year?
+expect: Intel 4004; Intel; 1971
+must-not: the Intel 8008 named as first
