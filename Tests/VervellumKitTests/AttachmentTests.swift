@@ -353,25 +353,32 @@ final class AttachmentTests: XCTestCase {
         XCTAssertTrue(turn.attachments.isEmpty)
     }
 
-    /// A provider nobody has said has eyes is one an image would fail on, so an absent
-    /// flag reads as "no" rather than as "try it and see".
-    func testAProfileWrittenBeforeTheImageFlagDefaultsToNotSendingThem() throws {
+    /// A profile written before the image flag existed is treated as able to see.
+    ///
+    /// Withholding is the failure this default exists to prevent: a user pastes a
+    /// screenshot, the model is told the file could not be sent, and the only way to
+    /// find out why is a per-provider switch they have never seen. Defaulting the other
+    /// way round would be safe only if a provider that cannot take an image rejected it
+    /// gracefully — which is what `ChatCompletionsClient` now does, by retrying without
+    /// the picture rather than failing the turn.
+    func testAProfileWrittenBeforeTheImageFlagIsSentImages() throws {
         let json = """
             [{"id":"\(UUID().uuidString)","name":"P","endpoint":"https://a.example/v1",
               "model":"m","keyAccount":"model-api-key"}]
             """
         let profiles = try XCTUnwrap(ProviderSettings.decodeModelProfiles(json))
         XCTAssertEqual(profiles.count, 1)
-        XCTAssertFalse(profiles[0].sendsImages)
+        XCTAssertTrue(profiles[0].sendsImages)
 
-        // The key's spelling, pinned. The default above would still pass if the flag were
-        // renamed on the way out and read back as absent — and every user who had opted
-        // in would silently lose their eyes with no error anywhere.
-        let optedIn = """
+        // An explicit no survives, and the key's spelling is pinned. The default above
+        // would still pass if the flag were renamed on the way out and read back as
+        // absent — and everyone who turned it off for a text-only endpoint would
+        // silently start sending images it would reject.
+        let optedOut = """
             [{"id":"\(UUID().uuidString)","name":"Q","endpoint":"https://b.example/v1",
-              "model":"m","keyAccount":"model-api-key","sendsImages":true}]
+              "model":"m","keyAccount":"model-api-key","sendsImages":false}]
             """
-        let decoded = try XCTUnwrap(ProviderSettings.decodeModelProfiles(optedIn))
-        XCTAssertTrue(try XCTUnwrap(decoded.first).sendsImages)
+        let decoded = try XCTUnwrap(ProviderSettings.decodeModelProfiles(optedOut))
+        XCTAssertFalse(try XCTUnwrap(decoded.first).sendsImages)
     }
 }

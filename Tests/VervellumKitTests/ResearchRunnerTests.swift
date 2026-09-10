@@ -505,6 +505,50 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertFalse(content.contains("\"sent\""), content)
     }
 
+    /// A provider that rejects the picture still answers.
+    ///
+    /// This is what makes sending images by default safe: a text-only endpoint that
+    /// answers 400 to a request carrying an `image_url` part is not a failed turn, it is
+    /// a request to be retried without the picture. The turn then says the image was
+    /// left out, exactly as it does when a provider is explicitly configured not to see
+    /// one — because from the reader's side the two are the same fact.
+    func testAProviderThatRejectsTheImageIsRetriedWithoutIt() async throws {
+        let transport = StubTransport { call in
+            guard call.kind == .stream else { return .unrouted }
+            // The way a text-only endpoint refuses one: HTTP 400 for the whole request,
+            // before any content, which is why the retry is free of duplicated prose.
+            let messages = call.body?["messages"] as? [[String: Any]]
+            let parts = messages?.last?["content"] as? [[String: Any]]
+            let carriesImage = parts?.contains { $0["type"] as? String == "image_url" } ?? false
+            return carriesImage ? .failure(ResearchError.badRequest)
+                                 : .stream(["It is a screenshot of a stack trace."])
+        }
+
+        let turn = await run("What is this?", mode: .direct, transport: transport,
+                             sendsImages: true, attachments: [Self.image],
+                             attachmentBytes: { _ in Data([0x89, 0x50, 0x4E, 0x47]) })
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "It is a screenshot of a stack trace.")
+        XCTAssertTrue(turn.notices.contains(.imagesNotSent), "notices: \(turn.notices)")
+
+        // The request that answered is the one with no picture, and it keeps the plain
+        // string shape — the fallback must not leave a dangling empty parts array.
+        let answered = try XCTUnwrap(transport.calls.last)
+        let messages = try XCTUnwrap(answered.body?["messages"] as? [[String: Any]])
+        XCTAssertNotNil(messages.last?["content"] as? String,
+                        "the retried request must not still carry parts")
+        let whole = String(decoding: try JSONSerialization.data(withJSONObject: answered.body ?? [:]),
+                           as: UTF8.self)
+        XCTAssertFalse(whole.contains("image_url"), "the retry still carried the picture")
+        // And the retry's *payload* says the picture was withheld. Sending the same
+        // payload without the image part would tell the model an image accompanies a
+        // message that carries none — the setup for a confidently invented answer.
+        let content = try XCTUnwrap(answered.userContent)
+        XCTAssertTrue(content.contains("unavailable"), content)
+        XCTAssertFalse(content.contains("\"sent\""), content)
+    }
+
     /// An attached text file is inlined into the payload, so a model with no eyes at all
     /// can still read it — and the provider's image flag has nothing to do with it.
     func testAnAttachedTextFileIsInlinedForAnyProvider() async throws {

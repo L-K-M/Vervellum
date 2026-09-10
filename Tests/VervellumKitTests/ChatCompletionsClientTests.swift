@@ -317,6 +317,49 @@ final class ChatCompletionsClientTests: XCTestCase {
                        "data:image/png;base64,AAAA")
     }
 
+    /// A text-only endpoint's 400 is not a failed turn: the request is retried without
+    /// the image, and with a payload that stops claiming it was sent.
+    ///
+    /// The second half is the part that is easy to miss. The picture is gone from the
+    /// request, but the payload that stays was built for a call that carried it — an
+    /// `attachments` entry marked `sent` for a message with no image, which is exactly
+    /// the shape that invites a model to describe a picture it never received. So the
+    /// retry takes the caller's picture-free payload, not the one that just failed.
+    func testARejectedImageIsRetriedWithoutItAndWithTheWithheldPayload() async throws {
+        let images = [ChatCompletionsClient.ImagePart(mediaType: "image/png", base64: "AAAA")]
+        let transport = StubTransport { call in
+            let messages = call.body?["messages"] as? [[String: Any]]
+            let carriesImage = (messages?.last?["content"] as? [[String: Any]] ?? [])
+                .contains { $0["type"] as? String == "image_url" }
+            return carriesImage ? .failure(ResearchError.badRequest)
+                                 : .completion(json: ["ok": true])
+        }
+        let client = ChatCompletionsClient(url: URL(string: "https://a.example/v1/chat/completions")!,
+                                           model: "m", apiKey: nil, sendsImages: true,
+                                           trace: ResearchTrace(sink: SilentLog()),
+                                           transport: transport)
+
+        let object = try await client.completeJSON(
+            system: "s",
+            payload: ["attachments": [["name": "shot.png", "sent": "yes"]]],
+            withoutImages: ["attachments": [["name": "shot.png", "unavailable": "yes"]]],
+            label: "Plan", images: images)
+
+        XCTAssertEqual(object["ok"] as? Bool, true)
+        XCTAssertTrue(client.withheldImages, "the runner has to know the picture did not go")
+        XCTAssertFalse(client.imagesWillBeSent,
+                       "a provider that refused once must not be offered one again this turn")
+
+        // The request that answered is the plain-string one, and its payload names the
+        // picture as withheld.
+        let answered = try XCTUnwrap(transport.calls.last)
+        let messages = try XCTUnwrap(answered.body?["messages"] as? [[String: Any]])
+        let content = try XCTUnwrap(messages.last?["content"] as? String,
+                                    "the retry still carried parts")
+        XCTAssertTrue(content.contains("unavailable"), content)
+        XCTAssertFalse(content.contains("\"sent\""), content)
+    }
+
     /// Inline rather than hosted. The alternative is uploading the user's screenshot
     /// somewhere to get a link for it, which is the opposite of what this app promises
     /// about where their data goes.

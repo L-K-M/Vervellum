@@ -43,6 +43,20 @@ final class ChatCompletionsClient {
     /// Whether the endpoint has, so far, accepted the optional parameters.
     private var sendsOptionalParameters = true
 
+    /// Whether the endpoint has, so far, accepted the images.
+    ///
+    /// Learned rather than configured: a provider that answers 400 to a request carrying
+    /// an `image_url` part has said no, and there is no reason to make it say so once per
+    /// stage. Once false it stays false for the turn — see `withImages`.
+    private var imagesAccepted = true
+
+    /// Whether the most recent call dropped its images because the provider refused them.
+    ///
+    /// The runner reads this immediately after a stage to say on the turn that the
+    /// picture was left out. `false` for a call that sent them, and for a call that had
+    /// none to send.
+    private(set) var withheldImages = false
+
     init(url: URL, model: String, apiKey: String?, sendsImages: Bool = false,
          trace: ResearchTrace, transport: any HTTPTransporting = HTTPTransport.shared) {
         self.url = url
@@ -73,37 +87,62 @@ final class ChatCompletionsClient {
         var dataURL: String { "data:\(mediaType);base64,\(base64)" }
     }
 
+    /// Whether a call made now would carry images: the user's setting, and the
+    /// provider's own answer so far.
+    ///
+    /// Read by `ResearchRunner` before a stage so it builds the payload that matches what
+    /// will actually be sent — a provider that refused a picture during the plan stage is
+    /// not offered one again for the answer. The answer is only about *this* turn: a
+    /// rejection is remembered on the client, which the chain builds once per run.
+    var imagesWillBeSent: Bool { sendsImages && imagesAccepted }
+
     /// The images this provider may actually be sent.
     ///
     /// Enforced here, where every request is built, rather than left to each caller. The
     /// rule is one a caller could forget exactly once and lose a turn to: a text-only
-    /// endpoint handed an `image_url` part answers 400 and the whole question fails. A
-    /// caller may still filter earlier — `ResearchRunner` does, because it has to *know*
-    /// whether the pictures went in order to say so on the turn — and this makes the
-    /// guarantee structural rather than a matter of discipline.
+    /// endpoint handed an `image_url` part answers 400. A caller may still filter earlier
+    /// — `ResearchRunner` does, because it has to *know* whether the pictures went in
+    /// order to say so on the turn — and this makes the guarantee structural rather than
+    /// a matter of discipline. The 400 is not fatal either way: `withImages` retries
+    /// without the picture.
     private func allowed(_ images: [ImagePart]) -> [ImagePart] {
-        sendsImages ? images : []
+        imagesWillBeSent ? images : []
     }
 
     // MARK: Structured call
 
     /// Sends `system` plus a JSON-encoded `payload` and decodes the reply as a JSON
     /// object.
-    func completeJSON(system: String, payload: Any, label: String,
-                      images: [ImagePart] = []) async throws -> [String: Any] {
-        let images = allowed(images)
+    ///
+    /// `withoutImages` is the same payload with every picture named as withheld rather
+    /// than as sent. It exists for the retry `withImages` makes: a provider that refuses
+    /// the pictures must be asked again with prose that does not claim they arrived, or
+    /// the model is told an image accompanies a message that carries none — the setup for
+    /// a confidently invented answer this app exists to prevent.
+    func completeJSON(system: String, payload: Any, withoutImages: Any? = nil,
+                      label: String, images: [ImagePart] = []) async throws -> [String: Any] {
         guard let userContent = Self.encodeUserContent(payload)
         else { throw ResearchError.invalidContext }
+        // Encoded before the call so the retry swaps a body rather than encoding a second
+        // one. Nil when there is nothing to fall back to, and the retry then reuses the
+        // payload it was given.
+        let textOnlyContent = withoutImages.flatMap { Self.encodeUserContent($0) }
 
-        let response = try await withOptionalParameters(label: label) { optional in
-            let body = Self.requestBody(model: self.model, system: system, userContent: userContent,
-                                        images: images, stream: false, optionalParameters: optional)
-            // `"stream": false` above, so do not advertise SSE — see HTTPTransport.request.
-            let request = try HTTPTransport.request(url: self.url, payload: body, headers: self.headers,
-                                                    acceptsEventStream: false)
-            return try await self.trace.stage(label) {
-                try await self.transport.sendJSON(request)
-            }.body
+        let response = try await withImages(label: label, hadImages: !images.isEmpty) { dropImages in
+            try await self.withOptionalParameters(label: label) { optional in
+                let body = Self.requestBody(model: self.model, system: system,
+                                            userContent: dropImages ? (textOnlyContent ?? userContent)
+                                                                    : userContent,
+                                            images: dropImages ? [] : self.allowed(images),
+                                            stream: false, optionalParameters: optional)
+                // `"stream": false` above, so do not advertise SSE — see HTTPTransport.request.
+                let request = try HTTPTransport.request(url: self.url, payload: body,
+                                                        headers: self.headers,
+                                                        acceptsEventStream: false)
+                return try await self.trace.stage(label) {
+                    try await self.transport.sendJSON(request)
+                }.body
+            }
         }
         let text = try Self.messageContent(from: response)
         guard let object = Self.decodeJSONObject(from: text) else {
@@ -123,40 +162,51 @@ final class ChatCompletionsClient {
     /// platforms answer it differently: on macOS the main actor is the main dispatch
     /// queue, but a GTK application runs a GLib main loop instead, so a `MainActor` hop
     /// there would never execute and the answer would never appear.
+    ///
+    /// `withoutImages` is the same payload with every picture named as withheld rather
+    /// than as sent; see `completeJSON`.
     func streamText(system: String,
                     payload: Any,
+                    withoutImages: Any? = nil,
                     label: String,
                     images: [ImagePart] = [],
                     onDelta: @escaping (String) -> Void) async throws -> String {
-        let images = allowed(images)
         guard let userContent = Self.encodeUserContent(payload)
         else { throw ResearchError.invalidContext }
+        let textOnlyContent = withoutImages.flatMap { Self.encodeUserContent($0) }
 
         trace.log("\(label) started")
         let began = Date()
         // The retry is safe here too: a 400 is delivered as the response head, before
-        // the first frame, so no delta has reached the caller when it is thrown.
-        let reply = try await withOptionalParameters(label: label) { optional in
-            let body = Self.requestBody(model: self.model, system: system, userContent: userContent,
-                                        images: images, stream: true, optionalParameters: optional)
-            let request = try HTTPTransport.request(url: self.url, payload: body, headers: self.headers,
-                                                    acceptsEventStream: true)
-            var reply = StreamingReply()
-            do {
-                for try await event in self.transport.streamJSONEvents(request) {
-                    try Task.checkCancellation()
-                    if let chunk = try reply.apply(event) { onDelta(chunk) }
+        // the first frame, so no delta has reached the caller when it is thrown. The
+        // same is true of the image retry inside `withImages`.
+        let reply = try await withImages(label: label, hadImages: !images.isEmpty) { dropImages in
+            try await self.withOptionalParameters(label: label) { optional in
+                let body = Self.requestBody(model: self.model, system: system,
+                                            userContent: dropImages ? (textOnlyContent ?? userContent)
+                                                                    : userContent,
+                                            images: dropImages ? [] : self.allowed(images),
+                                            stream: true, optionalParameters: optional)
+                let request = try HTTPTransport.request(url: self.url, payload: body,
+                                                        headers: self.headers,
+                                                        acceptsEventStream: true)
+                var reply = StreamingReply()
+                do {
+                    for try await event in self.transport.streamJSONEvents(request) {
+                        try Task.checkCancellation()
+                        if let chunk = try reply.apply(event) { onDelta(chunk) }
+                    }
+                } catch let error as ResearchError {
+                    self.trace.warn(String(format: "%@ failed after %.2fs: %@", label,
+                                           Date().timeIntervalSince(began), error.message))
+                    throw error
+                } catch is CancellationError {
+                    throw ResearchError.cancelled
+                } catch {
+                    throw ResearchError.connectionFailed
                 }
-            } catch let error as ResearchError {
-                self.trace.warn(String(format: "%@ failed after %.2fs: %@", label,
-                                       Date().timeIntervalSince(began), error.message))
-                throw error
-            } catch is CancellationError {
-                throw ResearchError.cancelled
-            } catch {
-                throw ResearchError.connectionFailed
+                return reply
             }
-            return reply
         }
 
         // Checked again *after* the loop, not only inside it. Cancelling the consuming
@@ -233,6 +283,38 @@ final class ChatCompletionsClient {
     }
 
     // MARK: Request shaping
+
+    /// Runs `attempt`, and once more without the images if the provider answered HTTP
+    /// 400.
+    ///
+    /// The same rule as `withOptionalParameters`, for the same reason and with a worse
+    /// outcome if it is missing: a rejected parameter is a nuisance, and a rejected image
+    /// used to be the whole turn. Plenty of OpenAI-compatible endpoints are text-only,
+    /// and they answer 400 to a request carrying an `image_url` part — which is exactly
+    /// why the setting existed, and why sending images by default would otherwise fail
+    /// every question to such an endpoint. The 400 arrives before any content, so
+    /// dropping the picture and trying again costs one request and cannot duplicate
+    /// prose.
+    ///
+    /// The second attempt is given `dropImages: true` rather than reading a flag off
+    /// `self`, because the caller holds the payload that has to change with it: the
+    /// request that goes without pictures must also stop claiming they were sent.
+    private func withImages<T>(label: String,
+                               hadImages: Bool,
+                               _ attempt: (_ dropImages: Bool) async throws -> T) async throws -> T {
+        withheldImages = false
+        do {
+            return try await attempt(false)
+        } catch let error as ResearchError
+            where error == .badRequest && hadImages && sendsImages && imagesAccepted {
+            // Remembered for the rest of the turn: a provider that has said no once will
+            // say it again, and re-learning it in every stage would cost a request each.
+            imagesAccepted = false
+            withheldImages = true
+            trace.log("\(label): the provider rejected the images; retrying without them")
+            return try await attempt(true)
+        }
+    }
 
     /// Runs `attempt` with the optional parameters, and once more without them if the
     /// provider answered HTTP 400 — see the type's documentation.

@@ -86,11 +86,11 @@ runs the searches and answers based on current sources.
   into the payload. Up to four per question, 4 MB each; what a file *is* is decided by
   its bytes rather than its name. An attachment is sent on the turn it was attached to
   and on no other — later turns in the thread know its name, so the model can say it
-  can no longer see it instead of inventing what was in it. Images go only to a
-  provider you have ticked **Send attached images** for, because there is no way to ask
-  an endpoint whether it can see and a text-only one rejects the whole question; a turn
-  whose image was withheld says so. Both front ends: ⌘V or a drag on macOS, Ctrl-V or a
-  drag on Linux.
+  can no longer see it instead of inventing what was in it. Images are sent to the
+  provider by default; a text-only endpoint that refuses one is retried without the
+  picture, and the turn says the image was left out. Untick **Send attached images**
+  for a provider that accepts the part and silently ignores it. Both front ends: ⌘V or
+  a drag on macOS, Ctrl-V or a drag on Linux.
 - **`/direct`** answers with no search at all, and is clearly badged as unsourced.
 - **Bring your own providers.** An OpenAI-compatible Chat Completions endpoint, and
   for search an HTTP MCP server — recognized tools include z.ai, Brave, Tavily,
