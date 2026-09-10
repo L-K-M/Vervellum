@@ -20,6 +20,13 @@ enum EvidenceExtractor {
     /// stops being something a reader can hold in their head, and the context cost
     /// grows faster than the answer improves.
     static let maxSources = 24
+    /// The most sources one domain may contribute. Search rank is not quality —
+    /// engines reward content farms that mirror each other, and without a cap one
+    /// well-ranked domain can fill the list with several spellings of the same page,
+    /// which the answer then reads as independent agreement. Four keeps any single
+    /// voice a minority of the list while leaving room for a topic that genuinely
+    /// lives on one site.
+    static let maxSourcesPerDomain = 4
     /// Snippets are trimmed hard: they are a reminder of what the page said, not a
     /// substitute for reading it, and long ones crowd out real evidence in context.
     static let maxSnippetLength = 600
@@ -32,14 +39,23 @@ enum EvidenceExtractor {
 
     /// Extracts hits from `results`, numbering them from `startingAt`.
     /// Duplicate URLs collapse to the first occurrence, so two searches that both
-    /// surface the same page do not get two citation numbers.
+    /// surface the same page do not get two citation numbers. One domain contributes
+    /// at most `maxSourcesPerDomain` hits — see the constant for why rank order is
+    /// not a diversity policy.
     static func sources(from results: [Any], startingAt startNumber: Int = 1) -> [Source] {
         var hits: [(url: String, title: String, snippet: String, date: String?)] = []
         var seen: Set<String> = []
         for result in results {
             collect(result, into: &hits, seen: &seen, depth: 0)
         }
-        return hits.prefix(maxSources).enumerated().map { offset, hit in
+        var perDomain: [String: Int] = [:]
+        return hits.filter { hit in
+            let domain = domainKey(for: hit.url)
+            let count = perDomain[domain, default: 0]
+            guard count < maxSourcesPerDomain else { return false }
+            perDomain[domain] = count + 1
+            return true
+        }.prefix(maxSources).enumerated().map { offset, hit in
             Source(number: startNumber + offset,
                    url: hit.url,
                    title: hit.title,
@@ -48,7 +64,22 @@ enum EvidenceExtractor {
         }
     }
 
+    /// The registrable-looking host a hit counts against, lowercased and without a
+    /// leading `www.` — the same key `Source.domain` computes, taken here before any
+    /// `Source` exists.
+    private static func domainKey(for url: String) -> String {
+        guard let host = URLComponents(string: url)?.host?.lowercased() else { return url }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
     private static let maxDepth = 24
+
+    /// How many hits collection keeps before the domain cap and the final prefix cut.
+    /// Larger than `maxSources` on purpose: hits arrive in rank order, and if the top
+    /// 24 are one content farm mirroring itself, the diversity cap can only reach the
+    /// varied hits below them if they were collected. Four rounds' worth is generous
+    /// without being unbounded.
+    private static let maxCollected = maxSources * 4
 
     private typealias Hit = (url: String, title: String, snippet: String, date: String?)
 
@@ -56,7 +87,7 @@ enum EvidenceExtractor {
                                 into hits: inout [Hit],
                                 seen: inout Set<String>,
                                 depth: Int) {
-        guard depth <= maxDepth, hits.count < maxSources else { return }
+        guard depth <= maxDepth, hits.count < maxCollected else { return }
         switch value {
         case let dictionary as [String: Any]:
             var consumed: Set<String> = []
@@ -95,7 +126,7 @@ enum EvidenceExtractor {
             // summaries in one text block — and a link in prose is still evidence. Each
             // item around a link becomes a hit whose snippet is that item, so the model
             // sees the words the link came with rather than a bare address.
-            for hit in proseHits(in: text) where hits.count < maxSources && !seen.contains(hit.url) {
+            for hit in proseHits(in: text) where hits.count < maxCollected && !seen.contains(hit.url) {
                 seen.insert(hit.url)
                 hits.append(hit)
             }

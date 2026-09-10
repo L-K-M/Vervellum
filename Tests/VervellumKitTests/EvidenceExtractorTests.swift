@@ -37,6 +37,37 @@ final class EvidenceExtractorTests: XCTestCase {
         XCTAssertEqual(EvidenceExtractor.sources(from: [first, second]).count, 1)
     }
 
+    /// Search rank is not a diversity policy: one well-ranked domain can fill the top
+    /// of the list with several spellings of the same page, which the answer then
+    /// reads as independent agreement. The cap keeps any single voice a minority, and
+    /// the wider collection pool is what lets the varied hits below the farm in.
+    func testCapsOneDomainsShareOfTheList() {
+        let farm = (1...30).map { ["title": "Farm \($0)",
+                                   "url": "https://farm.example.com/\($0)"] }
+        let varied = (1...6).map { ["title": "Varied \($0)",
+                                    "url": "https://site\($0).example.org/\($0)"] }
+        let payload: [String: Any] = ["results": farm + varied]
+        let sources = EvidenceExtractor.sources(from: [payload])
+
+        XCTAssertEqual(sources.filter { $0.domain == "farm.example.com" }.count,
+                       EvidenceExtractor.maxSourcesPerDomain)
+        // The varied hits sat below 30 same-domain hits: only a pool wider than
+        // maxSources reaches them at all.
+        XCTAssertEqual(sources.count, EvidenceExtractor.maxSourcesPerDomain + 6)
+        // Order is preserved: the first four are the farm's top hits, then the rest.
+        XCTAssertEqual(sources.map(\.number), Array(1...sources.count))
+    }
+
+    /// The cap is a ceiling, not a quota: a topic that lives on one site keeps what
+    /// that site has, up to the cap.
+    func testADomainBelowTheCapKeepsEverything() {
+        let payload: [String: Any] = ["results": [
+            ["title": "One", "url": "https://docs.example.com/1"],
+            ["title": "Two", "url": "https://docs.example.com/2"],
+        ]]
+        XCTAssertEqual(EvidenceExtractor.sources(from: [payload]).count, 2)
+    }
+
     func testReadsHitsFromAnMCPTextBlock() {
         let inner = #"{"results":[{"title":"Inner","url":"https://c.example.com/3","snippet":"Three."}]}"#
         let payload: [String: Any] = ["content": [["type": "text", "text": inner]]]
