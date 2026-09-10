@@ -780,6 +780,270 @@ final class ResearchRunner: ResearchRunning {
         }
         trace.log("Assessment: \(assessment.findings.count) findings in "
                   + String(format: "%.1fs", trace.elapsed))
+        try Task.checkCancellation()
+
+        // 6 — revise, only when the check found something worth correcting.
+        try await revise(answer: answer, findings: assessment.findings, evidence: evidence,
+                         sources: sources, question: question, history: history,
+                         today: today, reading: plan.reading, chain: chain)
+    }
+
+    /// Whether a verdict sends the answer back for correction.
+    ///
+    /// `contradicted` is a factual error in prose the reader has already read, and
+    /// `mixed` is a claim stated more firmly than the sources will carry — both are the
+    /// answer being wrong about the evidence in front of it.
+    ///
+    /// `insufficient` is not one, and that is the whole difference between a stage that
+    /// runs occasionally and one that runs on nearly every turn. "The evidence does not
+    /// settle this" is a normal, correct thing for an answer to contain — the answer
+    /// prompt asks for exactly that hedge — so a finding of it is usually the check
+    /// agreeing with the answer rather than catching it out. The reviser is still *shown*
+    /// those findings, because a sentence it is already rewriting may need weakening on
+    /// the same grounds; it just will not be woken for one.
+    ///
+    /// A switch rather than a set, so a sixth verdict cannot be added without someone
+    /// deciding which side of this line it falls on.
+    static func warrantsRevision(_ verdict: Verdict) -> Bool {
+        switch verdict {
+        case .contradicted, .mixed: return true
+        case .supported, .insufficient, .opinion: return false
+        }
+    }
+
+    /// Whether a finding is *shown* to the reviser, which is a wider set than the one
+    /// that wakes it.
+    ///
+    /// A switch for the reason the one above is: `!= .supported && != .opinion` says the
+    /// same thing today and would silently absorb a sixth verdict into "shown", which is
+    /// a decision somebody should have to make rather than inherit. The two questions are
+    /// separate — a claim can be worth mentioning to a rewrite already under way without
+    /// being worth starting one for — so they are two switches rather than one.
+    static func isShownToReviser(_ verdict: Verdict) -> Bool {
+        switch verdict {
+        case .contradicted, .mixed, .insufficient: return true
+        case .supported, .opinion: return false
+        }
+    }
+
+    /// The answer with a fence that wraps the *whole* of it removed.
+    ///
+    /// The revise prompt forbids fencing the answer and models do it anyway — it is the
+    /// commonest way a "return the document and nothing else" instruction is misread. It
+    /// matters more here than at the answer stage, which streams into view where a
+    /// leading ``` is visible immediately: a revision is swapped in whole, and a fenced
+    /// one would replace good prose with a wall of monospace. Worse, the citation check
+    /// would pass it — a bracketed number inside a fence is code, not a citation, so a
+    /// fenced revision validates as an answer that cites nothing at all.
+    ///
+    /// Only an *undecorated* opening fence is unwrapped: ``` or one labelled `markdown`
+    /// or `md`. A fence naming a code language is a real code block, and an answer that
+    /// is genuinely nothing but one — rare, but the reviser is told to preserve what it
+    /// was given — must survive this untouched. An *unlabeled* fence is always read as
+    /// decoration, even when what it wraps is code: the bare ``` wrap is the commonest
+    /// thing this has to undo, and requiring a label to unwrap would give that up to
+    /// protect a shape — an unlabeled whole-answer code block — that the un-citing guard
+    /// downstream would refuse anyway.
+    ///
+    /// Two lines are enough, not three. A reply of nothing but an opening and closing
+    /// fence unwraps to the empty string and is caught by the emptiness guard in
+    /// `revise`; refusing to unwrap it left it non-empty, different from the draft, and
+    /// carrying no citation for the validator to object to — so it cleared every guard
+    /// and replaced a read answer with a bare fence. The `revise` guard rejects a reply
+    /// made of nothing but backticks for the same reason, which covers the one-line
+    /// spelling this cannot.
+    static func unwrappingWholeAnswerFence(_ answer: String) -> String {
+        // By `isNewline`, not by the character "\n". A Swift `Character` is a grapheme
+        // cluster and CR-LF is *one* of them, so a CRLF reply never matched the "\n"
+        // separator at all: the whole answer came back as a single line, `lines.count >=
+        // 2` failed, and the one function whose job is catching a fenced answer switched
+        // itself off for any provider or proxy that speaks CRLF. Trimming harder does not
+        // reach this — there were no lines to trim.
+        //
+        // Trimmed first, so a trailing line terminator does not leave an empty last line
+        // for the closer test to fail on. `revise` already hands this a trimmed string;
+        // doing it here too means the function is correct whoever calls it, rather than
+        // correct because of the order two lines happen to sit in.
+        let lines = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        guard lines.count >= 2, let first = lines.first, let last = lines.last
+        else { return answer }
+        // A fence is a *run* of three or more backticks, not exactly three — and reading
+        // only the three-tick spelling left the hole open exactly where it was widest.
+        // A model reaches for the longer form when the thing it is wrapping contains its
+        // own ``` block, which is the likeliest shape for a correction to arrive in and
+        // the one reason it would think to fence the answer at all.
+        // `whitespacesAndNewlines` rather than `whitespaces` as well, which the split
+        // above already makes unnecessary for CR — belt and braces for any other line
+        // terminator that reaches a line's edge without having split it.
+        let opener = first.trimmingCharacters(in: .whitespacesAndNewlines)
+        let openingTicks = opener.prefix(while: { $0 == "`" }).count
+        guard openingTicks >= 3 else { return answer }
+        let label = opener.dropFirst(openingTicks)
+            .trimmingCharacters(in: .whitespaces).lowercased()
+        guard label.isEmpty || label == "markdown" || label == "md" else { return answer }
+        // The closer is backticks and nothing else, and at least as long as the opener.
+        // A shorter run does not close the fence — it sits inside it, which is the whole
+        // point of opening a longer one.
+        let closer = last.trimmingCharacters(in: .whitespacesAndNewlines)
+        let closingTicks = closer.prefix(while: { $0 == "`" }).count
+        guard closingTicks >= openingTicks, closingTicks == closer.count
+        else { return answer }
+        return lines.dropFirst().dropLast().joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Rewrites the answer against the findings, when there are findings worth rewriting
+    /// for.
+    ///
+    /// Ordered after the assessment rather than folded into it, which is the only order
+    /// that keeps both halves honest: the check grades the answer that was actually
+    /// written, and the correction is made against a check that has actually run. The
+    /// cost is that the findings on screen describe the draft rather than the prose above
+    /// them — so the draft is kept in `draftAnswer`, and a notice says which is which.
+    ///
+    /// Everything here fails soft. A revision that does not arrive, comes back empty, or
+    /// breaks the citation rule leaves the turn exactly as the assessment left it: the
+    /// draft on screen, the findings that grade it below, and a notice saying the
+    /// correction did not land. The answer has already been streamed and read, and losing
+    /// it to a failed rewrite is the worst outcome available here. Cancellation still
+    /// propagates, because a Stop is a Stop.
+    private func revise(answer: String,
+                        findings: [Finding],
+                        evidence: [[String: Any]],
+                        sources: [Source],
+                        question: String,
+                        history: [ResearchTurn],
+                        today: String,
+                        reading: String,
+                        chain: ModelChain) async throws {
+        let revisable = findings.filter { Self.warrantsRevision($0.verdict) }
+        guard !revisable.isEmpty else { return }
+
+        // Every finding the check left unsettled, not only the ones that triggered this.
+        // The trigger decides whether the call is worth making; once it is being made,
+        // the reviser should see the whole of what the check was unsure about.
+        let unsettled = findings
+            .filter { Self.isShownToReviser($0.verdict) }
+            .map { finding -> [String: Any] in
+                ["claim": finding.claim,
+                 "verdict": finding.verdict.rawValue,
+                 "reasoning": finding.reasoning,
+                 "sources": finding.sourceNumbers]
+            }
+        trace.log("Revising: \(revisable.count) claim(s) the evidence does not carry")
+        // `trace.elapsed` counts from the start of the *run*, so the figure logged at
+        // the end has to be a difference. Reporting it raw would say "revised the answer
+        // in 47 seconds" about a turn that spent 45 of them searching — and how long this
+        // stage costs is the number the decision to have it at all rests on.
+        let began = trace.elapsed
+        update { $0.isRevising = true }
+        // Cleared on every path out, including the ones that keep the draft: a label
+        // saying a request is outstanding must not outlive the request.
+        defer { update { $0.isRevising = false } }
+
+        let context = ResearchContext.assemble(
+            question: question, history: history, today: today,
+            extra: ["answer": answer, "evidence": evidence,
+                    "reading": reading, "findings": unsettled])
+        if context.trimmed { update { $0.addNotice(.contextTrimmed) } }
+
+        let revised: String
+        do {
+            revised = try await chain.perform("Revise") { chat in
+                // Streamed for the reason every long call here is — a provider that dies
+                // halfway is retried — but into nothing. The draft stays on screen until
+                // the whole correction has arrived and been checked, because text that
+                // rewrites itself under a reader mid-paragraph is worse than text that
+                // changes once.
+                try await chat.streamText(system: ResearchPrompts.revise,
+                                          payload: context.payload, label: "Revise") { _ in }
+            }
+        } catch {
+            // Every error that is not a Stop, not only the ones this file knows how to
+            // name. "Fails soft" was written above as a promise and matching on
+            // `ResearchError` alone did not keep it: anything else — a transport error
+            // that escaped wrapping, an encoding failure assembling the payload — would
+            // propagate out of here and fail a turn whose answer had already been
+            // streamed, validated, read and assessed. That is the outcome this whole
+            // function is arranged to avoid, arriving through the one path that was not
+            // covered.
+            let stopped = Task.isCancelled
+                || error is CancellationError
+                || (error as? ResearchError) == ResearchError.cancelled
+            guard !stopped else { throw error }
+            // `safeLabel`, not the error's own description: an unknown error can carry a
+            // URL with a query string or a path in it, and this trace is written to a
+            // log the user may paste somewhere. A type name says enough to debug with.
+            trace.warn("Revision unavailable: \(ResearchError.safeLabel(for: error))")
+            update { $0.addNotice(.revisionUnavailable) }
+            return
+        }
+
+        // The reply arrived; a Stop may have arrived with it. Everything below mutates
+        // the turn, and the catch above only covers a cancellation thrown *by* the call.
+        try Task.checkCancellation()
+        // `corrected`, not `trimmed`: the two lines that matter in this function read
+        // `turn.draftAnswer = answer` and `turn.answer = corrected`, and under the old
+        // name a skimming reader had to work out which of the two was the rewrite — at
+        // the one assignment where getting it backwards silently discards the correction.
+        let corrected = Self.unwrappingWholeAnswerFence(
+            revised.trimmingCharacters(in: .whitespacesAndNewlines))
+        // Nothing in it, or nothing in it but fence. A reply of a lone ``` is not caught
+        // by unwrapping — there is no closing line to pair it with — and would otherwise
+        // read as a perfectly valid revision: non-empty, different from the draft, and
+        // citing nothing for the validator to object to.
+        guard corrected.contains(where: { !$0.isWhitespace && $0 != "`" }) else {
+            // A reply with no content in it is a call that failed and happened to return.
+            trace.warn("Revision unavailable: the reply was empty")
+            update { $0.addNotice(.revisionUnavailable) }
+            return
+        }
+        guard corrected != answer.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            // The reviser read the findings and judged that none of them warranted a
+            // change, which is a real answer and not a failure — and not a revision
+            // either. Nothing is said, because nothing happened.
+            trace.log("Revision returned the answer unchanged")
+            return
+        }
+        // The citation rule is not advice here. A correction that invents a source
+        // number, or writes a URL the answer stage would have been refused, is a worse
+        // answer than the one it replaces — and it would arrive *after* the validation
+        // the reader's trust in these numbers rests on. So it is checked before it is
+        // accepted, and dropped whole rather than swapped in and annotated.
+        let validation = CitationValidator.validate(answer: corrected, sourceCount: sources.count)
+        // Un-citing is the quiet half of the same failure. A reviser that hedges a claim
+        // by dropping its `[n]` rather than weakening its words hands back prose that
+        // reads as confident and rests on nothing — and every check above would pass it,
+        // because there is no bad number to find. Measured against the draft, so an
+        // answer that never cited anything is not held to a standard it never met.
+        let draftCitedSomething = !CitationValidator
+            .validate(answer: answer, sourceCount: sources.count)
+            .citedSourceIndices.isEmpty
+        let revisionCitedSomething = !validation.citedSourceIndices.isEmpty
+        guard validation.outOfRangeCitations.isEmpty,
+              validation.literalURLs.isEmpty,
+              !draftCitedSomething || revisionCitedSomething
+        else {
+            // Which clause fired, because the three are different stories. Two are a
+            // reviser breaking a rule it was given; the third is the un-citing guard,
+            // which is the only one that can also refuse a *correct* rewrite — one that
+            // weakened every flagged claim and legitimately dropped its numbers. It fails
+            // soft either way, so the only way to know how often that happens is to say
+            // which branch it was.
+            let broken = !validation.outOfRangeCitations.isEmpty ? "a source number that does not exist"
+                : !validation.literalURLs.isEmpty ? "a URL in the prose"
+                : "no citation at all, where the draft had one"
+            trace.warn("Revision discarded: \(broken)")
+            update { $0.addNotice(.revisionUnavailable) }
+            return
+        }
+        update { turn in
+            turn.draftAnswer = answer
+            turn.answer = corrected
+            turn.addNotice(.answerRevised)
+        }
+        trace.log("Revised the answer in " + String(format: "%.1fs", trace.elapsed - began))
     }
 
     /// How much of a linked page the *planner* is shown. The answer sees the whole

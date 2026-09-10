@@ -192,6 +192,18 @@ enum TurnNotice: String, Codable, Equatable {
     case unreadableVerdictDropped
     /// The assessment call failed, so the answer's claims were never checked.
     case assessmentUnavailable
+    /// The check found claims the evidence contradicts or only half-supports, and the
+    /// answer above was rewritten against them.
+    case answerRevised
+    /// The check found claims worth correcting and the rewrite could not be used — it
+    /// did not arrive, came back empty, or broke the citation rule and was discarded. So
+    /// the answer above is the draft the findings grade.
+    ///
+    /// One case for all three, because the reader's position is the same in each and
+    /// there is nothing different for them to do. The three are told apart in the trace,
+    /// which is where the difference matters: a rewrite discarded for inventing a source
+    /// number will keep being discarded, and a provider that timed out will not.
+    case revisionUnavailable
     /// Page reading was on, but no page could be read — so every source is a summary,
     /// exactly as if it were off.
     case noPagesRead
@@ -242,6 +254,13 @@ enum TurnNotice: String, Codable, Equatable {
         case .assessmentUnavailable:
             return "The answer's claims could not be checked, because the assessment call failed. "
                 + "Nothing below the answer has been verified."
+        case .answerRevised:
+            return "The check found claims the evidence does not carry, and the answer was "
+                + "rewritten against them. The findings below grade the first draft, which "
+                + "is what they were written about."
+        case .revisionUnavailable:
+            return "The check found claims worth correcting, but the rewrite could not be "
+                + "used. The answer above is the draft the findings below describe."
         case .noPagesRead:
             return "No page could be read in full, so every source below is a search summary. "
                 + "A summary cannot show that a page says what the answer claims it says."
@@ -319,8 +338,26 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// stored property with no `CodingKeys` case: never written, never read, zero on
     /// every turn that comes back from disk.
     var pagesInFlight: Int = 0
-    /// The streamed markdown answer, with `[n]` citations.
+    /// The streamed markdown answer, with `[n]` citations. When a revision replaced it,
+    /// this is the revised text — what the reader is shown is always what the turn now
+    /// stands behind.
     var answer: String = ""
+    /// The answer as first written, kept only when the revision stage replaced it.
+    ///
+    /// Nil on every turn that was never revised, which is most of them. It exists so the
+    /// findings below stay readable: they grade the draft, and a table saying "this claim
+    /// is contradicted" over prose that no longer makes the claim is a table that looks
+    /// broken. Keeping the draft is what lets the two be shown as what they are — a
+    /// check, and what it changed.
+    var draftAnswer: String?
+    /// Whether a revision call is outstanding right now.
+    ///
+    /// Transient in the same sense as `pagesInFlight`, and omitted from `CodingKeys` for
+    /// the same reason: a document is a record of a turn that has stopped, so nothing on
+    /// disk can be evidence that a request is in flight. It reports through
+    /// `runningProgressLabel` rather than through a `ResearchStage` case, because a new
+    /// case is a value an older build cannot decode — see the note on that method.
+    var isRevising = false
     var findings: [Finding] = []
     var limitations: String = ""
     var followups: [String] = []
@@ -367,7 +404,8 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id, question, askedAt, stage, reading, searches, searchesCompleted, sources
         case pagesAttempted, pagesRead
-        case answer, findings, limitations, followups, notices, failure, duration, model
+        case answer, draftAnswer, findings, limitations, followups, notices, failure
+        case duration, model
     }
 
     init(from decoder: Decoder) throws {
@@ -387,6 +425,9 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         // for the initializer's sake and to say so at the point someone would look.
         pagesInFlight = 0
         answer = try container.decode(String.self, forKey: .answer)
+        draftAnswer = try container.decodeIfPresent(String.self, forKey: .draftAnswer)
+        // Not decoded, and not encoded either — see `isRevising` and `pagesInFlight`.
+        isRevising = false
         findings = try container.decode([Finding].self, forKey: .findings)
         limitations = try container.decode(String.self, forKey: .limitations)
         followups = try container.decode([String].self, forKey: .followups)
@@ -432,6 +473,19 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         if pagesInFlight > 0 {
             return "Reading \(pagesInFlight) page\(pagesInFlight == 1 ? "" : "s")"
         }
+        // Below the fetches and above the stage, because it happens inside `.assessing`
+        // and is the more specific truth while it lasts: the claims have been checked,
+        // and the answer is being rewritten against what the check found.
+        //
+        // Gated on the stage as well as the flag. The runner clears the flag on every
+        // way out of the revision, so a set flag outside `.assessing` is already a bug —
+        // and the cost of that bug is a turn that says it is revising for as long as it
+        // is on screen, which is a lie told by the one label that exists to say where the
+        // run actually is.
+        // Below the fetches, which is safe rather than lucky: every read this turn makes
+        // happens in `.planning` or `.searching`, so nothing is outstanding by the time
+        // `.assessing` is reached and the two branches cannot both be true.
+        if isRevising, stage == .assessing { return "Revising the answer" }
         guard case .searching = stage else { return stage.label }
         if !searches.isEmpty, searchesCompleted < searches.count {
             let attempted = min(max(searchesCompleted, 1), searches.count)

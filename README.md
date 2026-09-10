@@ -25,6 +25,12 @@ runs the searches and answers based on current sources.
 - **Claims get a separate assessment.** Findings are *supported*, *contradicted*,
   *mixed*, *not established*, or *opinion*. The first three require citations.
   Failed assessments retain the answer with a warning, not a verified verdict.
+- **A faulted answer is corrected, not just annotated.** When the check finds a claim
+  the evidence contradicts or only half-supports, the answer is sent back once to be
+  fixed against the same evidence — a correction of the sentences the findings name,
+  not a rewrite. The first draft is kept, because the findings below grade the draft.
+  A correction that never arrives, or that breaks the citation rule, is dropped and
+  the draft stands with a warning.
 - **Finding nothing is a result.** *Not established* is a normal outcome, not an
   error state. It gives the model a place to put a claim the evidence doesn't
   support.

@@ -72,7 +72,7 @@ final class ResearchRunnerTests: XCTestCase {
     /// also a small guard on the prompts themselves: a stage that stopped sending the
     /// prompt it is named for would stop being routed here.
     private enum Stage {
-        case plan, deepPlan, answer, assess
+        case plan, deepPlan, answer, assess, revise
     }
 
     private static func stage(of call: StubTransport.Call) -> Stage? {
@@ -88,6 +88,11 @@ final class ResearchRunnerTests: XCTestCase {
             return .answer
         }
         if prompt.contains("TASK: assess the material claims") { return .assess }
+        // Answered before this one and by a longer phrase, because both stages talk
+        // about "the answer": the revision prompt repeats the citation rule "exactly as
+        // it was for the answer", and a looser answer test would swallow it and feed the
+        // revision the answer's script.
+        if prompt.contains("TASK: correct an answer you are given") { return .revise }
         return nil
     }
 
@@ -114,6 +119,27 @@ final class ResearchRunnerTests: XCTestCase {
             "followups": ["What does the other side say?"],
         ]
     }()
+
+    /// An assessment with one finding of the given verdict, for the revision tests.
+    private static func assessment(verdict: String,
+                                   claim: String = "Parallax is measured in arcseconds.",
+                                   sources: [Int] = [1],
+                                   alongside: [(verdict: String, claim: String)] = [])
+        -> [String: Any] {
+        func finding(_ verdict: String, _ claim: String) -> [String: Any] {
+            [
+                "claim": claim,
+                "verdict": verdict,
+                "reasoning": "What the evidence does and does not carry.",
+                "sources": sources,
+            ]
+        }
+        // `alongside` exists so a fixture can carry a second verdict. Every one of these
+        // used to hold exactly one finding, which meant `isShownToReviser` was only ever
+        // asked what it returns and never what it *does*.
+        return ["findings": [finding(verdict, claim)] + alongside.map { finding($0.verdict, $0.claim) },
+                "limitations": "", "followups": []]
+    }
 
     // MARK: A whole turn
 
@@ -625,5 +651,385 @@ final class ResearchRunnerTests: XCTestCase {
         // not the URLs, because this call chooses queries and cites nothing.
         let roundTwo = try XCTUnwrap(plans.first?.userContent)
         XCTAssertTrue(roundTwo.contains("Hit for first"), roundTwo)
+    }
+
+    // MARK: Revision
+
+    /// Everything the revision stage needs, with the answer and the revision scripted
+    /// separately so a test can say what each one returns.
+    ///
+    /// The verdict is passed as a string rather than a built assessment, so the route
+    /// closure captures nothing that is not `Sendable` — the same reason every other
+    /// fixture here is reached through `Self.` instead of captured.
+    private func revisionTransport(verdict: String,
+                                   claim: String = "Parallax is measured in arcseconds.",
+                                   alongside: [(verdict: String, claim: String)] = [],
+                                   answer: [String],
+                                   revision: StubTransport.Reply?) -> StubTransport {
+        StubTransport { call in
+            switch call.kind {
+            case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
+                switch Self.stage(of: call) {
+                case .plan: return .completion(json: Self.plan("stellar parallax"))
+                case .assess:
+                    return .completion(json: Self.assessment(verdict: verdict, claim: claim,
+                                                            alongside: alongside))
+                default: return .unrouted
+                }
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "https://a.example/one", title: "One")]))
+            case .fetch:
+                return .html("<p>The page text.</p>")
+            case .stream:
+                switch Self.stage(of: call) {
+                case .answer: return .stream(answer)
+                case .revise: return revision ?? .unrouted
+                default: return .unrouted
+                }
+            default:
+                return .unrouted
+            }
+        }
+    }
+
+    /// The whole point of the stage: a claim the evidence contradicts does not stay on
+    /// screen. The draft is kept because the findings below it grade the draft — a table
+    /// saying "contradicted" over prose that no longer makes the claim reads as broken.
+    func testAContradictedClaimIsRewrittenAndTheDraftIsKept() async throws {
+        let transport = revisionTransport(
+            verdict: "contradicted",
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .stream(["Parallax is measured in arcseconds [1]."]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "Parallax is measured in arcseconds [1].")
+        XCTAssertEqual(turn.draftAnswer, "Parallax is measured in degrees [1].")
+        XCTAssertTrue(turn.notices.contains(.answerRevised), "\(turn.notices)")
+        XCTAssertFalse(turn.isRevising, "the label outlived the request")
+        // The findings outlive the rewrite they caused, which is the whole reason the
+        // draft is kept: they grade the draft, and a table with nothing in it under a
+        // notice saying the answer was corrected explains nothing.
+        XCTAssertEqual(turn.findings.count, 1,
+                       "the grading table should outlive the rewrite it caused")
+
+        // What the reviser was actually sent, because a stage that ran on the wrong
+        // material would pass every assertion above.
+        let revise = try XCTUnwrap(transport.calls.first { Self.stage(of: $0) == .revise })
+        let sent = try XCTUnwrap(revise.userContent)
+        XCTAssertTrue(sent.contains("Parallax is measured in degrees"), sent)
+        // The finding's own claim, not the verdict word — the revise prompt explains
+        // what "contradicted" means, so matching that alone would pass on the template
+        // even if the findings payload had been dropped entirely.
+        XCTAssertTrue(sent.contains("Parallax is measured in arcseconds."), sent)
+        XCTAssertTrue(sent.contains("contradicted"), sent)
+    }
+
+    /// `mixed` is the other verdict that sends an answer back, and nothing else here
+    /// pins that a valid rewrite under it is *accepted*: the citation test proves only
+    /// that it triggers an attempt. A change that gated the stage on `contradicted`
+    /// alone would pass every other test in this section.
+    func testAMixedVerdictIsRevisedAndKeepsItsDraft() async throws {
+        let transport = revisionTransport(
+            verdict: "mixed",
+            claim: "The answer gives the unit as degrees.",
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .stream(["Parallax is measured in arcseconds [1]."]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "Parallax is measured in arcseconds [1].")
+        XCTAssertEqual(turn.draftAnswer, "Parallax is measured in degrees [1].")
+        XCTAssertTrue(turn.notices.contains(.answerRevised), "\(turn.notices)")
+    }
+
+    /// The mirror, and the reason the claim above is true in both directions. Without it
+    /// a *new* verdict that warrants a revision would land in neither loop: this one
+    /// filters it out, and the named tests above only ever say "contradicted" and
+    /// "mixed". A gate that drifted from `warrantsRevision` for that verdict would fail
+    /// nothing.
+    func testEveryVerdictThatWarrantsRevisionSendsTheAnswerBack() async throws {
+        let sentBack = Verdict.allCases
+            .filter { ResearchRunner.warrantsRevision($0) }
+            .map(\.rawValue)
+        XCTAssertFalse(sentBack.isEmpty, "nothing warrants a revision any more")
+
+        for verdict in sentBack {
+            let transport = revisionTransport(
+                verdict: verdict,
+                answer: ["Parallax is measured in degrees [1]."],
+                revision: .stream(["Parallax is measured in arcseconds [1]."]))
+
+            let turn = await run("How is stellar parallax measured?", transport: transport)
+
+            XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+            XCTAssertTrue(transport.calls.contains { Self.stage(of: $0) == .revise },
+                          "\(verdict) never sent the answer back")
+            XCTAssertEqual(turn.draftAnswer, "Parallax is measured in degrees [1].", verdict)
+            // And that the rewrite was *taken*, not merely asked for. This loop is the
+            // only cover a sixth verdict would have, and a runner that woke the stage,
+            // kept the draft and then discarded every result would have passed it while
+            // leaving the contradicted prose on screen.
+            XCTAssertEqual(turn.answer, "Parallax is measured in arcseconds [1].", verdict)
+            XCTAssertTrue(turn.notices.contains(.answerRevised),
+                          "\(verdict) rewrote the answer without saying so")
+        }
+    }
+
+    /// What the reviser is shown, as opposed to what wakes it.
+    ///
+    /// `isShownToReviser` had its return value pinned and its effect not. Every fixture
+    /// in this section carried exactly one finding, so a runner that woke on
+    /// `contradicted` and then poured the whole findings array into the prompt would
+    /// have passed all of them — the predicate would have been dead code with a green
+    /// suite beside it. An `insufficient` claim rides along; a `supported` one has
+    /// nothing to correct and must not be offered as though it did.
+    func testOnlyTheFindingsWorthShowingReachTheReviser() async throws {
+        let transport = revisionTransport(
+            verdict: "contradicted",
+            alongside: [("insufficient", "The distance is under ten parsecs."),
+                        ("supported", "Parallax is an angle.")],
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .stream(["Parallax is measured in arcseconds [1]."]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        let revise = try XCTUnwrap(transport.calls.first { Self.stage(of: $0) == .revise })
+        let sent = try XCTUnwrap(revise.userContent)
+        XCTAssertTrue(sent.contains("The distance is under ten parsecs."),
+                      "an unsettled claim rides along: \(sent)")
+        XCTAssertFalse(sent.contains("Parallax is an angle."),
+                       "a supported claim has nothing to correct: \(sent)")
+    }
+
+    /// The two switches, read directly. One decides whether a finding *wakes* the stage,
+    /// the other whether it is *shown* to a rewrite already under way — and the whole
+    /// reason they are switches rather than set membership is that a sixth verdict has to
+    /// be decided about twice. This is what notices if one of them quietly grows a
+    /// `default`.
+    func testWhichVerdictsWakeTheReviserAndWhichAreMerelyShownToIt() {
+        // As sets: which verdicts are in each answer is the contract, and the order
+        // `allCases` happens to list them in is not. Compared as arrays, renaming or
+        // reordering a case in `Verdict` — a change with no behaviour in it — turned this
+        // red as though a switch had grown a `default`. A sixth verdict still breaks it,
+        // which is the property worth keeping.
+        XCTAssertEqual(Set(Verdict.allCases.filter(ResearchRunner.warrantsRevision)),
+                       [.contradicted, .mixed])
+        XCTAssertEqual(Set(Verdict.allCases.filter(ResearchRunner.isShownToReviser)),
+                       [.contradicted, .mixed, .insufficient])
+    }
+
+    /// A reviser that fences the whole answer would otherwise replace good prose with a
+    /// wall of monospace — and the citation check would pass it, because a bracketed
+    /// number inside a fence is code rather than a citation.
+    func testAWholeAnswerWrappedInAFenceIsUnwrapped() {
+        let fenced = "```markdown\nParallax is measured in arcseconds [1].\n```"
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence(fenced),
+                       "Parallax is measured in arcseconds [1].")
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("```\nOne\nTwo\n```"),
+                       "One\nTwo")
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("```md\nText [1].\n```"),
+                       "Text [1].", "`md` is the other spelling of a prose wrapper")
+
+        // A fence naming a *code* language — unlike the `markdown` wrapper the first
+        // assertion unwraps — is a real code block, and an answer that is nothing but one
+        // has to survive: the reviser is told to return what it was given where the
+        // findings name nothing.
+        let code = "```swift\nlet x = 1\n```"
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence(code), code)
+        // And a fence that closes in the middle is not a wrapper at all.
+        let partial = "Text.\n```\nlet x = 1\n```\nMore text."
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence(partial), partial)
+
+        // A fence with nothing between its halves unwraps to nothing, which is what
+        // hands it to the emptiness guard. Left alone it was non-empty, different from
+        // the draft, and cited nothing for the validator to object to — so it cleared
+        // every check and replaced a read answer with two rows of backticks.
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("```\n```"), "")
+
+        // Four backticks, which is what a model reaches for when the prose it is
+        // wrapping has its own three-tick block in it — the likeliest shape of all for a
+        // correction, and the one a three-tick-only reading let straight through.
+        XCTAssertEqual(
+            ResearchRunner.unwrappingWholeAnswerFence(
+                "````markdown\nText [1].\n\n```swift\nlet x = 1\n```\n````"),
+            "Text [1].\n\n```swift\nlet x = 1\n```",
+            "the inner block is content, not fence")
+        // A closer shorter than its opener does not close anything — it sits inside the
+        // fence, which is the whole reason for opening a longer one.
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence("````\nText.\n```"),
+                       "````\nText.\n```")
+
+        // CRLF, which switched the whole function off — and not for the reason it
+        // looked like. A Swift `Character` is a grapheme cluster and CR-LF is one of
+        // them, so splitting on the character "\n" never matched a CRLF break at all:
+        // the answer arrived as a single line and the two-line guard turned the function
+        // into a no-op. Splitting by `isNewline` is what fixes it; no amount of trimming
+        // would have.
+        XCTAssertEqual(
+            ResearchRunner.unwrappingWholeAnswerFence("```markdown\r\nText [1].\r\n```"),
+            "Text [1].")
+        // A lone trailing CR after the closing fence is still just a line terminator.
+        XCTAssertEqual(
+            ResearchRunner.unwrappingWholeAnswerFence("```\r\nText [1].\r\n```\r\n"),
+            "Text [1].")
+        let crlfCode = "```swift\r\nlet x = 1\r\n```"
+        XCTAssertEqual(ResearchRunner.unwrappingWholeAnswerFence(crlfCode), crlfCode,
+                       "a code fence survives, CRLF or not")
+    }
+
+    /// The unwrapper is pinned above; this pins that the revision path still calls it.
+    /// A disconnected call site would either drop a wall of monospace on the reader or
+    /// discard a good rewrite, and every other test in this section would stay green —
+    /// the fenced replies they use are degenerate ones that fail the emptiness guard
+    /// whether they were unwrapped or not.
+    func testAFencedValidRevisionIsUnwrappedAndAccepted() async {
+        let transport = revisionTransport(
+            verdict: "contradicted",
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .stream(["```markdown\nParallax is measured in arcseconds [1].\n```"]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "Parallax is measured in arcseconds [1].")
+        XCTAssertEqual(turn.draftAnswer, "Parallax is measured in degrees [1].")
+        XCTAssertTrue(turn.notices.contains(.answerRevised), "\(turn.notices)")
+    }
+
+    /// The one-line spelling of the same degenerate reply, which unwrapping cannot see —
+    /// there is no closing line to pair the opening one with — so the guard that catches
+    /// it is the one asking whether anything but backticks came back.
+    func testAReplyOfNothingButFenceIsNotARevision() async throws {
+        let transport = revisionTransport(
+            verdict: "contradicted",
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .stream(["```"]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "Parallax is measured in degrees [1].")
+        XCTAssertNil(turn.draftAnswer)
+        XCTAssertTrue(turn.notices.contains(.revisionUnavailable), "\(turn.notices)")
+    }
+
+    /// Dropping every citation is the quiet half of breaking the citation rule: the prose
+    /// still reads as confident and now rests on nothing, and no check above this one has
+    /// a bad number to catch.
+    func testARevisionThatStripsEveryCitationIsDiscarded() async throws {
+        let transport = revisionTransport(
+            verdict: "mixed",
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .stream(["Parallax is measured in arcseconds, though sources vary."]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "Parallax is measured in degrees [1].")
+        XCTAssertNil(turn.draftAnswer)
+        XCTAssertTrue(turn.notices.contains(.revisionUnavailable), "\(turn.notices)")
+    }
+
+    /// The common case, and the one that decides whether this stage costs a call on
+    /// every turn. A `supported` finding is the check agreeing with the answer, and an
+    /// `insufficient` one is usually the check agreeing with a hedge the answer prompt
+    /// asked for — neither is the answer being wrong about its evidence.
+    func testAnAnswerTheCheckDidNotFaultIsNeverSentBackForRevision() async throws {
+        // Derived from the runner's own rule rather than listed here, so a sixth verdict
+        // is covered the day it is added: whichever side of `warrantsRevision` it lands
+        // on, this loop or its mirror above takes it, and it cannot fall between them.
+        let accepted = Verdict.allCases
+            .filter { !ResearchRunner.warrantsRevision($0) }
+            .map(\.rawValue)
+        // A derived loop can pass by running nothing. If every verdict came to warrant a
+        // revision, the filter would empty and this test would go green while checking
+        // the opposite of what it is named for.
+        XCTAssertFalse(accepted.isEmpty, "no verdict is left that does not warrant a revision")
+        for verdict in accepted {
+            let transport = revisionTransport(
+                verdict: verdict,
+                answer: ["Parallax is measured in arcseconds [1]."],
+                revision: nil)
+
+            let turn = await run("How is stellar parallax measured?", transport: transport)
+
+            XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+            XCTAssertNil(turn.draftAnswer, "\(verdict) sent the answer back for rewriting")
+            XCTAssertTrue(transport.calls.allSatisfy { Self.stage(of: $0) != .revise },
+                          "\(verdict) spent a model call")
+            XCTAssertFalse(turn.notices.contains(.answerRevised),
+                           "\(verdict) announced a revision")
+        }
+    }
+
+    /// A correction that breaks the citation rule is worse than the answer it replaces,
+    /// and it arrives *after* the validation the reader's trust in these numbers rests
+    /// on. So it is checked before it is accepted, and dropped whole.
+    func testARevisionThatBreaksTheCitationRuleIsDiscarded() async throws {
+        for bad in ["Parallax is measured in arcseconds [7].",
+                    "Parallax is measured in arcseconds, see https://a.example/one."] {
+            let transport = revisionTransport(
+                verdict: "mixed",
+                answer: ["Parallax is measured in degrees [1]."],
+                revision: .stream([bad]))
+
+            let turn = await run("How is stellar parallax measured?", transport: transport)
+
+            XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+            XCTAssertEqual(turn.answer, "Parallax is measured in degrees [1].",
+                           "\(bad): a revision that broke the rule reached the screen")
+            XCTAssertNil(turn.draftAnswer, "\(bad): the discarded revision replaced the draft")
+            XCTAssertTrue(turn.notices.contains(.revisionUnavailable), "\(turn.notices)")
+            XCTAssertFalse(turn.notices.contains(.answerRevised))
+            // And the answer keeps the notices its own validation earned, rather than
+            // the discarded revision's.
+            XCTAssertFalse(turn.notices.contains(.invalidCitation), "\(turn.notices)")
+            XCTAssertFalse(turn.notices.contains(.literalURL), "\(turn.notices)")
+        }
+    }
+
+    /// The reviser reading the findings and judging that none of them warrants a change
+    /// is a real answer, not a failure — and not a revision either. Nothing is said,
+    /// because nothing happened.
+    func testARevisionThatChangesNothingIsNotAnnouncedAsOne() async throws {
+        let transport = revisionTransport(
+            verdict: "mixed",
+            answer: ["Parallax is measured in arcseconds [1]."],
+            revision: .stream(["Parallax is measured in arcseconds [1].\n"]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "Parallax is measured in arcseconds [1].")
+        XCTAssertNil(turn.draftAnswer)
+        XCTAssertFalse(turn.notices.contains(.answerRevised), "\(turn.notices)")
+        XCTAssertFalse(turn.notices.contains(.revisionUnavailable), "\(turn.notices)")
+    }
+
+    /// The answer has been streamed, validated and read by the time this stage runs.
+    /// Losing it to a rewrite that never arrived is the worst outcome available here, so
+    /// a failed revision leaves the turn exactly as the assessment left it — and says so.
+    func testAFailedRevisionKeepsTheAnswerAndSaysTheCorrectionDidNotLand() async throws {
+        let transport = revisionTransport(
+            verdict: "contradicted",
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .failure(ResearchError("the provider gave up")))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete,
+                       "a failed revision must not fail the turn: "
+                        + (turn.failure ?? "no failure recorded"))
+        XCTAssertEqual(turn.answer, "Parallax is measured in degrees [1].")
+        XCTAssertNil(turn.draftAnswer)
+        XCTAssertTrue(turn.notices.contains(.revisionUnavailable), "\(turn.notices)")
+        XCTAssertFalse(turn.isRevising)
+        // The findings are still there: the check ran, and what it found is the reason
+        // the reader is being told the correction is missing.
+        XCTAssertEqual(turn.findings.count, 1)
     }
 }

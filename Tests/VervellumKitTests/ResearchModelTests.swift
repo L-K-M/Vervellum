@@ -387,6 +387,10 @@ final class ResearchModelTests: XCTestCase {
         turn.sources = [Source(number: 1, url: "https://example.com", title: "T", snippet: "S")]
         turn.findings = [Finding(claim: "C", verdict: .mixed, reasoning: "R", sourceNumbers: [1])]
         turn.notices = [.contextTrimmed]
+        // The revision keeps the draft so the findings above stay readable. A field that
+        // went missing from the document would leave the table annotating prose that no
+        // longer makes the claims — the exact thing keeping it prevents.
+        turn.draftAnswer = "An answer that was wrong [1]."
         turn.searches = [try XCTUnwrap(PlannedSearch(purpose: "p", arguments: ["q": "x"]))]
         turn.duration = 12.5
 
@@ -402,9 +406,44 @@ final class ResearchModelTests: XCTestCase {
         let decoded = try decoder.decode(ThreadLibrary.self, from: encoder.encode(library))
 
         XCTAssertEqual(decoded.threads.first?.turns.first?.answer, "An answer [1].")
+        XCTAssertEqual(decoded.threads.first?.turns.first?.draftAnswer,
+                       "An answer that was wrong [1].")
         XCTAssertEqual(decoded.threads.first?.turns.first?.findings.first?.verdict, .mixed)
         XCTAssertEqual(decoded.threads.first?.turns.first?.notices, [.contextTrimmed])
         XCTAssertEqual(decoded.threads.first?.turns.first?.searches.first?.displayQuery, "x")
+    }
+
+    /// The upgrade path, which the round trip above cannot see: it writes the field and
+    /// reads it back, so it would pass just as happily if a document *without* the field
+    /// were undecodable. Every thread saved before the revision stage existed is such a
+    /// document, and a `keyNotFound` here would take the whole library with it on the
+    /// first launch after the update.
+    func testATurnSavedBeforeTheRevisionStageStillLoads() throws {
+        var turn = ResearchTurn(question: "Q")
+        turn.stage = .complete
+        turn.answer = "An answer [1]."
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: try encoder.encode(turn)) as? [String: Any])
+        // The document as an older build wrote it: no such key at all, rather than null.
+        object.removeValue(forKey: "draftAnswer")
+        // And a key no build writes, put there on purpose. `isRevising` is transient —
+        // it has no `CodingKeys` case — so asserting it decodes false out of a document
+        // this test encoded proves nothing: the encoder never wrote it either way. A
+        // document that *does* carry it is the only thing that can tell "never written"
+        // apart from "written and read back", and the second would strand a turn saved
+        // mid-revision on "Revising…" for the rest of its life.
+        object["isRevising"] = true
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(
+            ResearchTurn.self, from: try JSONSerialization.data(withJSONObject: object))
+
+        XCTAssertEqual(decoded.answer, "An answer [1].")
+        XCTAssertNil(decoded.draftAnswer)
+        XCTAssertFalse(decoded.isRevising, "a persisted flag would outlive its request")
     }
 
     /// Retry has to know how a turn was asked, and the document does not store it: a
