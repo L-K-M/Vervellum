@@ -6,13 +6,23 @@ import SwiftUI
 /// it. But process detail is also the fastest way to turn a panel into noise, so it
 /// obeys one rule: **loud while it is happening, one quiet line once it is done.**
 ///
-/// While a turn runs the stages are named as they complete, because a 40-second wait
-/// with a spinner feels broken and the same wait with "searching the web · 3 of 4"
-/// feels like work. Once the answer lands the whole thing collapses to a summary the
-/// user can expand if they want to audit it.
+/// While a turn runs the stage is named as it changes, because a 40-second wait with a
+/// spinner feels broken and the same wait with "searching the web · 3 of 4" feels like
+/// work. That live line is the whole of it: the queries behind it are a dozen rows of
+/// text that push the answer off the screen at exactly the moment it arrives, so they
+/// wait behind a disclosure like everything else. One line running, one line done, and
+/// the detail one click away in both.
+///
+/// The disclosure was previously forced open for the duration of a run, which meant it
+/// also shut itself the moment the answer landed. It no longer does either, and the
+/// consequence is deliberate: a reader who opens the queries mid-run still has them
+/// open afterwards. Closing what somebody opened, because a background task they were
+/// not watching finished, is the panel deciding it knows better — and the one click it
+/// saves is the same click they just spent.
 struct ProcessTrailView: View {
 
     @Environment(\.panelTextScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let turn: ResearchTurn
     @Binding var isExpanded: Bool
@@ -22,9 +32,9 @@ struct ProcessTrailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.small) {
             header
-            if isExpanded || isRunning {
+            if isExpanded {
                 detail
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .transition(PanelTheme.Motion.disclosureTransition(reduceMotion))
             }
         }
         .padding(.vertical, PanelTheme.Space.small)
@@ -37,7 +47,9 @@ struct ProcessTrailView: View {
 
     private var header: some View {
         Button {
-            withAnimation(PanelTheme.Motion.disclosure) { isExpanded.toggle() }
+            withAnimation(PanelTheme.Motion.disclosureAnimation(reduceMotion)) {
+                isExpanded.toggle()
+            }
         } label: {
             HStack(spacing: PanelTheme.Space.small) {
                 stageGlyph
@@ -56,17 +68,33 @@ struct ProcessTrailView: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if !isRunning {
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(PanelTheme.Font.at(9, textScale, weight: .semibold))
-                        .foregroundStyle(PanelTheme.Palette.tertiaryText)
-                }
+                // Shown while it runs too. The queries arrive early and are the most
+                // interesting thing on screen for the few seconds before an answer
+                // exists — but only to a reader who went looking, which is what the
+                // chevron is for.
+                // Turned rather than swapped, for the reason `SourcesView` gives: two
+                // symbols are an identity change and will not animate.
+                Image(systemName: "chevron.down")
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    .font(PanelTheme.Font.at(9, textScale, weight: .semibold))
+                    .foregroundStyle(PanelTheme.Palette.tertiaryText)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(isRunning)
         .accessibilityLabel(isExpanded ? "Hide research detail" : "Show research detail")
+        // The same swallowed-label bug `SourcesView` has, and here it costs more. An
+        // explicit label replaces the one SwiftUI composes from the button's children, so
+        // the live line goes with it — and since the detail now starts closed, that line
+        // is the *only* place a running turn says what it is doing. A reader using
+        // VoiceOver heard "Show research detail" for the whole forty seconds. "Loud while
+        // it is happening" has to mean out loud.
+        .accessibilityValue(summaryLine)
+        // And a heading, as well as a button. Nothing was lost by making this a button —
+        // no trait was there to lose — but the row is a section header, and now that it
+        // is also the only way into the detail it belongs in the headings rotor, where a
+        // reader can reach it without swiping the whole transcript.
+        .accessibilityAddTraits(.isHeader)
     }
 
     @ViewBuilder

@@ -42,11 +42,18 @@ struct PanelRootView: View {
 
     /// Which command in the completion list the keyboard has highlighted, if any.
     ///
-    /// Starts nil, and typing returns it to nil. Nothing is preselected on purpose: with
-    /// a highlighted row Return *accepts* the completion, so preselecting the first one
-    /// would mean typing `/new` and pressing Return filled the field instead of starting
-    /// a thread — the command would become harder to run, not easier.
+    /// Starts nil, and typing returns it to nil — but nil no longer means *nothing is
+    /// highlighted*. The list now offers its first row on its own (see
+    /// `effectiveCompletionIndex`); this holds the row the reader walked to instead.
     @State private var completionIndex: Int?
+
+    /// Whether the reader stepped out of the list — ↑ off the top, or Escape.
+    ///
+    /// Needed only because the list offers a row by itself: without it, leaving would
+    /// clear `completionIndex` and the offer would immediately put the highlight back,
+    /// so the one exit a reader is most likely to take by accident would do nothing.
+    /// Typing anything clears it, because the list that was left no longer exists.
+    @State private var completionDismissed = false
 
     /// The row the pointer is over, kept apart from the keyboard's choice.
     ///
@@ -57,8 +64,32 @@ struct PanelRootView: View {
     /// just no longer destroys the other one's answer on the way out.
     @State private var hoverIndex: Int?
 
-    /// What is highlighted, and what Return would accept.
-    private var effectiveCompletionIndex: Int? { hoverIndex ?? completionIndex }
+    /// The row the reader chose, by pointer or by arrow key. Nil when they have chosen
+    /// nothing — which is not the same as nothing being highlighted.
+    private var explicitCompletionIndex: Int? { hoverIndex ?? completionIndex }
+
+    /// What is highlighted: the reader's own choice, or the row the list offers when
+    /// they have not made one. The rule is `ComposerCommand.offeredRowIndex`, which
+    /// holds the reasoning and the tests; this is the view's three pieces of state
+    /// handed to it.
+    ///
+    /// The offer itself is not announced, and that is a decision rather than an
+    /// oversight. It appears at `/d` and stays through `/de` and `/dee`, while the row
+    /// it points at changes under it as the list narrows — so a once-per-word
+    /// announcement would name a command the reader has already typed past, and a
+    /// per-keystroke one would talk over the character echo. What Return will take is
+    /// spoken by `announceSelection` the moment the reader arrows to a row, and by the
+    /// row's own `.isSelected` trait when the VoiceOver cursor reaches it. The two
+    /// moments that *do* change what Return means are both spoken already: leaving the
+    /// list, and taking a row — `submitFromComposer` says "Selected /deep-research"
+    /// after Return fills the field, so the completion is never the silent step.
+    private var effectiveCompletionIndex: Int? {
+        ComposerCommand.offeredRowIndex(explicit: explicitCompletionIndex,
+                                        isDismissed: completionDismissed,
+                                        draft: draft,
+                                        completions: visibleCompletions)
+    }
+
     /// Whether the thread is scrolled to its end. Streams auto-scroll only while
     /// pinned, so reading back during an answer is never undone by the next token.
     @State private var isPinnedToBottom = true
@@ -223,13 +254,19 @@ struct PanelRootView: View {
                 guard isPinnedToBottom else { return }
                 scrollToBottom(proxy)
             }
-            .onChange(of: draft) { _, _ in
+            .onChange(of: draft) { old, new in
                 // Any edit invalidates the highlight: the list is filtered by what has
                 // been typed, so an index kept across a keystroke could point past the
                 // end of the shorter list, or at a command the user has just filtered out.
                 // Both of them: the pointer's row is an index into the same list.
-                completionIndex = nil
-                hoverIndex = nil
+                // And the list is a new list, so leaving the old one says nothing about
+                // this one.
+                //
+                // Read before it is cleared: this is the edit that puts a dismissed
+                // offer back, and the announcement is the only thing that says so.
+                let wasDismissed = completionDismissed
+                clearCompletionChoices(dismissed: false)
+                announceListOpening(from: old, to: new, reopened: wasDismissed)
             }
             .onChange(of: engine.thread.turns.count) { _, _ in
                 scrollToBottom(proxy)
@@ -306,8 +343,10 @@ struct PanelRootView: View {
                              // Return takes the highlighted command when there is one,
                              // and otherwise asks. The send button below never takes a
                              // highlighted row — clicking is not a way to pick from a
-                             // list — but it declines a half-typed command just as
-                             // Return does, so the same text cannot mean two things.
+                             // list — so on a half-typed command the two now differ on
+                             // purpose: Return finishes the word; the button declines
+                             // it and asks for the rest. The button is the gesture with
+                             // no list in it.
                              //
                              // `onSubmit` is the user's submit gesture, not the Return
                              // key: with submit-on-Return off, `ComposerView` routes
@@ -702,8 +741,7 @@ struct PanelRootView: View {
             // alone left Escape doing nothing visible on a row the *pointer* had
             // highlighted, and the next Return still accepted it. Splitting the two
             // indices is what made that possible, so this is the other half of it.
-            completionIndex = nil
-            hoverIndex = nil
+            clearCompletionChoices(dismissed: true)
             // Leaving the list changes what Return does, exactly as entering it did, and
             // a change of meaning nobody is told about is the thing the announcements on
             // the way in exist to prevent.
@@ -785,6 +823,23 @@ struct PanelRootView: View {
         ComposerCommand.completions(for: draft)
     }
 
+    /// Forgets both chosen rows at once, and says whether the reader *left* the list or
+    /// the list simply changed underneath them.
+    ///
+    /// One writer for three pieces of state that only make sense together. Escape and
+    /// the draft-change handler were each clearing the same pair and then disagreeing
+    /// about the flag in a comment rather than in code, and the next gesture that clears
+    /// the composer has to get the flag right too: forgetting it either resurrects a
+    /// highlight the reader dismissed on purpose, or kills the offer for good.
+    ///
+    /// The arrow-key handler does not use this — it assigns a row rather than clearing
+    /// one, and derives the flag from where the move landed.
+    private func clearCompletionChoices(dismissed: Bool) {
+        completionIndex = nil
+        hoverIndex = nil
+        completionDismissed = dismissed
+    }
+
     /// Fills the composer with the chosen command, exactly as clicking the row does.
     ///
     /// It does not *run* the command. A completion is a way to finish typing, and
@@ -797,12 +852,10 @@ struct PanelRootView: View {
         // only open while `isBareCommandWord` holds, and the first space closes it. So
         // there is never an argument in the field for this to lose.
         draft = "/\(name) "
-        completionIndex = nil
-        // Both, here, rather than leaving the hover to the draft change that follows.
-        // `onChange(of: draft)` does clear it, so this is not a fix — it is the same
-        // pair `backOut` and that handler clear together, kept together in the third
-        // place that touches them.
-        hoverIndex = nil
+        // Here rather than left to the draft change that follows. `onChange(of: draft)`
+        // clears exactly this, so it is not a fix — it is the third place that touches
+        // the completion state, saying so through the same writer as the other two.
+        clearCompletionChoices(dismissed: false)
         // Ends the recall walk, the way submitting does. Choosing a command is a decision
         // about what the field holds, and leaving the walk open means a later ↑ — once an
         // argument makes the list close — replaces that choice with a question from
@@ -862,6 +915,10 @@ struct PanelRootView: View {
                                                   count: completions.count)
         hoverIndex = nil
         completionIndex = moved
+        // ↑ off the top leaves the list, and it has to *stay* left: the offer in
+        // `effectiveCompletionIndex` would otherwise re-highlight row 0 the moment this
+        // returns, and the exit would be invisible.
+        completionDismissed = moved == nil
         if moved == nil {
             // ↑ off the top is a way out of the list, and leaving changes what Return
             // does exactly as Escape's does. Only `announceSelection` spoke here, and it
@@ -888,6 +945,47 @@ struct PanelRootView: View {
     private func announceSelection(_ index: Int?, in completions: [ComposerCommand.Entry]) {
         guard let index, completions.indices.contains(index) else { return }
         announce("/\(completions[index].name), \(index + 1) of \(completions.count)")
+    }
+
+    /// Said when a command list appears where there was none, and again on the first
+    /// keystroke after the reader dismissed one.
+    ///
+    /// The gap this closes is real: the list opening changes what Return does — from
+    /// declining a half-typed word to taking a row — and a reader whose cursor is in the
+    /// field had no way to know until they pressed it and heard the result.
+    ///
+    /// `reopened` is the other half of that, and it was missing. Escape and ↑ off the
+    /// top both say so out loud, but the dismissal they set lives exactly one keystroke:
+    /// `onChange(of: draft)` clears it, so typing one more character silently put the
+    /// offer back and turned Return from asking to completing again — a third change of
+    /// meaning, and the only unspoken one. Once per dismissal rather than per keystroke,
+    /// because the flag it reads is cleared by the same edit that reads it.
+    ///
+    /// It does not name the row, and that is the difference from the announcement
+    /// declined earlier. Naming it goes stale immediately: the list opens at `/` holding
+    /// the whole catalogue, so the row named would be the first of eight, and the reader
+    /// is in the middle of typing the word that narrows it. A single-match list is no
+    /// safer, though it looks it — Backspace widens `/d` back to `/` without the list
+    /// ever closing, so the one name spoken would be left describing eight rows. What
+    /// does not go stale is that a list is there and which key takes from it.
+    ///
+    /// Which key is a preference, not a constant. With submit-on-Return off, plain
+    /// Return inserts a newline and never reaches `onSubmit` — `ComposerView` answers
+    /// false to `insertNewline:` in that mode — so Shift-Return is what completes a row,
+    /// and naming Return would have sent exactly the readers this exists for to a key
+    /// that puts a line break in their question.
+    ///
+    /// Otherwise only on the opening. Every later keystroke narrows a list already
+    /// announced, and a line spoken per keystroke would talk over the character echo —
+    /// which is what makes a field unusable rather than merely quiet.
+    private func announceListOpening(from old: String, to new: String, reopened: Bool) {
+        guard let opened = ComposerCommand.completions(for: new), !opened.isEmpty,
+              ComposerCommand.isHalfTypedCommand(new),
+              reopened || ComposerCommand.completions(for: old) == nil
+        else { return }
+        let key = preferences.submitOnReturn ? "Return" : "Shift-Return"
+        announce("Command list, \(opened.count) \(opened.count == 1 ? "match" : "matches"). "
+                 + "\(key) completes the highlighted one.")
     }
 
     /// Speaks one line to VoiceOver.

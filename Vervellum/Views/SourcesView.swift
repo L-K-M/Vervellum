@@ -7,12 +7,19 @@ import AppKit
 /// rather than hidden. A source the model looked at and did not use is evidence about
 /// the answer: four cited out of eighteen found means the model was selective, and the
 /// user should be able to see the fourteen it passed over.
+///
+/// The list itself is closed until asked for. "8 of 24 cited" is the fact most readers
+/// want from it, and eight rows of URLs between the answer and the next question buries
+/// the thing they came for. The count stays on screen; the rows are one click away.
 struct SourcesView: View {
 
     @Environment(\.panelTextScale) private var textScale
+    /// A disclosure that slides a list into place is exactly what this setting is for.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let sources: [Source]
     let citedNumbers: Set<Int>
+    @Binding var isExpanded: Bool
     @Binding var showsAll: Bool
 
     private var cited: [Source] { sources.filter { citedNumbers.contains($0.number) } }
@@ -20,29 +27,91 @@ struct SourcesView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.small) {
-            SectionLabel(text: "Sources", trailing: countText)
-            VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
-                ForEach(cited) { source in
-                    SourceRow(source: source, isCited: true)
-                }
-                if showsAll {
-                    ForEach(uncited) { source in
-                        SourceRow(source: source, isCited: false)
+            header
+            if isExpanded {
+                VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
+                    ForEach(cited) { source in
+                        SourceRow(source: source, isCited: true)
+                    }
+                    if showsAll {
+                        ForEach(uncited) { source in
+                            SourceRow(source: source, isCited: false)
+                        }
+                        // The same route again, for the same reason as the toggle below.
+                        // The container's transition covers these rows when the *section*
+                        // opens, because they are inside it — but `showsAll` moves them
+                        // while the section is already open, and there the container is
+                        // not transitioning at all. Left on the default fade, the rows
+                        // the toggle summons arrived differently from the toggle that
+                        // summoned them.
+                        .transition(PanelTheme.Motion.disclosureTransition(reduceMotion))
                     }
                 }
+                .transition(PanelTheme.Motion.disclosureTransition(reduceMotion))
+                // The same transition as the rows above it. The two are one section, and
+                // leaving this on SwiftUI's default fade meant they came and went by
+                // different routes — which is the opposite of the reason this was
+                // declined last round.
+                uncitedToggle
+                    .transition(PanelTheme.Motion.disclosureTransition(reduceMotion))
             }
-            if !uncited.isEmpty {
-                Button {
-                    withAnimation(PanelTheme.Motion.disclosure) { showsAll.toggle() }
-                } label: {
-                    Text(showsAll
-                         ? "Hide the \(uncited.count) uncited"
-                         : "Show \(uncited.count) found but not cited")
-                        .font(PanelTheme.Font.caption(textScale))
-                        .foregroundStyle(PanelTheme.Palette.accent)
+        }
+    }
+
+    /// The label, which is also the way in. A whole-width hit area rather than a
+    /// chevron to aim at: the row is one line of small text, and the reader's target
+    /// should be the sentence they are reading.
+    private var header: some View {
+        Button {
+            withAnimation(PanelTheme.Motion.disclosureAnimation(reduceMotion)) {
+                isExpanded.toggle()
+            }
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
+                SectionLabel(text: "Sources", trailing: countText)
+                // One symbol turned, not two swapped. Swapping `chevron.up` for
+                // `chevron.down` is an identity change and cannot animate, so the one
+                // control the reader actually clicked was the only thing on screen that
+                // jumped while everything under it slid.
+                Image(systemName: "chevron.down")
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    .font(PanelTheme.Font.at(9, textScale, weight: .semibold))
+                    .foregroundStyle(PanelTheme.Palette.tertiaryText)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isExpanded ? "Hide the sources" : "Show the sources")
+        // The count, spoken. An explicit label on a button replaces the one SwiftUI
+        // would have built from its children, so naming the gesture silently took
+        // "8 of 24 cited" away from the readers who cannot see it — and now that the
+        // rows are closed by default, there is nothing left for them to count.
+        // `countText` is nil only for a turn with no sources at all, which is a
+        // section that does not appear.
+        .accessibilityValue(countText ?? "")
+        // And a heading, as well as a button. Nothing was lost by wrapping
+        // `SectionLabel` — it never carried the trait — but this row is a section
+        // header, and now that it is also the only way into the section it belongs in
+        // the headings rotor, where a reader can reach it without swiping the whole
+        // transcript to find it.
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    @ViewBuilder
+    private var uncitedToggle: some View {
+        if !uncited.isEmpty {
+            Button {
+                withAnimation(PanelTheme.Motion.disclosureAnimation(reduceMotion)) {
+                    showsAll.toggle()
                 }
-                .buttonStyle(.plain)
+            } label: {
+                Text(showsAll
+                     ? "Hide the \(uncited.count) uncited"
+                     : "Show \(uncited.count) found but not cited")
+                    .font(PanelTheme.Font.caption(textScale))
+                    .foregroundStyle(PanelTheme.Palette.accent)
             }
+            .buttonStyle(.plain)
         }
     }
 

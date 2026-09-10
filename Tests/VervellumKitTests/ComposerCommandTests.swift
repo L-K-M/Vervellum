@@ -347,4 +347,125 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertNil(ComposerCommand.completions(for: "/direct what is the time"))
     }
 
+    // MARK: What the list offers
+
+    /// The list highlights its first row only while the command word is unfinished,
+    /// because a highlighted row is one Return will *take*. `isHalfTypedCommand` is that
+    /// condition — the same predicate that decides whether Return would otherwise be
+    /// withheld, which is why the two can never disagree about a bare command word.
+    func testTheWordsAnOfferedRowWouldFinish() {
+        for unfinished in ["/dee", "/h", "/mod"] {
+            XCTAssertTrue(ComposerCommand.isHalfTypedCommand(unfinished),
+                          "\(unfinished) would be left without an offer")
+        }
+        // And a command already typed in full is not offered anything: `/new` and Return
+        // starts a thread, exactly as it did before the list highlighted anything.
+        for finished in ["/new", "/help", "/model", "/history", "/copy"] {
+            XCTAssertFalse(ComposerCommand.isHalfTypedCommand(finished),
+                           "\(finished) would be completed instead of run")
+        }
+        // The edges either side of a command word, which is where a later tweak to the
+        // trimming or the matching would show up first. A trailing space is trimmed, so
+        // `/model ` is still the bare command and false for the same reason `/model` is;
+        // the first character of an argument stops it being a command word at all; and
+        // an empty field has no word to finish.
+        for notOffered in ["", "/model ", "/model deep"] {
+            XCTAssertFalse(ComposerCommand.isHalfTypedCommand(notOffered),
+                           "\(notOffered) should not read as an unfinished word")
+        }
+        // A bare slash *is* one, and is the input most likely to be mistaken for the
+        // empty case above: `parse` reads it as a question, and Return sending "/" to a
+        // model is the spend this predicate exists to prevent.
+        XCTAssertTrue(ComposerCommand.isHalfTypedCommand("/"))
+    }
+
+    /// The whole "what will Return do" contract, which used to live in the view where
+    /// nothing could reach it.
+    func testTheListOffersItsFirstRowOnlyWhenTakingItWouldHelp() throws {
+        // Unwrapped, so a nil stops the test here with the cause named. Carried on
+        // unguarded it would fail in the two offer cases immediately below — as a bare
+        // nil-against-0 mismatch, which says nothing about where the nil came from —
+        // while two of the four `XCTAssertNil` cases, the two fed these completions,
+        // would pass on the wrong grounds. The other two are handed a literal nil and a
+        // literal empty list and are about those, not about this.
+        let rows = try XCTUnwrap(ComposerCommand.completions(for: "/h"),
+                                 "\"/h\" always has something to complete")
+
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
+                                                       draft: "/h", completions: rows), 0,
+                       "an unfinished word is what the offer exists for")
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
+                                                       draft: "/", completions: rows), 0,
+                       "a bare slash is an unfinished word, and the offer is what stands "
+                        + "between Return and spending a request on \"/\"")
+        XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: true,
+                                                     draft: "/h", completions: rows),
+                     "leaving the list has to stay left, or the exit is invisible")
+        // `rows`, not the completions for "/new". This function treats the list as
+        // opaque, and the assertion is about the *word* — passing "/new"'s own list
+        // would let the test pass through the empty-list guard if `completions(for:)`
+        // ever stopped answering for a finished command, which is the one branch this
+        // line exists to hold.
+        XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
+                                                     draft: "/new", completions: rows),
+                     "offering a row under a finished command would fill the field "
+                        + "instead of starting a thread")
+        // A different leg of the same guard, and the one nothing else here reaches.
+        // `/new` is refused for being a *complete* command — it passes
+        // `isBareCommandWord`, has completions, and falls at `parse`. `/model deep` is
+        // refused one step earlier, for not being a bare word at all. Only this case
+        // holds that step: a change to how the word is found could let an
+        // argument-bearing draft through while every assertion above stayed green.
+        XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
+                                                     draft: "/model deep", completions: rows),
+                     "a draft carrying an argument is not a word being typed, and "
+                        + "Return has to run it rather than complete it")
+        XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
+                                                     draft: "/h", completions: nil))
+        XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
+                                                     draft: "/h", completions: []),
+                     "an empty list has no row to offer, whatever the word looks like")
+    }
+
+    /// A row the reader walked or hovered to is theirs, and none of the conditions on
+    /// the *offer* may take it away — the offer is what happens in the absence of a
+    /// choice, not a filter over one.
+    func testAChosenRowSurvivesEveryConditionOnTheOffer() {
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: 0, isDismissed: false,
+                                                       draft: "/new",
+                                                       completions: ComposerCommand.completions(for: "/new")),
+                       0,
+                       "arrowing onto the row under a finished /new is a gesture that "
+                        + "deserves its own answer, even though the offer declines to "
+                        + "make it unasked")
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: 1, isDismissed: true,
+                                                       draft: "/h",
+                                                       completions: ComposerCommand.completions(for: "/h")),
+                       1,
+                       "a row the reader walked to outlives the exit that cleared the offer")
+        // And the pass-through is unchecked against the list, which is the decision the
+        // doc comment spends ten lines on. Pinned here so a later "defensive" bounds
+        // check has to argue with a failing test rather than arrive as a tidy-up.
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: 99, isDismissed: false,
+                                                       draft: "/h",
+                                                       completions: ComposerCommand.completions(for: "/h")),
+                       99,
+                       "a choice is handed back without being measured against the list")
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: 0, isDismissed: true,
+                                                       draft: "", completions: nil), 0,
+                       "every condition on the offer at once, and the choice still wins")
+
+        // Except a negative, which is no row in any list and so is no choice either.
+        // The offer rules answer instead — here, row 0 under a half-typed word.
+        XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: -1, isDismissed: false,
+                                                       draft: "/h",
+                                                       completions: ComposerCommand.completions(for: "/h")),
+                       0,
+                       "a negative choice is no choice; the offer answers")
+        XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: -1, isDismissed: true,
+                                                     draft: "/h",
+                                                     completions: ComposerCommand.completions(for: "/h")),
+                     "and with nothing to fall back to, nothing is offered")
+    }
+
 }

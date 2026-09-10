@@ -153,9 +153,13 @@ enum ComposerCommand: Equatable {
     /// Pure and here rather than in the view so the edges are testable on both platforms,
     /// because the edges are the whole design:
     ///
-    /// * **Nothing is highlighted to begin with.** Return *accepts* a highlighted row, so
-    ///   preselecting the first would mean typing `/new` and pressing Return filled the
-    ///   field instead of starting a thread.
+    /// * **Nothing is highlighted to begin with**, as far as this function is concerned:
+    ///   it is told the current row and answers with the next one, and "no row" is a
+    ///   state it both accepts and returns. Whether a list *offers* a row unasked is
+    ///   `offeredRowIndex`'s question, not this one — and the answer there is the same
+    ///   rule read from the other end, since Return accepts a highlighted row and
+    ///   preselecting under a finished `/new` would fill the field instead of starting
+    ///   a thread.
     /// * **↓ enters at the top, ↑ enters at the bottom**, the way a menu opened upward
     ///   behaves.
     /// * **↑ off the top returns to nothing highlighted** rather than wrapping. Wrapping
@@ -231,6 +235,71 @@ enum ComposerCommand: Equatable {
         guard let command = parse(input) else { return false }
         if case .ask = command { return true }
         return false
+    }
+
+    /// Which row a command list highlights, given what the reader has chosen and what
+    /// they have typed.
+    ///
+    /// The whole "what will Return do" contract, in one place. A highlighted row is one
+    /// the submit gesture *takes*, so the list may only offer a row when taking it is
+    /// the useful answer:
+    ///
+    /// * **An explicit choice always wins**, finished word or not. A reader who has
+    ///   typed `/new` in full and then arrowed onto the `new` row has asked for the row,
+    ///   and Return fills the field rather than starting a thread — which is the answer
+    ///   to the gesture they actually made. The offer below is what happens in the
+    ///   *absence* of a choice, never a filter over one.
+    /// * **Otherwise row 0 is offered while the word is unfinished.** `/dee` and Return
+    ///   finishes the word rather than answering "Finish the command name" — the thing
+    ///   that made the list look broken, because it was plainly *showing* the answer.
+    /// * **Never under a finished command.** Offering a row under `/new` would mean
+    ///   Return filled the field instead of starting a thread.
+    /// * **Never after the reader leaves.** ↑ off the top and Escape are ways out, and
+    ///   an offer that re-highlighted row 0 on the way out would make the exit invisible.
+    ///   Both of those exits reach here as `isDismissed` — there is no third parameter
+    ///   for the arrow one, and none is wanted: the handler turns the nil that
+    ///   `moveSelection` answers off the top into the flag, so the two ways out are one
+    ///   fact by the time this reads them.
+    ///
+    /// `explicit` is handed back as given, without being checked against `completions`
+    /// — and that is the contract, not an oversight. A choice is the reader's, and this
+    /// function is not the place a stale one is caught, because a stale one cannot get
+    /// here: `clearCompletionChoices` empties both indices on every draft change, so a
+    /// row selected against a longer list does not survive the keystroke that shortened
+    /// it. The two callers that could subscript with the result guard anyway —
+    /// `submitFromComposer` with `indices.contains`, the arrow handler by mapping an
+    /// out-of-range index to nil before it moves — so the belt and the braces are both
+    /// on. Bounds-checking here as well would only add a third place for the rule to be
+    /// stated and a third place for it to drift.
+    ///
+    /// A *negative* is the exception, and it is not the same kind of check. Bounds need
+    /// `completions` — that is what makes checking them here a second reading of the
+    /// callers' rule. "Below zero is not a row" needs nothing: it is true of every list
+    /// there will ever be, so it can be settled at the one place that owns the contract
+    /// rather than left to both guards happening to ask `indices.contains` (which
+    /// rejects a negative) instead of comparing against a count (which does not). A
+    /// negative is treated as no choice at all, so the offer rules answer instead.
+    ///
+    /// The same goes for a choice under `isDismissed`. Escape clears the choice as it
+    /// sets the flag, so the two are not live together by that route — but the pointer
+    /// *can* make them live together, because hovering a row after an Escape sets
+    /// `hoverIndex` without ending the dismissal. That is why the choice is answered
+    /// first: a reader who backs out with Escape and then reaches for the mouse gets the
+    /// row under the pointer, not nothing.
+    ///
+    /// Pure and here rather than in the view for the same reason as `moveSelection` and
+    /// `isHalfTypedCommand`: the rule is the interesting part, the regressions it guards
+    /// against are ones only manual poking would find, and the GTK panel has no command
+    /// list yet — when it grows one, this is the rule it should grow, not a second
+    /// reading of it.
+    static func offeredRowIndex(explicit: Int?,
+                                isDismissed: Bool,
+                                draft: String,
+                                completions: [Entry]?) -> Int? {
+        if let explicit, explicit >= 0 { return explicit }
+        guard !isDismissed, isHalfTypedCommand(draft),
+              let completions, !completions.isEmpty else { return nil }
+        return 0
     }
 
     /// The configured model providers as markdown, for a bare `/model`.
