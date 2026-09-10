@@ -27,10 +27,9 @@ struct Source: Codable, Identifiable, Equatable {
     var wasRead: Bool { !(fullText ?? "").isEmpty }
 
     /// The registrable-looking host, for a compact source chip ("apple.com").
-    var domain: String {
-        guard let host = URLComponents(string: url)?.host else { return url }
-        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-    }
+    /// Delegated to `EvidenceExtractor.domainKey` so the diversity cap and the chip
+    /// the reader sees can never drift into two definitions of "same domain".
+    var domain: String { EvidenceExtractor.domainKey(for: url) }
 
     enum CodingKeys: String, CodingKey {
         case id, number, url, title, snippet, publishedAt, fullText

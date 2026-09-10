@@ -58,6 +58,24 @@ final class EvidenceExtractorTests: XCTestCase {
         XCTAssertEqual(sources.map(\.number), Array(1...sources.count))
     }
 
+    /// The displayed domain and the key the cap counts are the same computation —
+    /// pinned, because a drift between them would group citations by one domain while
+    /// showing the reader another.
+    func testDisplayedDomainAndCapKeyCannotDrift() {
+        let cases: [(url: String, domain: String)] = [
+            ("https://WWW.Example.COM/a", "example.com"),
+            ("https://www.example.com/b", "example.com"),
+            ("https://example.com:8443/c", "example.com"),
+            ("https://en.example.org/d", "en.example.org"),
+            ("not a url", "not a url"),
+        ]
+        for (url, domain) in cases {
+            XCTAssertEqual(Source(number: 1, url: url, title: "", snippet: "").domain,
+                           domain, url)
+            XCTAssertEqual(EvidenceExtractor.domainKey(for: url), domain, url)
+        }
+    }
+
     /// The cap is a ceiling, not a quota: a topic that lives on one site keeps what
     /// that site has, up to the cap.
     func testADomainBelowTheCapKeepsEverything() {

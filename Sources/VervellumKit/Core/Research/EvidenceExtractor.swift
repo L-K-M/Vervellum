@@ -64,10 +64,11 @@ enum EvidenceExtractor {
         }
     }
 
-    /// The registrable-looking host a hit counts against, lowercased and without a
-    /// leading `www.` — the same key `Source.domain` computes, taken here before any
-    /// `Source` exists.
-    private static func domainKey(for url: String) -> String {
+    /// The host a hit counts against, lowercased and without a leading `www.` — the
+    /// single source of truth for what a source's domain is. `Source.domain`
+    /// delegates here, so the diversity cap and the domain the reader is shown cannot
+    /// drift into two definitions.
+    static func domainKey(for url: String) -> String {
         guard let host = URLComponents(string: url)?.host?.lowercased() else { return url }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
