@@ -205,14 +205,17 @@ vouch for, and it is handled on those terms:
   separators too. Nothing builds a path from it —
   the store keys by the attachment's id — and keeping it that way is easier than proving
   it is safe.
-- **A provider is shown images only if you said it can.** There is no way to ask an
-  OpenAI-compatible endpoint whether it has eyes, and guessing wrong fails the turn
-  outright, so it is a per-provider setting that is off until set. The filter is applied
-  where the request is built rather than by each caller, so a provider you did not tick
-  cannot be sent a picture by a code path that forgot.
-- **An attachment that could not be sent says so.** Bytes that have gone missing, or text
-  that no longer decodes, raise a notice on the turn rather than leaving an answer that
-  ignores a file for no visible reason.
+- **An image goes to a provider by default, and a refused one never fails the turn.**
+  There is no way to ask an OpenAI-compatible endpoint whether it has eyes, so the
+  picture is sent unless you untick it for that provider. An endpoint that answers 400
+  to a request carrying an image is retried once without the picture — a 400 arrives
+  before any content, so the retry costs one request and cannot duplicate prose — and
+  the turn then says the image was left out. The filter is applied where the request is
+  built rather than by each caller, so a provider you unticked cannot be sent a picture
+  by a code path that forgot, and the retry is the only way the pictures are dropped.
+- **An attachment that could not be sent says so.** Bytes that have gone missing, text
+  that no longer decodes, or a picture the provider refused raise a notice on the turn
+  rather than leaving an answer that ignores a file for no visible reason.
 
 ### Captured text
 

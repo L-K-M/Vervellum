@@ -203,18 +203,20 @@ struct ModelProfile: Codable, Equatable, Identifiable {
     var keyAccount: String
     /// Whether this provider is asked to look at attached images.
     ///
-    /// A setting rather than a guess, and off by default, because getting it wrong is
-    /// not a graceful degradation: a text-only endpoint handed an `image_url` part
-    /// answers with a 400, so a turn that would have worked fails outright. There is no
-    /// reliable way to ask an OpenAI-compatible endpoint whether it has eyes — the model
-    /// list says nothing about it — so the person who configured the provider says.
+    /// On by default, because the failure on the other side is the one a user reports:
+    /// a screenshot is pasted, the model is told a file could not be sent, and the only
+    /// explanation is a per-provider switch nobody has looked for. A text-only endpoint
+    /// refuses the picture with HTTP 400, and `ChatCompletionsClient` answers that by
+    /// retrying the same request without it and saying on the turn that the image was
+    /// left out — so the guess is safe in both directions, and the switch is there for
+    /// a provider that *accepts* the part and silently ignores it.
     ///
     /// Text attachments ignore this: they are inlined into the question payload as text,
     /// which every model can read.
     var sendsImages: Bool
 
     init(id: UUID = UUID(), name: String, endpoint: String, model: String, keyAccount: String,
-         sendsImages: Bool = false) {
+         sendsImages: Bool = true) {
         self.id = id
         self.name = name
         self.endpoint = endpoint
@@ -258,10 +260,12 @@ struct ModelProfile: Codable, Equatable, Identifiable {
         model = try container.decodeIfPresent(String.self, forKey: .model) ?? ""
         keyAccount = try container.decodeIfPresent(String.self, forKey: .keyAccount)
             ?? SecretAccount.derived(from: .modelAPIKey, for: id).rawValue
-        // Absent means a settings file written before this existed, and the safe reading
-        // of that is "no": a provider nobody has said has eyes is one an image would
-        // fail on.
-        sendsImages = try container.decodeIfPresent(Bool.self, forKey: .sendsImages) ?? false
+        // Absent means a settings file written before this existed. Read as "yes": the
+        // endpoint either has eyes or answers 400, and `ChatCompletionsClient` turns that
+        // 400 into the same turn without the picture plus a notice. An explicit `false`
+        // is still honoured and is the right answer for a provider that accepts the part
+        // and ignores it.
+        sendsImages = try container.decodeIfPresent(Bool.self, forKey: .sendsImages) ?? true
     }
 }
 

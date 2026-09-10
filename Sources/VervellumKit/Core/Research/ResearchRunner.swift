@@ -604,8 +604,7 @@ final class ResearchRunner: ResearchRunning {
             // The planner is shown the picture when the provider can take one: an image
             // is very often what the question is *about*, and planning searches from the
             // words alone is the commonest way to search for the wrong thing.
-            let images = chat.sendsImages ? planImages : []
-            sentPlanImages = !images.isEmpty
+            let images = chat.imagesWillBeSent ? planImages : []
             let object = try await chat.completeJSON(
                 system: ResearchPrompts.plan(maxSearches: Self.maxSearches, today: today,
                                              hasLinkedPages: !linked.isEmpty,
@@ -618,7 +617,13 @@ final class ResearchRunner: ResearchRunning {
                                                  || !attachments.payload.isEmpty),
                 payload: images.isEmpty ? (withheldPlanContext ?? planContext).payload
                                         : planContext.payload,
+                withoutImages: images.isEmpty ? nil : withheldPlanContext?.payload,
                 label: "Plan", images: images)
+            // Read after the call, not before: the provider may have refused the picture
+            // and been sent the question without it, which is what `withheldImages`
+            // records. Set before the call, this said "sent" for an image the endpoint
+            // had just rejected.
+            sentPlanImages = !images.isEmpty && !chat.withheldImages
             return try PlanParser.parse(object, maxSearches: Self.maxSearches)
         }
         // Said in the trace, because the turn's own notice is raised by the answer stage:
@@ -633,7 +638,7 @@ final class ResearchRunner: ResearchRunning {
         }
         if !planImages.isEmpty, !sentPlanImages {
             trace.log("Plan: \(planImages.count) image(s) withheld — "
-                      + "this provider is not set to be sent images")
+                      + "this provider is not being sent images")
         }
         update { turn in
             turn.reading = plan.reading
@@ -927,16 +932,20 @@ final class ResearchRunner: ResearchRunning {
         let answer = try await chain.perform("Answer", beforeRetry: { [weak self] in
             self?.update { $0.answer = "" }
         }) { chat in
-            let images = chat.sendsImages ? answerImages : []
-            sentImages = !images.isEmpty
+            let images = chat.imagesWillBeSent ? answerImages : []
             let payload = images.isEmpty ? (withheldContext ?? answerContext).payload
                                          : answerContext.payload
-            return try await chat.streamText(
+            let text = try await chat.streamText(
                 system: ResearchPrompts.answer, payload: payload,
+                withoutImages: images.isEmpty ? nil : withheldContext?.payload,
                 label: "Answer", images: images
             ) { [weak self] chunk in
                 self?.update { $0.answer += chunk }
             }
+            // After the call, because a provider that rejected the image was retried
+            // without it and the reader has to be told the answer saw no picture.
+            sentImages = !images.isEmpty && !chat.withheldImages
+            return text
         }
         // As in the plan stage: the payload that went is the one whose trimming the
         // reader has to be told about, and the withheld one carries more.
@@ -1557,16 +1566,20 @@ final class ResearchRunner: ResearchRunning {
         _ = try await chain.perform("Direct answer", beforeRetry: { [weak self] in
             self?.update { $0.answer = "" }
         }) { chat in
-            let images = chat.sendsImages ? attachments.images : []
-            sentImages = !images.isEmpty
+            let images = chat.imagesWillBeSent ? attachments.images : []
             let payload = images.isEmpty ? (withheldContext ?? context).payload
                                          : context.payload
-            return try await chat.streamText(
+            let text = try await chat.streamText(
                 system: ResearchPrompts.direct, payload: payload,
+                withoutImages: images.isEmpty ? nil : withheldContext?.payload,
                 label: "Direct answer", images: images
             ) { [weak self] chunk in
                 self?.update { $0.answer += chunk }
             }
+            // After the call, as in the research path's answer: a rejected image was
+            // retried without and must be reported as left out.
+            sentImages = !images.isEmpty && !chat.withheldImages
+            return text
         }
         // And here, for the same reason as the research path.
         if !sentImages, withheldContext?.trimmed == true {

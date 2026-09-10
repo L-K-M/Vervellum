@@ -66,8 +66,9 @@ Vervellum makes network requests in exactly five cases, each with a fixed purpos
   follow-up never re-bills you for a picture you sent once. The bytes are kept beside
   your threads in `attachments/` — a `0700` directory, the files inside it `0600` — and
   deleted once no thread refers to them any more, which also means an attachment you
-  attached moments ago is never swept out from under you. A provider is shown images
-  only if you ticked that box for it; a turn whose attachment could not be sent says so.
+  attached moments ago is never swept out from under you. An image is sent to the
+  provider you ask with, unless you untick **Send attached images** for it; a provider
+  that refuses the picture is retried without it, and the turn says so.
 - **Listing a provider's models.** Only when you press the refresh button beside a
   model field in Settings ▸ Providers. It sends `GET <endpoint>/models` to that one
   provider, with that provider's key, and nothing else — no question, no thread, no

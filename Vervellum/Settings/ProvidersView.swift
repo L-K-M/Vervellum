@@ -233,10 +233,11 @@ struct ProvidersView: View {
             // attachments are unaffected — they are inlined as text, which every model
             // reads — so this switch is about pictures only, as its help says.
             Toggle("Send attached images to this provider", isOn: profile.sendsImages)
-                .help("Only turn this on for a model that can look at images. A "
-                    + "text-only endpoint rejects the whole question when one is "
-                    + "attached. Attached text files are sent either way; with this "
-                    + "off, an attached image is left out of the question.")
+                .help("On by default. An endpoint that cannot take an image rejects the "
+                    + "whole request, which Vervellum answers by retrying without the "
+                    + "picture and saying on the turn that it was left out. Turn this off "
+                    + "for a provider that accepts the part and silently ignores it. "
+                    + "Attached text files are sent either way.")
             keyRow(title: "API key",
                    entry: Binding(get: { keyEntries[id] ?? "" },
                                   set: { keyEntries[id] = $0 }),
