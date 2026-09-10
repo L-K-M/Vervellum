@@ -146,8 +146,14 @@ enum ResearchPrompts {
                      hasAttachments: Bool = false) -> String {
         // Only when there is one. A standing sentence about attachments on every turn
         // would be a standing invitation to plan searches about a file nobody sent.
+        //
+        // A paragraph, not a trailing sentence. `linked` below is a block that begins
+        // with a blank line and ends without one, so a leading space glued the whole
+        // attachment clause onto the end of the linked-pages paragraph whenever both
+        // were present — and this prompt uses paragraph breaks as its structure, which
+        // is how the model reads it. Standing alone, it reads the same either way.
         let attached = hasAttachments
-            ? " The user attached something to this question: any attached text is in "
+            ? "\n\nThe user attached something to this question: any attached text is in "
                 + "the payload under \"attachments\", and any attached image, when one "
                 + "was sent, accompanies this message. Read what is there before "
                 + "planning — it usually says "

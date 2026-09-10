@@ -94,7 +94,15 @@ final class AttachmentStore {
         // A UUID name, so a crash between the write and the move leaves something the
         // sweep already understands: unreferenced, and removed once it is old enough.
         let staged = url(for: UUID())
-        try data.write(to: staged, options: [.atomic])
+        // Written straight to `staged`, not through `.atomic`. The atomic option writes
+        // via Foundation's own temporary file in this directory, under a name that is
+        // not a UUID — and `sweep` deliberately skips names it cannot read as one, so a
+        // process killed mid-write would strand that file where nothing will ever
+        // collect it. Written in place, a partial write leaves a UUID-named file the
+        // sweep already understands. Nothing is lost by dropping it: the move below is
+        // what makes the *destination* appear atomically, and it only runs once this
+        // write has returned.
+        try data.write(to: staged)
         try? fileManager.setAttributes([.posixPermissions: 0o600],
                                        ofItemAtPath: staged.path)
         let destination = url(for: attachment.id)

@@ -24,22 +24,44 @@ struct Attachment: Codable, Equatable, Identifiable {
     /// a kind added by a later build must decode *here* as something this build can
     /// ignore, rather than making the whole thread unreadable. `ResearchModels` explains
     /// what that costs when it is forgotten.
-    enum Kind: String, Codable {
+    enum Kind: Codable, Equatable {
         case image
         case text
-        /// A kind this build does not know. `make` never produces one; a decoded
-        /// `.other` is written back as `"other"` if the thread is saved again, which is
-        /// what keeps a newer build's attachment intact through an older build's save.
-        case other
+        /// A kind this build does not know, carrying the string that named it.
+        ///
+        /// `make` never produces one. It carries the raw string rather than being a bare
+        /// case because the record surviving an older build's save is only half of
+        /// forward compatibility — the *kind* has to survive it too. Flattened to
+        /// `"other"` on the way out, a newer build's `"audio"` would come back from this
+        /// build's save permanently downgraded, and the newer build would then be the one
+        /// that could not read its own attachment.
+        case other(raw: String)
 
         init(from decoder: Decoder) throws {
             // `try?`, so the leniency covers the *shape* and not only the spelling. A
-            // string this build has never seen was already answered with `.other`; a
+            // string this build has never seen is answered with `.other` carrying it; a
             // value that is not a string at all — corruption, or a later build changing
             // how it writes this — threw, and the throw climbed the ladder this whole
             // decoder was hand-written to stop: attachment, turn, library.
             let raw = try? decoder.singleValueContainer().decode(String.self)
-            self = raw.flatMap(Kind.init(rawValue:)) ?? .other
+            switch raw {
+            case "image": self = .image
+            case "text": self = .text
+            // `"other"` for a value that was not a string at all: there is no name to
+            // keep, and the field still has to round-trip as something.
+            default: self = .other(raw: raw ?? "other")
+            }
+        }
+
+        /// Hand-written for the same reason the decoder is: the synthesized one would
+        /// write the case, and the case is not what was read.
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            switch self {
+            case .image: try container.encode("image")
+            case .text: try container.encode("text")
+            case .other(let raw): try container.encode(raw)
+            }
         }
     }
 
@@ -72,6 +94,14 @@ struct Attachment: Codable, Equatable, Identifiable {
     /// overwrite the newer file. That is the exact sequence `TurnNotice.unknown` exists
     /// to prevent, arriving one level down.
     ///
+    /// `try?` on every field but `id`, so the leniency covers the *shape* and not only
+    /// the presence — for the reason `Kind`'s own decoder gives. `decodeIfPresent` answers
+    /// a missing key with nil and a present-but-wrong-typed one by **throwing**, so a
+    /// `"byteCount": "1.4 MB"` in a hand-edited document would take the attachment, then
+    /// the turn, then the library, and an older build would start from an empty one and
+    /// overwrite the newer file. That is the same ladder, climbed by a corrupted scalar
+    /// rather than by a field this build has never seen.
+    ///
     /// `id` is the exception and stays required: it is the name of the bytes on disk, and
     /// an attachment with a minted one would point at a file that is not its own. A
     /// record without it is not a record of anything.
@@ -85,7 +115,7 @@ struct Attachment: Codable, Equatable, Identifiable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
-        kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .other
+        kind = (try? container.decodeIfPresent(Kind.self, forKey: .kind)) ?? .other(raw: "other")
         // Through `displayName` like every other way a name arrives. The property says
         // it is sanitised on the way in, and this was a way in that was not: a document
         // hand-edited, restored from a backup, or written by anything but this code
@@ -93,11 +123,11 @@ struct Attachment: Codable, Equatable, Identifiable {
         // panel and the request payload. Idempotent, so a name this build wrote is
         // unchanged — and it is also what bounds the length, which is the other promise
         // the property makes.
-        let storedName = try container.decodeIfPresent(String.self, forKey: .name)
+        let storedName = try? container.decodeIfPresent(String.self, forKey: .name)
         name = Attachment.displayName(for: storedName ?? "attachment")
-        mediaType = try container.decodeIfPresent(String.self, forKey: .mediaType)
+        mediaType = (try? container.decodeIfPresent(String.self, forKey: .mediaType))
             ?? "application/octet-stream"
-        byteCount = try container.decodeIfPresent(Int.self, forKey: .byteCount) ?? 0
+        byteCount = (try? container.decodeIfPresent(Int.self, forKey: .byteCount)) ?? 0
     }
 
     // MARK: Limits
@@ -233,6 +263,15 @@ struct Attachment: Codable, Equatable, Identifiable {
         guard data.count <= maxAttachmentBytes else {
             return .failure(.tooLarge(name: display, byteCount: data.count))
         }
+        // Sniffed before decoded, which costs one thing worth naming: the GIF signatures
+        // are ASCII, so a text file whose first bytes really are `GIF89a` is classified
+        // as an image and base64'd into the request on that claim. Deciding by text
+        // first would close that — and it is *nearly* free, because PNG (`0x89`) and
+        // JPEG (`0xFF`) open with bytes that cannot begin valid UTF-8, so neither could
+        // ever be read as text. Nearly, not entirely: `text(from:)` refuses only on
+        // invalid UTF-8 or a NUL, and a small GIF need not contain either in its header.
+        // Both risks are about equally unreachable, so this stays as it is — the bytes
+        // decide, and the one that identifies itself first wins.
         if let mediaType = imageMediaType(sniffing: data) {
             return .success((Attachment(kind: .image, name: display, mediaType: mediaType,
                                         byteCount: data.count), data))

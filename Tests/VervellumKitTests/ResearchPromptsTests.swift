@@ -75,5 +75,13 @@ final class ResearchPromptsTests: XCTestCase {
         let with = ResearchPrompts.plan(maxSearches: 4, today: "2026-09-06",
                                         hasAttachments: true)
         XCTAssertTrue(with.contains("attached something to this question"))
+        // Additive, not substituted. A build that swapped the ordinary plan *for* the
+        // attachment sentence would satisfy the line above while dropping the search
+        // budget and the date grounding on exactly the turns that carry a file.
+        XCTAssertGreaterThan(with.count, without.count)
+        // And the plan itself is still there. The clause lands mid-prompt, on the TASK
+        // line, so the two strings share a prefix and then diverge — it is what comes
+        // *after* the insertion that a substitution would have taken with it.
+        XCTAssertTrue(with.contains("Work out which factual questions"), with)
     }
 }

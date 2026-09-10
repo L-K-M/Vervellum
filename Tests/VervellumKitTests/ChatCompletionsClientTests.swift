@@ -281,8 +281,15 @@ final class ChatCompletionsClientTests: XCTestCase {
         // moved into the system message, or an extra message appended — and the check
         // above is blind to exactly that.
         let whole = try JSONSerialization.data(withJSONObject: body)
-        XCTAssertFalse(String(decoding: whole, as: UTF8.self).contains("image_url"),
+        let text = String(decoding: whole, as: UTF8.self)
+        XCTAssertFalse(text.contains("image_url"),
                        "an image reached a provider with no eyes")
+        // And the bytes themselves, which is the assertion that survives a change of
+        // wire shape: a leak through a renamed part type, a nested key, or base64
+        // smuggled into the prompt would keep `image_url` absent while the picture still
+        // travelled. The stub payload cannot occur in a legitimate body for this call.
+        XCTAssertFalse(text.contains("AAAA"),
+                       "the image's bytes reached a provider with no eyes")
     }
 
     /// And the same client with the flag on sends it, so the guard above is a filter

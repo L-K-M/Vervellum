@@ -418,6 +418,11 @@ final class ResearchRunnerTests: XCTestCase {
         // the words would be the most visible bug this feature could have.
         let text = try XCTUnwrap(parts.first?["text"] as? String)
         XCTAssertTrue(text.contains("What is this?"), text)
+        // The part's `type` as well as its payload: a part carrying the right data URL
+        // under a missing or misspelled type passes every other assertion here and is
+        // refused by the provider, which is a failure that arrives in production rather
+        // than in this suite.
+        XCTAssertEqual(parts.last?["type"] as? String, "image_url")
         XCTAssertEqual((parts.last?["image_url"] as? [String: Any])?["url"] as? String,
                        "data:image/png;base64,iVBORw==")
     }
@@ -550,6 +555,11 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertTrue(text.contains("What failed?"), text)
         XCTAssertTrue(text.contains("read timeout"), text)
         XCTAssertTrue(text.contains("log.txt"), text)
+        // The part's `type` as well as its payload: a part carrying the right data URL
+        // under a missing or misspelled type passes every other assertion here and is
+        // refused by the provider, which is a failure that arrives in production rather
+        // than in this suite.
+        XCTAssertEqual(parts.last?["type"] as? String, "image_url")
         XCTAssertEqual((parts.last?["image_url"] as? [String: Any])?["url"] as? String,
                        "data:image/png;base64,iVBORw==")
     }

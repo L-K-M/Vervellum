@@ -77,9 +77,13 @@ final class AttachmentTests: XCTestCase {
     /// listed, and its name carried into every later turn — telling the model about a
     /// file whose contents are nothing.
     func testAnEmptyFileIsNotAnAttachment() {
-        guard case .failure = Attachment.make(from: Data(), name: "empty.txt") else {
-            return XCTFail("accepted an empty file")
-        }
+        guard case .failure(let reason) = Attachment.make(from: Data(), name: "empty.txt")
+        else { return XCTFail("accepted an empty file") }
+        // The reason, not only the refusal. A regression that rejected empty files
+        // through some other case — or with a message that stopped naming the file —
+        // would leave the reader with a sentence they cannot act on, and the assertion
+        // above would still be green.
+        XCTAssertTrue(reason.message.contains("empty.txt"), reason.message)
     }
 
     func testAnUnsupportedFileIsRefusedByName() {
@@ -178,7 +182,7 @@ final class AttachmentTests: XCTestCase {
         let decoded = try JSONDecoder().decode(Attachment.self, from: Data(sparse.utf8))
 
         XCTAssertEqual(decoded.id, id)
-        XCTAssertEqual(decoded.kind, .other, "an unknown kind is the safe reading")
+        XCTAssertEqual(decoded.kind, .other(raw: "other"), "an absent kind is the safe reading")
         XCTAssertEqual(decoded.byteCount, 0)
         XCTAssertFalse(decoded.name.isEmpty, "something has to be shown in the panel")
 
@@ -229,8 +233,38 @@ final class AttachmentTests: XCTestCase {
              "mediaType":"video/quicktime","byteCount":10}
             """
         let decoded = try JSONDecoder().decode(Attachment.self, from: Data(json.utf8))
-        XCTAssertEqual(decoded.kind, .other)
+        XCTAssertEqual(decoded.kind, .other(raw: "video"))
         XCTAssertEqual(decoded.name, "clip.mov")
+
+        // And it goes back out as `"video"`, not as `"other"`. The record surviving this
+        // build's save is only half of it: a kind flattened on the way out would come
+        // back to the newer build permanently downgraded, leaving that build unable to
+        // read an attachment it wrote itself.
+        let written = try JSONEncoder().encode(decoded)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: written) as? [String: Any])
+        XCTAssertEqual(object["kind"] as? String, "video")
+    }
+
+    /// A field of the wrong *type* degrades exactly as a missing one does.
+    ///
+    /// `decodeIfPresent` answers an absent key with nil and a present-but-wrong-typed one
+    /// by throwing, and that throw climbs the ladder the hand-written decoder exists to
+    /// stop: attachment, turn, library, and an older build starting from an empty one.
+    /// A hand-edited document is exactly where this arrives.
+    func testAWrongTypedFieldDegradesRatherThanThrowing() throws {
+        let id = UUID()
+        let wrong = """
+            {"id":"\(id.uuidString)","kind":42,"name":7,
+             "mediaType":null,"byteCount":"1.4 MB"}
+            """
+        let decoded = try JSONDecoder().decode(Attachment.self, from: Data(wrong.utf8))
+
+        XCTAssertEqual(decoded.id, id)
+        XCTAssertEqual(decoded.kind, .other(raw: "other"))
+        XCTAssertEqual(decoded.mediaType, "application/octet-stream")
+        XCTAssertEqual(decoded.byteCount, 0)
+        XCTAssertFalse(decoded.name.isEmpty, "something has to be shown in the panel")
     }
 
     /// A turn written before attachments existed still loads, with none.

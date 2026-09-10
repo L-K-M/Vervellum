@@ -166,6 +166,16 @@ final class ThreadArchiveTests: XCTestCase {
         // A backup standing in is still the whole of what this launch will honour: the
         // save it is behind by is lost either way, so bytes only that save named are
         // orphaned, not in use, and the sweep may run.
+        //
+        // It reads like the case the flag exists to refuse — a document on disk holding
+        // threads this library does not — and the difference is that the broken primary
+        // is not repairable *by anything here*. `writeNow` rotates the primary into the
+        // `.bak` only when `primaryIsTrustworthy`, which a primary that failed to decode
+        // is not; so the next save overwrites those bytes without ever having read them,
+        // and nothing in this build will look at them again. Threads no code path can
+        // reach are not threads a sweep has to spare. Untrusting this case would instead
+        // mean a single truncated write stopped every later sweep for good, which is the
+        // unbounded direction.
         XCTAssertTrue(reloaded.libraryIsTrustworthy)
     }
 
@@ -196,6 +206,11 @@ final class ThreadArchiveTests: XCTestCase {
 
         let archive = ThreadArchive(fileURL: fileURL, debounce: 0)
         XCTAssertTrue(archive.isReadOnly, "a version this build does not know is read-only")
+        // Both halves of what the comment above claims, because they are two facts in
+        // two places and the sweep gate alone could go on reading false while `load`
+        // started decoding optimistically before the version check.
+        XCTAssertTrue(archive.library.threads.isEmpty,
+                      "a version this build does not know must not be half-decoded in")
         XCTAssertFalse(archive.libraryIsTrustworthy,
                        "read-only means the attachments beside it are not ours to sweep")
     }
