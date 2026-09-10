@@ -182,9 +182,11 @@ VervellumTests/              macOS-only tests (hotkeys, panel geometry, Accessib
   `AssessmentParser`, `CitationValidator`, `SourceHarvester`, `EvidenceExtractor`,
   `ResearchContext` and `ProviderSettings` are pure and carry the validation rules.
   `Attachment` decides what a user may attach to a question and what its bytes turn out
-  to be; the bytes themselves live in `Store/AttachmentStore`, beside the thread file
-  rather than inside it, because a thread's history is what gets re-sent to the model on
-  every later turn.
+  to be, and `AttachmentIntake` holds the rest of that policy — the per-question limit,
+  the words a refusal is given, and reading a dropped path — so both front ends accept
+  and refuse the same things. The bytes themselves live in `Store/AttachmentStore`,
+  beside the thread file rather than inside it, because a thread's history is what gets
+  re-sent to the model on every later turn.
 - `Store/` — `ThreadLibrary` (the versioned document) and `ThreadArchive`.
 - `Text/` — `MarkdownParser`, `ComposerCommand`, `Formatting`, `TranscriptFormatter`.
 - `Platform/` — the seams: `SecretStore`, `SettingsStore`, `LogSink`,
@@ -193,7 +195,10 @@ VervellumTests/              macOS-only tests (hotkeys, panel geometry, Accessib
 
 `Sources/VervellumKit/Linux/` — `GTK` (every raw C call), `PangoMarkup` (rendering),
 `LinuxPanel`, `LinuxApp`, `LinuxEnvironment`, `LinuxPaths`, `LinuxSecretStore`,
-`ShortcutInstaller`.
+`ShortcutInstaller`. Attaching is `GTK.onDrop` and `GTK.readClipboard`, over the
+`GtkDropTarget` and `GdkClipboard` helpers in the shim: the GTypes involved are all
+macros and a dropped value arrives as a `GValue` holding an opaque list, so the
+flattening is done in C rather than by re-typing raw pointers in Swift.
 
 `Vervellum/` (macOS):
 
@@ -210,11 +215,12 @@ VervellumTests/              macOS-only tests (hotkeys, panel geometry, Accessib
 - `Store/` — `ThreadStore`, an `ObservableObject` shell over `ThreadArchive`. It also
   owns the `AttachmentStore` beside it and sweeps it where a thread can stop existing —
   a delete, a prune, an erase, and once at launch.
-- `Attachments/` — `AttachmentIntake`, which turns what was pasted or dropped into
-  attachments. The one place that decides what wins when a pasteboard carries several
-  things, and the only layer allowed to re-encode a TIFF screenshot as PNG: `Core` may
-  not import an imaging framework, which is why it refuses an image it cannot identify
-  rather than converting one.
+- `Attachments/` — `PasteboardIntake`, the AppKit half of attaching: which of several
+  things on a pasteboard the user meant, and the TIFF-to-PNG re-encode a clipboard
+  screenshot needs. Only that half — what may be attached at all, and in what words it
+  is refused, is `AttachmentIntake` in Core, so the GTK front end answers the same. The
+  re-encode is here because `Core` may not import an imaging framework, which is also
+  why `Core` refuses an image it cannot identify rather than converting one.
 - `Security/` — `KeychainStore`, the macOS `SecretStore`.
 - `Selection/` — `SelectedTextReader` (the Accessibility path).
 - `Hotkeys/` — `CarbonHotkey`, `KeyCodes`.

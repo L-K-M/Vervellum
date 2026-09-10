@@ -466,8 +466,9 @@ struct PanelRootView: View {
     /// Said twice — once to the eye as a tooltip, once to VoiceOver from `submit` — and
     /// the comment there already promised they were the same sentence. Now they are.
     private static let unfinishedCommandCopy = "Finish the command name"
-    /// The other reason the send button is dim, said in the same two places.
-    private static let questionlessCopy = "Ask something to go with the attachment"
+    /// The other reason the send button is dim, said in the same two places — and, since
+    /// the GTK composer refuses the same gesture for the same reason, from Core.
+    private static let questionlessCopy = AttachmentIntake.questionlessMessage
     /// Spoken by both ways out of the list — Escape, and ↑ off the top. Named because
     /// two literals for one transition is how a screen reader ends up describing the
     /// same thing two ways after somebody tunes the wording at one of them.
@@ -610,7 +611,7 @@ struct PanelRootView: View {
                         // The size, because an attachment is about to be sent to a
                         // provider that charges for it, and "1.4 MB" is the difference
                         // between a screenshot and a photograph nobody meant to send.
-                        Text(Self.size(item.attachment.byteCount))
+                        Text(item.attachment.sizeDescription)
                             .font(PanelTheme.Font.caption(textScale))
                             .foregroundStyle(PanelTheme.Palette.tertiaryText)
                         Spacer(minLength: 0)
@@ -646,10 +647,6 @@ struct PanelRootView: View {
             // arrive at.
             .accessibilityElement(children: .contain)
             .accessibilityLabel("\(attachments.count) attachment\(attachments.count == 1 ? "" : "s")")
-        }
-
-        static func size(_ bytes: Int) -> String {
-            ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
         }
     }
 

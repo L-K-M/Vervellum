@@ -108,7 +108,7 @@ struct ComposerView: NSViewRepresentable {
         // fall-through in `performDragOperation` never reached because the drop never
         // arrived. Reading the current list first keeps both halves.
         textView.registerForDraggedTypes(
-            textView.registeredDraggedTypes + AttachmentIntake.draggedTypes)
+            textView.registeredDraggedTypes + PasteboardIntake.draggedTypes)
         textView.string = text
 
         let scroll = NSScrollView()
@@ -268,7 +268,8 @@ private final class ComposerTextView: NSTextView {
 
     /// A paste that is carrying a file or an image attaches it; anything else pastes.
     ///
-    /// `AttachmentIntake` decides which of the two this is, and it is deliberately
+    /// `PasteboardIntake` decides which of the two this is — with Core's
+    /// `AttachmentIntake` deciding what may be attached at all — and it is deliberately
     /// conservative: a pasteboard carrying text as well as a picture pastes the text.
     /// This override only routes.
     ///
@@ -291,7 +292,7 @@ private final class ComposerTextView: NSTextView {
     /// forward to flatten.
     override func paste(_ sender: Any?) {
         guard let coordinator else { return super.paste(sender) }
-        let outcome = AttachmentIntake.read(NSPasteboard.general,
+        let outcome = PasteboardIntake.read(NSPasteboard.general,
                                             existing: coordinator.parent.attachmentCount)
         guard !outcome.isEmpty else { return super.paste(sender) }
         coordinator.parent.onAttach(outcome)
@@ -316,7 +317,7 @@ private final class ComposerTextView: NSTextView {
         // `textWins: false`: `carries` has already said this drag is holding a picture
         // or a file, and the text beside a dragged image is the page's address, not
         // something anybody meant to paste.
-        let outcome = AttachmentIntake.read(sender.draggingPasteboard,
+        let outcome = PasteboardIntake.read(sender.draggingPasteboard,
                                             existing: coordinator.parent.attachmentCount,
                                             textWins: false)
         guard !outcome.isEmpty else { return super.performDragOperation(sender) }
@@ -330,7 +331,7 @@ private final class ComposerTextView: NSTextView {
     /// cursor promises — and a drag that showed a copy badge and then did nothing would
     /// be worse than one that refused up front.
     private func carries(_ sender: any NSDraggingInfo) -> Bool {
-        AttachmentIntake.carriesAttachment(sender.draggingPasteboard)
+        PasteboardIntake.carriesAttachment(sender.draggingPasteboard)
     }
 
     override func draw(_ dirtyRect: NSRect) {

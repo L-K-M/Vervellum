@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 @testable import Vervellum
 
 /// What a paste or a drop on the composer turns out to be.
-final class AttachmentIntakeTests: XCTestCase {
+final class PasteboardIntakeTests: XCTestCase {
 
     private var pasteboard: NSPasteboard!
     private var directory: URL!
@@ -42,7 +42,7 @@ final class AttachmentIntakeTests: XCTestCase {
     /// outcome means: nothing here claimed it.
     func testPlainTextIsNotAnAttachment() {
         XCTAssertTrue(pasteboard.setString("just words", forType: .string))
-        XCTAssertTrue(AttachmentIntake.read(pasteboard).isEmpty)
+        XCTAssertTrue(PasteboardIntake.read(pasteboard).isEmpty)
     }
 
     /// Copying from a web page puts the words *and* a picture on the pasteboard. Taking
@@ -58,7 +58,7 @@ final class AttachmentIntakeTests: XCTestCase {
         pasteboard.clearContents()
         XCTAssertTrue(pasteboard.writeObjects([item]))
 
-        XCTAssertTrue(AttachmentIntake.read(pasteboard).isEmpty)
+        XCTAssertTrue(PasteboardIntake.read(pasteboard).isEmpty)
     }
 
     /// But a *drop* of that same board takes the picture. A browser hands over the image
@@ -73,11 +73,11 @@ final class AttachmentIntakeTests: XCTestCase {
         pasteboard.clearContents()
         XCTAssertTrue(pasteboard.writeObjects([item]))
 
-        let dropped = AttachmentIntake.read(pasteboard, textWins: false)
+        let dropped = PasteboardIntake.read(pasteboard, textWins: false)
         XCTAssertEqual(dropped.accepted.count, 1, "\(dropped.refusals)")
         XCTAssertEqual(dropped.accepted.first?.attachment.kind, .image)
         // And the paste of the same board is unchanged: there the words are the point.
-        XCTAssertTrue(AttachmentIntake.read(pasteboard).isEmpty)
+        XCTAssertTrue(PasteboardIntake.read(pasteboard).isEmpty)
     }
 
     /// A file wins over the path-shaped string that comes with it. Pasting a file into a
@@ -92,7 +92,7 @@ final class AttachmentIntakeTests: XCTestCase {
         pasteboard.clearContents()
         XCTAssertTrue(pasteboard.writeObjects([path, url as NSURL]))
 
-        let outcome = AttachmentIntake.read(pasteboard)
+        let outcome = PasteboardIntake.read(pasteboard)
         XCTAssertEqual(outcome.accepted.count, 1)
         XCTAssertEqual(outcome.accepted.first?.attachment.name, "shot.png")
         XCTAssertEqual(outcome.accepted.first?.attachment.kind, .image)
@@ -111,7 +111,7 @@ final class AttachmentIntakeTests: XCTestCase {
         XCTAssertTrue(pasteboard.setData(try XCTUnwrap(image.tiffRepresentation),
                                          forType: .tiff))
 
-        let outcome = AttachmentIntake.read(pasteboard)
+        let outcome = PasteboardIntake.read(pasteboard)
         let attached = try XCTUnwrap(outcome.accepted.first)
         XCTAssertEqual(attached.attachment.mediaType, "image/png")
         XCTAssertEqual(attached.attachment.name, AttachmentIntake.pastedImageName)
@@ -129,7 +129,7 @@ final class AttachmentIntakeTests: XCTestCase {
         pasteboard.clearContents()
         XCTAssertTrue(pasteboard.writeObjects([first, second]))
 
-        let outcome = AttachmentIntake.read(pasteboard)
+        let outcome = PasteboardIntake.read(pasteboard)
         XCTAssertEqual(outcome.accepted.count, 2, "\(outcome.refusals)")
         XCTAssertTrue(outcome.accepted.allSatisfy { $0.attachment.kind == .image })
         // And they are told apart. Two chips reading `pasted image.png` are two things
@@ -137,9 +137,9 @@ final class AttachmentIntakeTests: XCTestCase {
         // name is what the model is told it was sent.
         XCTAssertEqual(outcome.accepted.map { $0.attachment.name },
                        [AttachmentIntake.pastedImageName, "pasted image 2.png"])
-        // And the cap still counts them: two more on top of three is one taken and a
-        // note, not two silently dropped.
-        let onFull = AttachmentIntake.read(pasteboard,
+        // And the cap still counts them: two more onto a question one short of full is
+        // one taken and a note, not two silently dropped.
+        let onFull = PasteboardIntake.read(pasteboard,
                                            existing: AttachmentIntake.maximumPerQuestion - 1)
         XCTAssertEqual(onFull.accepted.count, 1)
         XCTAssertEqual(onFull.refusals, [AttachmentIntake.tooManyMessage])
@@ -163,7 +163,7 @@ final class AttachmentIntakeTests: XCTestCase {
         pasteboard.clearContents()
         XCTAssertTrue(pasteboard.writeObjects(items))
 
-        let outcome = AttachmentIntake.read(pasteboard)
+        let outcome = PasteboardIntake.read(pasteboard)
         XCTAssertEqual(outcome.accepted.count, AttachmentIntake.maximumPerQuestion)
         XCTAssertEqual(outcome.refusals, [AttachmentIntake.tooManyMessage])
         // And they are still numbered from the first, so the cap did not renumber what
@@ -194,21 +194,11 @@ final class AttachmentIntakeTests: XCTestCase {
         // Read as a drop. On a paste the address wins the whole gesture before the cap
         // is ever reached, which is a different rule and tested above; the drag is where
         // an image and its address arrive together and both are looked at.
-        let outcome = AttachmentIntake.read(pasteboard, textWins: false)
+        let outcome = PasteboardIntake.read(pasteboard, textWins: false)
 
         XCTAssertEqual(outcome.accepted.count, AttachmentIntake.maximumPerQuestion,
                        "\(outcome.refusals)")
         XCTAssertEqual(outcome.refusals, [], "every picture on the board was taken")
-    }
-
-    /// The numbering starts at the *second* image, so the ordinary paste of one is
-    /// unchanged by it — a series of one numbered `pasted image 1.png` would be worse
-    /// than the plain name it replaced. That the single-image paths still produce that
-    /// name is pinned by the TIFF test above; this pins the rule they get it from.
-    func testTheFirstPastedImageOfAPasteIsNotNumbered() {
-        XCTAssertEqual(AttachmentIntake.name(forPastedImage: 1),
-                       AttachmentIntake.pastedImageName)
-        XCTAssertEqual(AttachmentIntake.name(forPastedImage: 2), "pasted image 2.png")
     }
 
     /// A copied *link* is a real `NSURL` on the pasteboard, and must not be claimed.
@@ -222,7 +212,7 @@ final class AttachmentIntakeTests: XCTestCase {
     func testACopiedWebLinkIsNotAnAttachment() throws {
         let url = try XCTUnwrap(NSURL(string: "https://example.com/notes"))
         XCTAssertTrue(pasteboard.writeObjects([url]))
-        XCTAssertTrue(AttachmentIntake.read(pasteboard).isEmpty)
+        XCTAssertTrue(PasteboardIntake.read(pasteboard).isEmpty)
     }
 
     /// A JPEG-only clipboard — some capture tools and editors offer nothing else — has
@@ -234,9 +224,9 @@ final class AttachmentIntakeTests: XCTestCase {
             Data([0xFF, 0xD8, 0xFF, 0xE0]),
             forType: NSPasteboard.PasteboardType(UTType.jpeg.identifier)))
 
-        let outcome = AttachmentIntake.read(pasteboard)
+        let outcome = PasteboardIntake.read(pasteboard)
         XCTAssertTrue(outcome.accepted.isEmpty)
-        XCTAssertEqual(outcome.refusals, [AttachmentIntake.unreadableImageMessage])
+        XCTAssertEqual(outcome.refusals, [PasteboardIntake.unreadableImageMessage])
         // And it is *claimed*: an empty outcome would hand the gesture back to AppKit,
         // which has nothing to paste from this board either.
         XCTAssertFalse(outcome.isEmpty)
@@ -253,12 +243,12 @@ final class AttachmentIntakeTests: XCTestCase {
         pasteboard.clearContents()
         XCTAssertTrue(pasteboard.writeObjects([item]))
 
-        XCTAssertTrue(AttachmentIntake.read(pasteboard).isEmpty)
+        XCTAssertTrue(PasteboardIntake.read(pasteboard).isEmpty)
     }
 
     /// Nothing recognisable is nothing claimed, so AppKit's own handling stands.
     func testAnEmptyPasteboardClaimsNothing() {
-        XCTAssertTrue(AttachmentIntake.read(pasteboard).isEmpty)
+        XCTAssertTrue(PasteboardIntake.read(pasteboard).isEmpty)
     }
 
     /// The inverse of `testAFileWinsOverTheStringBesideIt`, and the one that guards the
@@ -268,144 +258,70 @@ final class AttachmentIntakeTests: XCTestCase {
     /// pair of words. Nothing pins that from this side otherwise.
     func testAPathShapedStringWithNoFileBehindItStillPastesAsText() {
         XCTAssertTrue(pasteboard.setString("/usr/local/share/notes.txt", forType: .string))
-        XCTAssertTrue(AttachmentIntake.read(pasteboard).isEmpty)
+        XCTAssertTrue(PasteboardIntake.read(pasteboard).isEmpty)
     }
 
-    // MARK: The cap, and the one gesture it must not apply to
-
-    /// A paste or a drop is an intake: the cap is the answer, and what is past it is
-    /// declined while the file sits untouched wherever the user got it.
-    func testAPasteIsCappedAndSaysWhatWasLeftOut() {
-        let over = AttachmentIntake.admitted(existing: AttachmentIntake.maximumPerQuestion - 1,
-                                             incoming: 3, restoring: false)
-        XCTAssertEqual(over.taken, 1)
-        XCTAssertEqual(over.note, AttachmentIntake.tooManyMessage)
-
-        let fits = AttachmentIntake.admitted(existing: 0,
-                                             incoming: AttachmentIntake.maximumPerQuestion - 1,
-                                             restoring: false)
-        XCTAssertEqual(fits.taken, AttachmentIntake.maximumPerQuestion - 1)
-        XCTAssertNil(fits.note)
-
-        // And a composer with no room at all gets the other sentence here too. This is
-        // the panel's own check rather than an intake's, so it is the one place the
-        // wording could have drifted from the two above without a gesture noticing.
-        let full = AttachmentIntake.admitted(existing: AttachmentIntake.maximumPerQuestion,
-                                             incoming: 2, restoring: false)
-        XCTAssertEqual(full.taken, 0)
-        XCTAssertEqual(full.note, AttachmentIntake.noRoomMessage)
-    }
-
-    /// A composer already at the cap is the other sentence, and it has to be the other
-    /// sentence: nothing was "left out" of anything, because nothing was taken at all,
-    /// and the only move that helps is removing one. Both intakes reach it by their own
-    /// guard, so both are asked here — the wording is shared, the code is not.
-    func testAPasteOntoAFullComposerSaysThereIsNoRoom() throws {
-        XCTAssertTrue(pasteboard.setData(png(), forType: .png))
-        let pasted = AttachmentIntake.read(pasteboard,
-                                           existing: AttachmentIntake.maximumPerQuestion)
-        XCTAssertTrue(pasted.accepted.isEmpty)
-        XCTAssertEqual(pasted.refusals, [AttachmentIntake.noRoomMessage])
-
-        let file = try write(png(), named: "shot.png")
-        let dropped = AttachmentIntake.read(files: [file],
-                                            existing: AttachmentIntake.maximumPerQuestion)
-        XCTAssertTrue(dropped.accepted.isEmpty)
-        XCTAssertEqual(dropped.refusals, [AttachmentIntake.noRoomMessage])
-    }
-
-    /// A question handed back by the queue is an undo, and the cap cannot apply to it.
-    /// The bytes of a pasted screenshot are on no disk anywhere — the hand-back is the
-    /// only copy there is — so dropping one here would not decline a file, it would
-    /// destroy one, and tell its owner it had been "left out" of somewhere they could
-    /// go and get it again.
-    func testARestoreKeepsEverythingAndWarnsInsteadOfDropping() {
-        let over = AttachmentIntake.admitted(existing: 2,
-                                             incoming: AttachmentIntake.maximumPerQuestion,
-                                             restoring: true)
-        XCTAssertEqual(over.taken, AttachmentIntake.maximumPerQuestion,
-                       "a returned attachment is the only copy of itself")
-        XCTAssertEqual(over.note, AttachmentIntake.overCapMessage)
-        XCTAssertNotEqual(over.note, AttachmentIntake.tooManyMessage,
-                          "nothing was left out, and the words must not say it was")
-
-        let under = AttachmentIntake.admitted(existing: 0, incoming: 2, restoring: true)
-        XCTAssertEqual(under.taken, 2)
-        XCTAssertNil(under.note, "under the cap there is nothing to warn about")
-    }
 
     // MARK: Files
 
-    /// The size is read from the directory entry, so a huge file is refused without
-    /// first being pulled into memory to find out how big it is.
-    func testAnOversizedFileIsRefusedByItsSizeOnDisk() throws {
-        let url = try write(Data(repeating: 0x41, count: Attachment.maxAttachmentBytes + 1),
-                            named: "huge.log")
-        let outcome = AttachmentIntake.read(files: [url])
+    /// The file half is Core's, and `Tests/VervellumKitTests/AttachmentIntakeTests.swift`
+    /// covers it there: an oversized file refused from its directory entry without being
+    /// read, a dropped folder named in the refusal, one bad file not taking the good ones
+    /// with it, the limit counting what the question already carries, and the same file
+    /// twice yielding two attachments. This is the one case that has to be true *through*
+    /// the pasteboard: a file that arrives on it reaches that code at all, and comes back
+    /// classified by its bytes. It is read with the question one short of full, which is
+    /// the other side of the boundary `testTheLimitIsForwardedWhenReadingFilesFromThePasteboard`
+    /// pins — a forwarded count has to leave the last slot usable, not just refuse past it.
+    func testAFileOnThePasteboardIsReadThroughCore() throws {
+        let url = try write(Data("read timeout".utf8), named: "log.txt")
+        XCTAssertTrue(pasteboard.writeObjects([url as NSURL]))
 
-        XCTAssertTrue(outcome.accepted.isEmpty)
-        XCTAssertEqual(outcome.refusals.count, 1)
-        // Claimed, not merely refused: an empty outcome hands the gesture back to AppKit
-        // and the sentence below is never shown — which is the drop that appears to do
-        // nothing, wearing the costume of a drop that explained itself.
-        XCTAssertFalse(outcome.isEmpty)
-        XCTAssertTrue(outcome.refusals[0].contains("huge.log"), outcome.refusals[0])
-        XCTAssertTrue(outcome.refusals[0].contains("MB"), outcome.refusals[0])
-    }
-
-    /// A dropped folder is refused out loud. A drag that appears to do nothing reads as
-    /// a drop target that does not work.
-    func testADroppedFolderIsRefusedRatherThanIgnored() throws {
-        let folder = directory.appendingPathComponent("papers")
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-
-        let outcome = AttachmentIntake.read(files: [folder])
-        XCTAssertTrue(outcome.accepted.isEmpty)
-        XCTAssertEqual(outcome.refusals.count, 1)
-        XCTAssertFalse(outcome.isEmpty, "an unclaimed refusal is a refusal nobody sees")
-        XCTAssertTrue(outcome.refusals[0].contains("papers"), outcome.refusals[0])
-    }
-
-    /// One bad file among good ones does not take them with it.
-    func testAGoodFileSurvivesABadOneBesideIt() throws {
-        let good = try write(Data("read timeout".utf8), named: "log.txt")
-        // Refused because nothing can name what it is: no image signature, and a NUL in
-        // the first bytes is what separates a binary from text that happens to decode.
-        // Not its size and not its extension — the name is the one part of a file that
-        // carries no evidence about it.
-        let bad = try write(Data([0x00, 0x01, 0x02]), named: "thing.bin")
-
-        let outcome = AttachmentIntake.read(files: [bad, good])
+        let outcome = PasteboardIntake.read(pasteboard,
+                                            existing: AttachmentIntake.maximumPerQuestion - 1)
         XCTAssertEqual(outcome.accepted.map(\.attachment.name), ["log.txt"])
-        XCTAssertEqual(outcome.refusals.count, 1)
+        XCTAssertEqual(outcome.accepted.first?.attachment.kind, .text)
     }
 
-    // MARK: The limit
-
-    func testTheLimitCountsWhatTheQuestionAlreadyCarries() throws {
+    /// The composer hands in what the question already carries, and this is the hop that
+    /// carries it: a `read` that dropped the argument would compile, pass every test
+    /// here that omits it, and quietly restore unlimited pasting. Not *every* test —
+    /// the two-image case reads one short of full and would notice — but that one
+    /// counts images against the cap incidentally, on its way to something else. This
+    /// is the assertion whose whole subject is the hop.
+    func testTheLimitIsForwardedWhenReadingFilesFromThePasteboard() throws {
         let url = try write(png(), named: "shot.png")
-        let files = Array(repeating: url, count: AttachmentIntake.maximumPerQuestion)
+        XCTAssertTrue(pasteboard.writeObjects([url as NSURL]))
 
-        let fresh = AttachmentIntake.read(files: files)
-        XCTAssertEqual(fresh.accepted.count, AttachmentIntake.maximumPerQuestion)
-        // Classified by their bytes on the way through, which only the pasteboard path
-        // asserted — and a drop is how files actually arrive.
-        XCTAssertTrue(fresh.accepted.allSatisfy { $0.attachment.kind == .image })
-        XCTAssertTrue(fresh.refusals.isEmpty)
-
-        // The same drop onto a question that already carries one leaves the last out,
-        // and says so rather than dropping it in silence.
-        let onTop = AttachmentIntake.read(files: files, existing: 1)
-        XCTAssertEqual(onTop.accepted.count, AttachmentIntake.maximumPerQuestion - 1)
-        XCTAssertEqual(onTop.refusals, [AttachmentIntake.tooManyMessage])
+        let outcome = PasteboardIntake.read(pasteboard,
+                                            existing: AttachmentIntake.maximumPerQuestion)
+        XCTAssertTrue(outcome.accepted.isEmpty)
+        // The full-question words, not the ones for a drop that was partly taken:
+        // nothing was left out anywhere, and the file is still where it was dropped from.
+        XCTAssertEqual(outcome.refusals, [AttachmentIntake.noRoomMessage])
     }
 
-    /// Every attachment is its own record even when the same file is dropped twice, so
-    /// removing one chip cannot remove the other.
-    func testTheSameFileTwiceIsTwoAttachments() throws {
-        let url = try write(png(), named: "shot.png")
-        let outcome = AttachmentIntake.read(files: [url, url])
-        XCTAssertEqual(outcome.accepted.count, 2)
-        XCTAssertNotEqual(outcome.accepted[0].id, outcome.accepted[1].id)
+    /// The accepting side of the boundary for images, which the file branch has and this
+    /// one did not: a forwarded count has to leave the last slot usable, not only refuse
+    /// past it, and an off-by-one in the image branch would have passed the suite.
+    func testAPastedImageFillsTheLastSlot() {
+        XCTAssertTrue(pasteboard.setData(png(), forType: .png))
+
+        let outcome = PasteboardIntake.read(pasteboard,
+                                            existing: AttachmentIntake.maximumPerQuestion - 1)
+        XCTAssertEqual(outcome.accepted.count, 1)
+        XCTAssertEqual(outcome.accepted.first?.attachment.kind, .image)
+        XCTAssertTrue(outcome.refusals.isEmpty)
+    }
+
+    /// And the refusing side. A paste onto a full question is turned away in words
+    /// rather than quietly making it fuller.
+    func testTheLimitIsForwardedForAPastedImage() {
+        XCTAssertTrue(pasteboard.setData(png(), forType: .png))
+
+        let outcome = PasteboardIntake.read(pasteboard,
+                                            existing: AttachmentIntake.maximumPerQuestion)
+        XCTAssertTrue(outcome.accepted.isEmpty)
+        XCTAssertEqual(outcome.refusals, [AttachmentIntake.noRoomMessage])
     }
 }
