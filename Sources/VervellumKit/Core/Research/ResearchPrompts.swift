@@ -113,10 +113,10 @@ enum ResearchPrompts {
 
         Entries in "found" keep their numbers from the turn's source list, so a number \
         you name here names the same page everywhere else in the run. A key called \
-        "failed_queries", when present, lists searches already tried that returned \
-        nothing usable: do not re-ask them in new words — the index has answered that \
-        wording once already, and a synonym spends a request proving the same nothing \
-        twice.
+        "failed_queries", when present, lists searches this run already tried that \
+        produced nothing usable — whether the engines errored or the index held \
+        nothing for them. Do not re-ask them in new words: a synonym spends a request \
+        on ground this run has already covered.
 
         Plan up to \(maxSearches) searches for those gaps and nothing else. Do not \
         re-ask what has been answered: a query that would return sources already in \

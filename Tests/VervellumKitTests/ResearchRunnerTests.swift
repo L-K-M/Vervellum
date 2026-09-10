@@ -963,11 +963,12 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertTrue(roundTwo.contains("2. Hit for first"), roundTwo)
     }
 
-    /// A search that failed on every engine must be visible to the next round's planner,
-    /// or the round re-asks the dead query in new words and spends the budget proving
-    /// the same nothing twice. The round plans two searches so the engine survives the
-    /// failure of one — an engine that answers nothing is dropped from later rounds, and
-    /// no round three would happen at all.
+    /// A search that produced nothing usable must be visible to the next round's
+    /// planner, or the round re-asks the dead query in new words and spends the budget
+    /// proving the same nothing twice. Both shapes are covered: an engine that throws,
+    /// and an engine that answers 200 with zero hits — treating the second as an
+    /// answer is what kept barren queries out of the list. The round plans a search
+    /// that answers alongside, so the engine survives and round three happens at all.
     func testDeepResearchTellsTheNextRoundWhatFailed() async throws {
         let transport = StubTransport { call in
             switch call.kind {
@@ -977,6 +978,7 @@ final class ResearchRunnerTests: XCTestCase {
                 let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
                     .queryItems?.first { $0.name == "q" }?.value ?? ""
                 if query == "gap-query" { return .failure(ResearchError("search is down")) }
+                if query == "barren-query" { return .json(Self.searxng([])) }
                 return .json(Self.searxng([(url: "https://ok.example/\(query)",
                                             title: "Hit for \(query)")]))
             case .json:
@@ -984,8 +986,8 @@ final class ResearchRunnerTests: XCTestCase {
                 case .plan:
                     return .completion(json: Self.plan("first", purpose: "the opening question"))
                 case .deepPlan:
-                    // Round two asks one search that fails and one that answers; round
-                    // three must be told about the failure and is scripted to stop.
+                    // Round two asks one search that fails, one that answers empty, and
+                    // one that answers; round three must be told about the first two.
                     guard call.systemPrompt?.contains("this is round 2") == true else {
                         let nothingLeft: [String: Any] = ["reading": "Nothing is missing.",
                                                           "searches": [Any]()]
@@ -995,6 +997,7 @@ final class ResearchRunnerTests: XCTestCase {
                         "reading": "One gap to close.",
                         "searches": [
                             ["purpose": "the gap", "arguments": ["q": "gap-query"]],
+                            ["purpose": "the barren field", "arguments": ["q": "barren-query"]],
                             ["purpose": "the other side", "arguments": ["q": "second"]],
                         ],
                     ])
@@ -1016,6 +1019,7 @@ final class ResearchRunnerTests: XCTestCase {
         let roundThree = try XCTUnwrap(plans.last?.userContent)
         XCTAssertTrue(roundThree.contains("failed_queries"), roundThree)
         XCTAssertTrue(roundThree.contains("gap-query"), roundThree)
+        XCTAssertTrue(roundThree.contains("barren-query"), roundThree)
         // The query that answered must not be reported as failed.
         XCTAssertFalse(roundThree.contains("\"second\""), roundThree)
     }

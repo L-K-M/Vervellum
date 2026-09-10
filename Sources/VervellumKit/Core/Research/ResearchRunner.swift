@@ -691,7 +691,8 @@ final class ResearchRunner: ResearchRunning {
         update { $0.stage = .searching }
         var rawResults: [Any] = []
         var searchFailures: [String] = []
-        /// The display query of every planned search that *no* engine answered. Fed to
+        /// The display query of every planned search that produced nothing usable on
+        /// any engine — whether the engines errored or the index held nothing. Fed to
         /// the follow-up planner as `failed_queries`: a round that cannot tell "asked
         /// and got nothing" from "never asked" re-asks the dead query in new words and
         /// spends the budget proving the same nothing twice.
@@ -709,7 +710,7 @@ final class ResearchRunner: ResearchRunning {
             var productive: Set<ObjectIdentifier> = []
             for step in planned {
                 try Task.checkCancellation()
-                var answered = 0
+                var fruitful = 0
                 for engine in asked {
                     do {
                         let label = asked.count > 1
@@ -728,7 +729,15 @@ final class ResearchRunner: ResearchRunning {
                                   + "\(EvidenceExtractor.shape(of: result))")
                         rawResults.append(result)
                         productive.insert(ObjectIdentifier(engine))
-                        answered += 1
+                        // "Usable" is the extractor's call, made here against the one
+                        // result: a 200 with zero hits resolves fine, and treating it
+                        // as an answer would leave the next round re-asking a barren
+                        // query in new words — the exact waste `failedQueries` exists
+                        // to stop. The main pass re-extracts everything at once; the
+                        // cost of this look is one walk per result.
+                        if !EvidenceExtractor.sources(from: [result]).isEmpty {
+                            fruitful += 1
+                        }
                     } catch is CancellationError {
                         throw ResearchError.cancelled
                     } catch let error as ResearchError where error == .cancelled {
@@ -746,10 +755,15 @@ final class ResearchRunner: ResearchRunning {
                         searchFailures.append(reason)
                     }
                 }
-                // Asked of every engine and answered by none. The query is the model's
-                // own text, safe to hand back to it — the trace rule about not logging
-                // results is about content, and this never reaches the log.
-                if answered == 0, !asked.isEmpty { failedQueries.append(step.displayQuery) }
+                // Asked of every engine and nothing usable came back — outage or
+                // barren index, the planner only needs the outcome. The query is the
+                // model's own text, safe to hand back to it — the trace rule about not
+                // logging results is about content, and this never reaches the log.
+                // Deduped: a planner that re-asks a dead query anyway must not fill
+                // the next round's context with the same line twice.
+                if fruitful == 0, !asked.isEmpty, !failedQueries.contains(step.displayQuery) {
+                    failedQueries.append(step.displayQuery)
+                }
                 // Counted whether the attempts succeeded or failed, and once per planned
                 // search rather than once per request: "2 of 3" is about the plan the
                 // reader can see, not about how many engines it was put to.
