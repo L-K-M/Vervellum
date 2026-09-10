@@ -3,7 +3,7 @@
 A review of `/deep-research` against OpenAI Deep Research, Gemini Deep Research,
 Anthropic's Research system, GPT-Researcher, and Stanford STORM, and the changes
 made as a result. Written 2026-09-10; the "Implemented changes" section is kept in
-step with the code.
+step with the code as follow-up PRs land.
 
 ## What the pipeline does today
 
@@ -37,13 +37,15 @@ where the gaps were.
 
 | Tool | Gathering | Verification | Steering |
 |---|---|---|---|
-| OpenAI Deep Research | Agentic loop, tens of minutes, many pages, code execution | Citation links only | Clarifying questions, editable plan, mid-run steering |
-| Gemini Deep Research | Agentic loop, 5–10+ min | Citation links only | Editable plan before start |
-| Anthropic Research | Orchestrator + parallel subagents, parallel tool calls | CitationAgent (attribution) | Effort scaled to query complexity |
-| GPT-Researcher | Sub-question decomposition, >20 sources scraped, relevance filtering; tree-exploration deep mode | Frequency-of-agreement heuristic | Depth/breadth config |
-| STORM | Perspective-guided questioning, simulated expert dialogue | Per-section grounding | Outline then article |
+| [OpenAI Deep Research](https://help.openai.com/en/articles/10500283-deep-research-faq) | Agentic loop, tens of minutes, many pages, code execution | Citation links only | Clarifying questions, editable plan, mid-run steering |
+| [Gemini Deep Research](https://support.google.com/gemini/answer/15719111) | Agentic loop, 5–10+ min | Citation links only | Editable plan before start |
+| [Anthropic Research](https://www.anthropic.com/engineering/multi-agent-research-system) | Orchestrator + parallel subagents, parallel tool calls | CitationAgent (attribution) | Effort scaled to query complexity |
+| [GPT-Researcher](https://github.com/assafelovic/gpt-researcher) | Sub-question decomposition, >20 sources scraped, relevance filtering; tree-exploration deep mode | Frequency-of-agreement heuristic | Depth/breadth config |
+| [STORM](https://github.com/stanford-oval/storm) | Perspective-guided questioning, simulated expert dialogue | Per-section grounding | Outline then article |
 
-Two measured findings from Anthropic's engineering post carry the most weight:
+Two measured findings from [Anthropic's multi-agent research engineering
+post](https://www.anthropic.com/engineering/multi-agent-research-system) carry the
+most weight:
 
 - Token usage alone explained ~80% of the performance variance on BrowseComp; tool
   calls and model choice explained most of the rest. Deep-research quality is, to a
@@ -122,14 +124,27 @@ The field has converged on **bounded agentic loops** — the model calls search/
 tools until satisfied, under effort caps — over fixed stage pipelines, because
 reacting to actual results beats planning against a digest. Vervellum's staged
 design buys predictable cost, a fully auditable process trail, and a known stage for
-every degradation. Both positions are now implemented and documented:
+every degradation. Both positions are planned:
 
 - The staged pipeline (`/deep-research`) keeps its contract and absorbs the
   gathering improvements above.
-- `/agent-research` runs a bounded tool loop — see [`AGENT-RESEARCH.md`](AGENT-RESEARCH.md).
+- A bounded tool loop is added as `/agent-research`, documented in
+  `AGENT-RESEARCH.md` when it lands.
 
 ## Implemented changes
 
-_Tracking section. Each entry names the gap it closes and the PR that landed it._
+Each gap above maps to a change below as it lands. Statuses: `open` (not yet
+started), `in review`, `landed`.
 
-(pending)
+| Gap | Change | Status |
+|---|---|---|
+| G1 | Deep-mode page budget + planner-ranked reads | open |
+| G2 | Planner-requested full-page reads | open |
+| G3 | A bounded evidence round on `insufficient` | open |
+| G4 | Sub-question decomposition in the plan | open |
+| G5 | Failed-query visibility + stable source numbers in the digest; `searches_run` covers every round | open |
+| G6 | Parallel fan-out across engines and stateless backends | open |
+| G7 | Deep-mode answer structure from the sub-questions | open |
+| G8 | Per-domain diversity cap in evidence assembly | open |
+| G9 | Human plan checkpoint | declined — the system must work without intervention |
+| G10 | Answer-quality eval harness (question bank + LLM judge) | open |
