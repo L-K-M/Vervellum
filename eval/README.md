@@ -28,7 +28,10 @@ eval/run.sh .build/release/vervellum eval/runs/before   # named dir, for a pair
 
 Keys come from the normal settings, or from `VERVELLUM_MODEL_KEY` /
 `VERVELLUM_SEARCH_KEY` in a container. Deep-mode questions cost several times a
-quick question in billed requests; the bank is twenty questions on purpose.
+quick question in billed requests; the bank is twenty questions on purpose. Each
+question is capped at 15 minutes (`VERVELLUM_EVAL_TIMEOUT` to change); a timeout
+counts as a failed question rather than stalling the run. Output lands in
+`eval/runs/`, which is git-ignored.
 
 ## Judging
 

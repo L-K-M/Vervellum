@@ -31,12 +31,25 @@ for file in eval/questions/*.txt; do
     id=$(basename "$file" .txt)
     mode=$(grep -m1 '^mode: ' "$file" | cut -d' ' -f2- | xargs)
     question=$(grep -m1 '^question: ' "$file" | cut -d' ' -f2-)
-    flag="--ask"
-    [ "$mode" = "deep" ] && flag="--deep"
-    [ "$mode" = "direct" ] && flag="--direct"
+    # A typo'd or missing mode must not silently run as research: a deep question
+    # measured as a cheap pass corrupts the before/after comparison this exists for.
+    case "$mode" in
+        research) flag="--ask" ;;
+        deep)     flag="--deep" ;;
+        direct)   flag="--direct" ;;
+        *)        echo "eval: $id: no usable 'mode:' line — skipping" >&2; continue ;;
+    esac
+    if [ -z "$question" ]; then
+        echo "eval: $id: no 'question:' line — skipping" >&2
+        continue
+    fi
 
     echo "== $id ($mode) =="
-    if "$BINARY" "$flag" "$question" > "$OUT/$id.transcript.txt" 2> "$OUT/$id.trace.txt"; then
+    # A deep question is several billed round trips; a wedged one must become a
+    # counted failure (timeout exits 124), not a stalled run. macOS: gtimeout from
+    # coreutils.
+    if timeout "${VERVELLUM_EVAL_TIMEOUT:-900}" "$BINARY" "$flag" "$question" \
+            > "$OUT/$id.transcript.txt" 2> "$OUT/$id.trace.txt"; then
         pass=$((pass + 1))
     else
         fail=$((fail + 1))

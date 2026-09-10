@@ -32,11 +32,10 @@ Score each axis from 0.0 to 1.0:
   Confidence the evidence does not carry is the failure this tool exists to
   prevent.
 
-Then a verdict: `pass` if factual >= 0.8 and citation >= 0.7 and calibration
->= 0.7, else `fail`.
+Then a verdict: exactly `pass` if factual >= 0.8 and citation >= 0.7 and
+calibration >= 0.7, otherwise exactly `fail`, both lowercase.
 
-Return one JSON object and nothing else:
+Return one JSON object and nothing else, on one line so the output parses even
+when copied verbatim:
 
-{"factual": 0.0, "citation": 0.0, "coverage": 0.0, "source_quality": 0.0,
- "calibration": 0.0, "verdict": "pass", "notes": "one or two sentences: the
- strongest and weakest thing about this answer"}
+{"factual": 0.0, "citation": 0.0, "coverage": 0.0, "source_quality": 0.0, "calibration": 0.0, "verdict": "pass", "notes": "one or two sentences: the strongest and weakest thing about this answer"}
