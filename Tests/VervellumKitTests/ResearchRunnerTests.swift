@@ -1198,8 +1198,7 @@ final class ResearchRunnerTests: XCTestCase {
     /// Deep mode puts each planned search to every engine, and the engines answer at
     /// the same time — the multiplier is the point of a second engine, and
     /// serialising it is latency bought with nothing.
-    func testDeepResearchFansOutAcrossEngines() async throws {
-        let probe = ConcurrencyProbe()
+    func testDeepResearchFansOutAcrossEngines() async throws {        let probe = ConcurrencyProbe()
         let transport = StubTransport { call in
             switch call.kind {
             case .fetch:
@@ -1248,6 +1247,55 @@ final class ResearchRunnerTests: XCTestCase {
         // because evidence numbering follows insertion order.
         XCTAssertEqual(turn.sources.map { URLComponents(string: $0.url)?.host ?? $0.url },
                        ["search.test.example", "search2.test.example"])
+    }
+
+    /// The failure mode the fan-out introduces: one engine failing one query must
+    /// not sink the round, renumber the surviving evidence, or stop the other
+    /// queries from reaching the failing engine's sibling. This is the regression
+    /// shape concurrency tends to ship — the happy path proves none of it.
+    func testAFailingEngineDoesNotSinkTheFanOut() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                let host = call.url.host ?? ""
+                let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first { $0.name == "q" }?.value ?? ""
+                if host == "search2.test", query == "q2" {
+                    return .failure(ResearchError("engine hiccup"))
+                }
+                return .json(Self.searxng([(url: "https://\(host).example/\(query)",
+                                            title: "Hit \(query) via \(host)")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan:
+                    return .completion(json: Self.threeSearchPlan(["q1", "q2", "q3"]))
+                case .deepPlan:
+                    let nothingLeft: [String: Any] = ["reading": "Nothing is missing.",
+                                                      "searches": [Any]()]
+                    return .completion(json: nothingLeft)
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["The survivors agree [1]."])
+            }
+        }
+
+        let turn = await run("What is still unsettled?", mode: .deep, transport: transport,
+                             extraSearchEndpoints: ["https://search2.test"])
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        // Every (query, engine) pair was asked, including the one that failed.
+        XCTAssertEqual(transport.calls.filter { $0.url.path == "/search" }.count, 6)
+        // Five hits survived, numbered in (step, engine) order with no gap where
+        // the failed pair would have sat: q1 by both engines, q2 by the selected
+        // one only, q3 by both.
+        XCTAssertEqual(turn.sources.map { $0.url.lastPathComponent }, ["q1", "q1", "q2", "q3", "q3"])
+        XCTAssertEqual(turn.sources.map(\.number), Array(1...5))
     }
 
     // MARK: Revision
