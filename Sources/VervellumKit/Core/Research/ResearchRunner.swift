@@ -1735,7 +1735,7 @@ final class ResearchRunner: ResearchRunning {
         // the policy working rather than an oversight — this pass cannot tell the
         // question's links from the search results — and it costs a retry the linked
         // pass already had its chance at.
-        let targets = Array(readableTargets(in: sources).prefix(budget))
+        let targets = Array(readableTargets(in: sources).prefix(max(0, budget)))
         guard !targets.isEmpty else {
             // Nothing survived the filter, so nothing will be fetched — and that is the
             // one turn where reading visibly did nothing. It gets the sentence a reader
@@ -1815,7 +1815,7 @@ final class ResearchRunner: ResearchRunning {
                 let rightIndex = numbers.firstIndex(of: right.number) ?? .max
                 return leftIndex < rightIndex
             }
-        let targets = Array(requested.prefix(budget))
+        let targets = Array(requested.prefix(max(0, budget)))
         guard !targets.isEmpty else { return ([:], 0) }
         trace.log("Round asked for \(numbers.count) page(s) by number; reading \(targets.count)")
         let (enriched, _) = await performReads(targets, in: sources, settings: settings)
