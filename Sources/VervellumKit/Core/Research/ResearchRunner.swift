@@ -169,7 +169,8 @@ final class ResearchRunner: ResearchRunning {
         /// Evidence is kept whole rather than summarised between rounds. The answer may
         /// cite only the numbered sources this turn collected, so a digest would buy
         /// room by dissolving the very things the citations point at. Rounds stop when
-        /// the budget is close to spent instead — see `deepRoundsAreWorthwhile`.
+        /// the budget is close to spent instead — the check is inline in `execute`,
+        /// asked with the same trimmer that decides what the answer sees.
         case deep
 
         /// Every mode but `direct` gathers evidence before answering.
@@ -201,14 +202,20 @@ final class ResearchRunner: ResearchRunning {
     /// the next queries and cites nothing, so it can be as lossy as it likes — which is
     /// exactly why the *evidence* is not summarised the same way: only the answer cites,
     /// and it must have the sources themselves.
+    ///
+    /// Each entry keeps the turn's own source number rather than being renumbered for the
+    /// digest. The planner's output feeds stages that act on sources — which page to read
+    /// in full is the planned one — and a local 1…40 numbering would make those answers
+    /// point at the wrong page whenever the digest starts past source 40 or a linked page
+    /// took number 1.
     private static func digest(of sources: [Source]) -> String {
         // `suffix`, not `prefix`. This list is cumulative, so once several engines over
         // several rounds push it past the cap, taking from the front would show a later
         // planner the round-one material it has already planned against and hide what the
         // round before it just found — the opposite of reading the gaps.
-        sources.suffix(40).enumerated().map { index, source in
+        sources.suffix(40).map { source in
             let snippet = source.snippet.prefix(200)
-            return "\(index + 1). \(source.title) — \(snippet)"
+            return "\(source.number). \(source.title) — \(snippet)"
         }.joined(separator: "\n")
     }
 
@@ -684,6 +691,12 @@ final class ResearchRunner: ResearchRunning {
         update { $0.stage = .searching }
         var rawResults: [Any] = []
         var searchFailures: [String] = []
+        /// The display query of every planned search that produced nothing usable on
+        /// any engine — whether the engines errored or the index held nothing. Fed to
+        /// the follow-up planner as `failed_queries`: a round that cannot tell "asked
+        /// and got nothing" from "never asked" re-asks the dead query in new words and
+        /// spends the budget proving the same nothing twice.
+        var failedQueries: [String] = []
         var attempted = 0
 
         // One round's searches, asked of every engine still in the running. Returns the
@@ -697,6 +710,7 @@ final class ResearchRunner: ResearchRunning {
             var productive: Set<ObjectIdentifier> = []
             for step in planned {
                 try Task.checkCancellation()
+                var fruitful = 0
                 for engine in asked {
                     do {
                         let label = asked.count > 1
@@ -715,6 +729,16 @@ final class ResearchRunner: ResearchRunning {
                                   + "\(EvidenceExtractor.shape(of: result))")
                         rawResults.append(result)
                         productive.insert(ObjectIdentifier(engine))
+                        // "Usable" is the extractor's call, made here against the one
+                        // result: a 200 with zero hits resolves fine, and treating it
+                        // as an answer would leave the next round re-asking a barren
+                        // query in new words — the exact waste `failedQueries` exists
+                        // to stop. Only deep rounds read the list, so only deep turns
+                        // pay the walk; the main pass re-extracts everything at once.
+                        if mode == .deep,
+                           !EvidenceExtractor.sources(from: [result]).isEmpty {
+                            fruitful += 1
+                        }
                     } catch is CancellationError {
                         throw ResearchError.cancelled
                     } catch let error as ResearchError where error == .cancelled {
@@ -731,6 +755,18 @@ final class ResearchRunner: ResearchRunning {
                                    + "\(engine.backendName): \(reason)")
                         searchFailures.append(reason)
                     }
+                }
+                // Asked of every engine and nothing usable came back — outage or
+                // barren index, the planner only needs the outcome. The query is the
+                // model's own text, safe to hand back to it — the trace rule about not
+                // logging results is about content, and this never reaches the log.
+                // Deduped: a planner that re-asks a dead query anyway must not fill
+                // the next round's context with the same line twice. Capped at the
+                // digest's snippet budget: the list is re-injected into every later
+                // round, and an unbounded model-written string would grow each one.
+                if mode == .deep, fruitful == 0, !asked.isEmpty {
+                    let query = String(step.displayQuery.prefix(200))
+                    if !failedQueries.contains(query) { failedQueries.append(query) }
                 }
                 // Counted whether the attempts succeeded or failed, and once per planned
                 // search rather than once per request: "2 of 3" is about the plan the
@@ -762,8 +798,14 @@ final class ResearchRunner: ResearchRunning {
         // `maxDeepRounds > 1` before the range: `2...1` is a runtime trap rather than an
         // empty loop, so setting the ceiling to one round would crash every deep turn
         // instead of quietly doing one. The constant is meant to be tuneable.
+        //
+        // `allSearches` accumulates every round's plan rather than living inside the
+        // block: the answer payload's `searches_run` is built from it, and the answer
+        // model is entitled to know about the searches that produced its evidence —
+        // built from the first plan alone, the list described a fraction of what the
+        // evidence block actually contains.
+        var allSearches = plan.searches
         if mode == .deep, !engines.isEmpty, Self.maxDeepRounds > 1 {
-            var everySearch = plan.searches
             for round in 2...Self.maxDeepRounds {
                 try Task.checkCancellation()
                 let soFar = Self.combined(linked: linked, results: rawResults)
@@ -773,10 +815,11 @@ final class ResearchRunner: ResearchRunning {
                 }
 
                 update { $0.stage = .planning }
+                var followExtra: [String: Any] = ["search_tool": search.toolDescriptor,
+                                                  "found": Self.digest(of: soFar)]
+                if !failedQueries.isEmpty { followExtra["failed_queries"] = failedQueries }
                 let followContext = ResearchContext.assemble(
-                    question: question, history: history, today: today,
-                    extra: ["search_tool": search.toolDescriptor,
-                            "found": Self.digest(of: soFar)])
+                    question: question, history: history, today: today, extra: followExtra)
                 // `try?`, because a later round failing to plan is not a reason to lose
                 // the turn. Everything gathered so far is still good evidence and still
                 // answers the question; the rounds are an improvement on one pass, not a
@@ -810,11 +853,11 @@ final class ResearchRunner: ResearchRunning {
                     break
                 }
 
-                everySearch += follow.searches
+                allSearches += follow.searches
                 // The reader sees every round's searches, not just the first plan's:
                 // `searchesCompleted` counts against this list, and a list that stopped
                 // growing would leave the progress label counting past its own total.
-                update { $0.searches = everySearch }
+                update { $0.searches = allSearches }
                 update { $0.stage = .searching }
                 engines = try await runSearches(follow.searches, across: engines)
                 if engines.isEmpty {
@@ -891,7 +934,7 @@ final class ResearchRunner: ResearchRunning {
 
         // 4 — answer, streamed.
         update { $0.stage = .answering }
-        let searchesRun: [[String: String]] = plan.searches.map {
+        let searchesRun: [[String: String]] = allSearches.map {
             ["purpose": $0.purpose, "query": $0.displayQuery]
         }
         var answerExtra: [String: Any] = [

@@ -917,6 +917,162 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertTrue(roundTwo.contains("Hit for first"), roundTwo)
     }
 
+    /// A link in the question takes source number 1, so the search hit is number 2 —
+    /// and the digest the follow-up planner reads must say so. Renumbering the digest
+    /// locally would make any later stage that acts on a named source (a page read, say)
+    /// act on the wrong one.
+    func testDeepResearchDigestKeepsTheTurnsSourceNumbers() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first { $0.name == "q" }?.value ?? ""
+                return .json(Self.searxng([(url: "https://\(query.prefix(5)).example/hit",
+                                            title: "Hit for \(query)")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan:
+                    return .completion(json: Self.plan("first", purpose: "the opening question"))
+                case .deepPlan:
+                    let nothingLeft: [String: Any] = ["reading": "Nothing is missing.",
+                                                      "searches": [Any]()]
+                    return .completion(json: nothingLeft)
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["The link and the hit agree [1, 2]."])
+            }
+        }
+
+        let turn = await run("What is still unsettled? https://example.com/report",
+                             mode: .deep, transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.sources.map(\.number), [1, 2])
+        XCTAssertEqual(turn.sources.first?.url, "https://example.com/report")
+
+        let roundTwo = try XCTUnwrap(transport.calls.first {
+            Self.stage(of: $0) == .deepPlan
+        }?.userContent)
+        // The hit is the turn's source 2 — and must be numbered 2 here, after the link.
+        XCTAssertTrue(roundTwo.contains("2. Hit for first"), roundTwo)
+    }
+
+    /// A search that produced nothing usable must be visible to the next round's
+    /// planner, or the round re-asks the dead query in new words and spends the budget
+    /// proving the same nothing twice. Both shapes are covered: an engine that throws,
+    /// and an engine that answers 200 with zero hits — treating the second as an
+    /// answer is what kept barren queries out of the list. The round plans a search
+    /// that answers alongside, so the engine survives and round three happens at all.
+    func testDeepResearchTellsTheNextRoundWhatFailed() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first { $0.name == "q" }?.value ?? ""
+                if query == "gap-query" { return .failure(ResearchError("search is down")) }
+                if query == "barren-query" { return .json(Self.searxng([])) }
+                return .json(Self.searxng([(url: "https://ok.example/\(query)",
+                                            title: "Hit for \(query)")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan:
+                    return .completion(json: Self.plan("first", purpose: "the opening question"))
+                case .deepPlan:
+                    // Round two asks one search that fails, one that answers empty, and
+                    // one that answers; round three must be told about the first two.
+                    guard call.systemPrompt?.contains("this is round 2") == true else {
+                        let nothingLeft: [String: Any] = ["reading": "Nothing is missing.",
+                                                          "searches": [Any]()]
+                        return .completion(json: nothingLeft)
+                    }
+                    return .completion(json: [
+                        "reading": "One gap to close.",
+                        "searches": [
+                            ["purpose": "the gap", "arguments": ["q": "gap-query"]],
+                            ["purpose": "the barren field", "arguments": ["q": "barren-query"]],
+                            ["purpose": "the other side", "arguments": ["q": "second"]],
+                        ],
+                    ])
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["What the two rounds found [1]."])
+            }
+        }
+
+        let turn = await run("What is still unsettled?", mode: .deep, transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        let plans = transport.calls.filter { Self.stage(of: $0) == .deepPlan }
+        XCTAssertEqual(plans.count, 2, "round two plans, round three asks and is told to stop")
+        let roundThree = try XCTUnwrap(plans.last?.userContent)
+        // Parsed, not substring-matched: the payload is one line of JSON, and a query
+        // string could legitimately appear in a digest entry or a prior round's plan.
+        let roundThreePayload = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: XCTUnwrap(roundThree.data(using: .utf8)))
+                as? [String: Any])
+        let failed = try XCTUnwrap(roundThreePayload["failed_queries"] as? [String])
+        XCTAssertTrue(failed.contains("gap-query"), "\(failed)")
+        XCTAssertTrue(failed.contains("barren-query"), "\(failed)")
+        // The query that answered must not be reported as failed.
+        XCTAssertFalse(failed.contains("second"), "\(failed)")
+    }
+
+    /// The answer payload's searches_run must cover every round: the evidence block in
+    /// front of the answer model contains later rounds' results, so a list built from
+    /// the first plan alone would describe a fraction of where the evidence came from.
+    func testDeepResearchAnswerIsToldAboutEveryRoundsSearches() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first { $0.name == "q" }?.value ?? ""
+                return .json(Self.searxng([(url: "https://\(query.prefix(5)).example/hit",
+                                            title: "Hit for \(query)")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan:
+                    return .completion(json: Self.plan("first", purpose: "the opening question"))
+                case .deepPlan:
+                    guard call.systemPrompt?.contains("this is round 2") == true else {
+                        let nothingLeft: [String: Any] = ["reading": "Nothing is missing.",
+                                                          "searches": [Any]()]
+                        return .completion(json: nothingLeft)
+                    }
+                    return .completion(json: Self.plan("second", purpose: "the gap round one left"))
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["Both rounds agree [1]."])
+            }
+        }
+
+        let turn = await run("What is still unsettled?", mode: .deep, transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        let answer = try XCTUnwrap(transport.calls.first {
+            Self.stage(of: $0) == .answer
+        }?.userContent)
+        XCTAssertTrue(answer.contains("the opening question"), answer)
+        XCTAssertTrue(answer.contains("the gap round one left"), answer)
+    }
+
     // MARK: Revision
 
     /// Everything the revision stage needs, with the answer and the revision scripted
