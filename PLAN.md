@@ -214,8 +214,10 @@ model alone and badged exactly as `/direct` is, with the reading kept as the
 explanation of why nothing was searched.
 
 **Three gathering depths, one tail.** The plan also names up to five sub-questions the
-answer depends on, which structure what follows. The default turn runs stage 2 once.
-`/deep-research` lets the plan come back: up to three rounds, each shown a digest of
+answer depends from; in deep mode they become the answer's sections. The default turn
+runs stage 2 once. `/deep-research` lets the plan come back: up to three planned
+rounds of searches (a fourth, unplanned round runs only when the check below cannot
+settle a claim), each shown a digest of
 what the last found (with stable source numbers, `[read]` marks, and the queries that
 produced nothing) and asked for what is still missing — including page reads by
 number, spent from a larger deep allowance (8 pages, a 100K evidence ceiling) with the
@@ -253,7 +255,9 @@ searches by engines by rounds, so every stateless (query, engine) pair of a roun
 concurrently. Determinism survives by construction: tasks produce value-typed outcomes, the
 parent applies them serially, and results append in (query, engine) order, because source
 numbering follows insertion order and a race would renumber the evidence between runs of an
-identical turn.
+identical turn. A failed search is logged and skipped rather than losing
+the others — and in deep mode, rather than losing the other engines and every earlier
+round, which a dozen billed requests may already have paid for.
 
 ### 3.1 The search transport
 
@@ -287,7 +291,7 @@ Byte-reader deadline checks are not an absolute end-to-end timer.
 ### 3.2 Context budget
 
 All model stages share a 110,000-byte serialized UTF-8 context ceiling; evidence has
-its own 70,000-byte ceiling, raised to 100,000 for deep and agent turns, whose rounds
+its own 70,000-byte ceiling, raised to 100,000 for deep and agent turns, whose gathering reads
 read up to eight pages at 8,000 extracted characters each — the quick ceiling would
 drop later rounds' sources, the gap-closers the rounds exist to find, to make room
 for round one's pages. Both ceilings sit under the total so history trims first, and
