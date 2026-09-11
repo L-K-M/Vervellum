@@ -763,10 +763,15 @@ final class ResearchRunner: ResearchRunning {
                     trace.warn("\(label) failed on \(engine.backendName): \(failure)")
                     searchFailures.append(failure)
                 }
-                pairsLeft[outcome.step]! -= 1
-                if pairsLeft[outcome.step] == 0 {
-                    attempted += 1
-                    update { $0.searchesCompleted = attempted }
+                // A step completes when its last pair does, whichever engine's that
+                // was. An unknown step number cannot happen — outcomes only carry
+                // indices this round planned — and is skipped rather than trapping.
+                if let left = pairsLeft[outcome.step] {
+                    pairsLeft[outcome.step] = left - 1
+                    if left == 1 {
+                        attempted += 1
+                        update { $0.searchesCompleted = attempted }
+                    }
                 }
             }
 
@@ -805,7 +810,10 @@ final class ResearchRunner: ResearchRunning {
                 }
             }
 
-            // Stateless engines: the whole round in flight at once.
+            // Stateless engines: the whole round in flight at once. The fan-out is
+            // bounded structurally — a round plans at most `maxSearches` steps, so the
+            // task count is maxSearches × engines (a dozen in any real configuration),
+            // and same-engine requests share one host queue below URLSession anyway.
             if !stateless.isEmpty, !planned.isEmpty {
                 try await withThrowingTaskGroup(of: Outcome.self) { group in
                     for (stepIndex, step) in planned.enumerated() {
@@ -838,7 +846,8 @@ final class ResearchRunner: ResearchRunning {
             // digest's snippet budget: the list is re-injected into every later
             // round, and an unbounded model-written string would grow each one.
             for (stepIndex, step) in planned.enumerated()
-            where mode == .deep && fruitfulByStep[stepIndex, default: 0] == 0 {
+            where mode == .deep && !asked.isEmpty
+                && fruitfulByStep[stepIndex, default: 0] == 0 {
                 let query = String(step.displayQuery.prefix(200))
                 if !failedQueries.contains(query) { failedQueries.append(query) }
             }

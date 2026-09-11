@@ -1030,11 +1030,16 @@ final class ResearchRunnerTests: XCTestCase {
         let plans = transport.calls.filter { Self.stage(of: $0) == .deepPlan }
         XCTAssertEqual(plans.count, 2, "round two plans, round three asks and is told to stop")
         let roundThree = try XCTUnwrap(plans.last?.userContent)
-        XCTAssertTrue(roundThree.contains("failed_queries"), roundThree)
-        XCTAssertTrue(roundThree.contains("gap-query"), roundThree)
-        XCTAssertTrue(roundThree.contains("barren-query"), roundThree)
+        // Parsed, not substring-matched: the payload is one line of JSON, and a query
+        // string could legitimately appear in a digest entry or a prior round's plan.
+        let roundThreePayload = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: XCTUnwrap(roundThree.data(using: .utf8)))
+                as? [String: Any])
+        let failed = try XCTUnwrap(roundThreePayload["failed_queries"] as? [String])
+        XCTAssertTrue(failed.contains("gap-query"), "\(failed)")
+        XCTAssertTrue(failed.contains("barren-query"), "\(failed)")
         // The query that answered must not be reported as failed.
-        XCTAssertFalse(roundThree.contains("\"second\""), roundThree)
+        XCTAssertFalse(failed.contains("second"), "\(failed)")
     }
 
     /// The answer payload's searches_run must cover every round: the evidence block in
@@ -1229,8 +1234,8 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(searches.count, 6, "three queries, put to both engines")
         XCTAssertEqual(Set(searches.compactMap(\.url.host)),
                        ["search.test", "search2.test"])
-        XCTAssertEqual(probe.maximum > 1, true,
-                       "both engines' searches must overlap in flight — the pool width is the machine's, the overlap is the design")
+        XCTAssertTrue(probe.maximum > 1,
+                      "both engines' searches must overlap in flight — the pool width is the machine's, the overlap is the design")
         XCTAssertEqual(turn.sources.count, 2,
                        "one hit per engine, both kept — disagreement is what a second engine is for")
     }
