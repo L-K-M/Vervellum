@@ -213,6 +213,24 @@ plan. That is honoured rather than treated as a failure: the turn is answered fr
 model alone and badged exactly as `/direct` is, with the reading kept as the
 explanation of why nothing was searched.
 
+**Three gathering depths, one tail.** The plan also names up to five sub-questions the
+answer depends on, which structure what follows. The default turn runs stage 2 once.
+`/deep-research` lets the plan come back: up to three rounds, each shown a digest of
+what the last found (with stable source numbers, `[read]` marks, and the queries that
+produced nothing) and asked for what is still missing — including page reads by
+number, spent from a larger deep allowance (8 pages, a 100K evidence ceiling) with the
+rank-order fill backstopping what the rounds did not name. When the check cannot
+settle a claim, one more round is planned against exactly those claims and the turn
+answers again over the enlarged evidence — atomic: adopted only when the second
+answer, second check and new sources all exist. `/agent-research` replaces staged
+rounds with a bounded tool loop — one search, page read, or stop per step under stated
+caps — reacting to actual results instead of planning against a digest; it is
+documented in [`AGENT-RESEARCH.md`](AGENT-RESEARCH.md), and the comparison that
+produced all of this is in [`DEEP-RESEARCH-REVIEW.md`](DEEP-RESEARCH-REVIEW.md).
+Everything after gathering — the numbered evidence, the streamed answer, the check,
+the revision — is shared code across all three depths, so the guarantees do not vary
+by mode.
+
 **Why stage 4 runs after stage 3, not beside it.** It does not depend on the prose, so
 it could run in parallel and halve the perceived latency. It does not, because
 assessing *the answer that was actually written* is what keeps the verdict table
@@ -228,10 +246,14 @@ reason, only usage-only frames are accepted; additional choices, even empty ones
 are protocol errors rather than evidence of another completed answer. Retained prose
 is citation-validated after cancellation, failure, and checkpoint recovery.
 
-**Why searches are sequential.** The MCP session is stateful — one JSON-RPC id
-sequence over one connection is the only shape the server documents. Four searches at
-about a second each is well inside the user's patience, and a failed search is logged
-and skipped rather than losing the other three.
+**Why the fan-out, and what stays serial.** The MCP session is stateful — one JSON-RPC id
+sequence over one connection is the only shape the server documents, and MCP searches stay
+serial for that reason. SearXNG and the Kagi CLI are stateless, and deep mode multiplies
+searches by engines by rounds, so every stateless (query, engine) pair of a round runs
+concurrently. Determinism survives by construction: tasks produce value-typed outcomes, the
+parent applies them serially, and results append in (step, engine) order, because source
+numbering follows insertion order and a race would renumber the evidence between runs of an
+identical turn.
 
 ### 3.1 The search transport
 
@@ -265,12 +287,19 @@ Byte-reader deadline checks are not an absolute end-to-end timer.
 ### 3.2 Context budget
 
 All model stages share a 110,000-byte serialized UTF-8 context ceiling; evidence has
-its own 70,000-byte ceiling. These are not tokenizer guarantees. Historic answers
-are shortened explicitly, then whole older turns are omitted as needed; both produce
-a `contextTrimmed` notice. Evidence drops a suffix and reports it, preserving numbering.
-Obsolete citation markers are removed from historic answers and finding claims.
-Document validation uses the renderer's block and table-cell boundaries; inline
-rendering validates only inline syntax, so backticks cannot suppress unrelated citations.
+its own 70,000-byte ceiling, raised to 100,000 for deep and agent turns, whose rounds
+read up to eight pages at 8,000 extracted characters each — the quick ceiling would
+drop later rounds' sources, the gap-closers the rounds exist to find, to make room
+for round one's pages. Both ceilings sit under the total so history trims first, and
+the relationships are pinned by tests. These are not tokenizer guarantees. Historic
+answers are shortened explicitly, then whole older turns are omitted as needed; both
+produce a `contextTrimmed` notice. Evidence drops a suffix and reports it, preserving
+numbering. Obsolete citation markers are removed from historic answers and finding
+claims. Document validation uses the renderer's block and table-cell boundaries;
+inline rendering validates only inline syntax, so backticks cannot suppress unrelated
+citations. One domain contributes at most four sources, and the collection pool is
+wider than the list so the varied hits below a well-ranked monoculture are still
+reached.
 
 If fixed context still exceeds the ceiling, the request fails locally rather than
 silently truncating the current question, answer, or evidence. Assessment failure
