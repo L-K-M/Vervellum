@@ -181,7 +181,7 @@ enum ResearchPrompts {
         Plan up to \(maxSearches) searches, and name in "read" any listed page whose \
         full text would settle what the check could not. A key called "failed_queries", \
         when present, lists searches this run already tried that produced nothing \
-        usable — treat each as a dead end for that wording, not as proof the ground
+        usable — treat each as a dead end for that wording, not as proof the ground \
         is barren; do not re-ask them or close paraphrases. Prefer searches that could \
         DISCONFIRM what the unsettled claims assert: a round that only finds more \
         agreement tells the check nothing it does not already know. Do not re-ask \

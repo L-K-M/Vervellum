@@ -746,7 +746,6 @@ final class ResearchRunner: ResearchRunning {
             answerExtra["subquestions"] = subquestions
         }
         if !attachments.payload.isEmpty { answerExtra["attachments"] = attachments.payload }
-        update { $0.stage = .answering }
         var answer = try await streamAnswer(chain: chain, prompt: answerPrompt,
                                             answerExtra: answerExtra, question: question,
                                             history: history, today: today,
@@ -1127,10 +1126,10 @@ final class ResearchRunner: ResearchRunning {
     /// a search-heavy loop hits the search cap first, with steps to spare for the
     /// reads and the stop.
     static let maxAgentSteps = 16
-    /// The most searches the agent loop may run across the whole turn. Above the
-    /// staged pipeline's 12 (4 × 3 rounds) by intent — reacting to results finds more
-    /// to react to — but bounded, because an unbounded loop is the one thing this
-    /// architecture exists not to be.
+    /// The most searches the agent loop may run across the whole turn. The same
+    /// ceiling as the staged pipeline's worst case (4 × 3 rounds) — reacting to
+    /// results may find more to react to, but an unbounded loop is the one thing
+    /// this architecture exists not to be.
     static let maxAgentSearches = 12
 
     /// The agentic gathering path: the model chooses one action at a time — search,
