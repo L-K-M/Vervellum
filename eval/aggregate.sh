@@ -28,6 +28,12 @@ aggregate() {
             if (!have) return
             f += sc["factual"]; c += sc["citation"]; cov += sc["coverage"]
             sq += sc["source_quality"]; cal += sc["calibration"]; n++
+            # A record accepted on its factual score may still be missing axes,
+            # which read as 0.0 below — the more likely failure of a capable but
+            # sloppy judge, and quieter than no record at all.
+            axes = 0
+            for (k in sc) axes++
+            if (axes < 5) incomplete++
             # judge.md defines the verdict as exactly this predicate; deriving it
             # here makes the gate deterministic even when the judge disagrees
             # with its own arithmetic.
@@ -91,6 +97,10 @@ aggregate() {
             if (files > n) {
                 printf "warning: %d of %d files in %s produced no readable scores\n", \
                        files - n, files, dir > "/dev/stderr"
+            }
+            if (incomplete > 0) {
+                printf "warning: %d case(s) in %s missing one or more axes (scored as 0.0)\n", \
+                       incomplete, dir > "/dev/stderr"
             }
             printf "%.3f %.3f %.3f %.3f %.3f %d %d %d\n", f/n, c/n, cov/n, sq/n, cal/n, p, f2, n
         }
