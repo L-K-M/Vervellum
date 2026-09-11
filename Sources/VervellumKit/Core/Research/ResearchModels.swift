@@ -220,6 +220,10 @@ enum TurnNotice: String, Codable, Equatable {
     /// necessarily the *selected* provider: a turn can move on twice, and the second
     /// failure is a spare's. The turn's `model` is the one that actually answered.
     case modelFellBack
+    /// The first check found claims the evidence could not settle, so the turn went
+    /// back for more evidence and answered again. The findings below grade this
+    /// answer; the first draft is kept for comparison.
+    case answerRegathered
     /// An image was attached, but the provider that answered was not configured to be
     /// shown images — so it answered from the question's words alone. Said out loud
     /// because an answer that ignores the picture, with nothing explaining why, reads as
@@ -302,6 +306,10 @@ enum TurnNotice: String, Codable, Equatable {
             return "A model provider failed, so the next one configured answered instead, "
                 + "and the rest of this turn used it too. The model named on this turn is "
                 + "the one that answered."
+        case .answerRegathered:
+            return "The first check found claims the evidence could not settle, so this "
+                + "turn went back for more evidence and answered again. The findings "
+                + "below grade this answer; the first draft is kept for comparison."
         case .attachmentNotStored:
             return "An attachment could not be saved, so it will not be here when this "
                 + "thread is reopened. The answer was written with it — only the stored "

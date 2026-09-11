@@ -707,203 +707,10 @@ final class ResearchRunner: ResearchRunning {
         // session is one JSON-RPC id sequence over one connection) stay serial: the
         // protocol documents no other shape.
         update { $0.stage = .searching }
-        var rawResults: [Any] = []
-        var searchFailures: [String] = []
-        /// The display query of every planned search that produced nothing usable on
-        /// any engine — whether the engines errored or the index held nothing. Fed to
-        /// the follow-up planner as `failed_queries`: a round that cannot tell "asked
-        /// and got nothing" from "never asked" re-asks the dead query in new words and
-        /// spends the budget proving the same nothing twice.
-        var failedQueries: [String] = []
-        var attempted = 0
+        var searchState = SearchRoundState()
 
-        // One round's searches, asked of every engine still in the running. Returns the
-        // engines that answered with something, so a later round can stop asking the ones
-        // that did not — the plan is written against the selected engine's `inputSchema`,
-        // and an engine declaring a different one refuses those arguments every time. It
-        // costs a request per search to find that out once; it should not cost one per
-        // round.
-        //
-        // Stateless engines run every pair of the round concurrently; stateful ones
-        // stay serial. All shared state is mutated in this task only: the concurrent
-        // tasks produce value-typed outcomes and the parent applies them as they
-        // arrive, and the results are buffered and appended in (step, engine) order at
-        // the end, because source numbering follows insertion order and a race would
-        // renumber the evidence between runs of an identical turn.
-        func runSearches(_ planned: [PlannedSearch], across asked: [SearchBackend]) async throws
-            -> [SearchBackend] {
-            // What one (step, engine) pair settled, whatever way it went. `Any` is the
-            // raw JSON the extractor walks; it is produced in the task and only read in
-            // the parent, which is what `@unchecked Sendable` certifies by hand.
-            struct Outcome: @unchecked Sendable {
-                let step: Int
-                let engine: Int
-                let result: Any?
-                let fruitful: Bool
-                let failure: String?
-            }
-
-            let indexed = Array(asked.enumerated())
-            let stateless = indexed.filter { $0.element.supportsConcurrentCalls }
-            let stateful = indexed.filter { !$0.element.supportsConcurrentCalls }
-
-            var productive: Set<ObjectIdentifier> = []
-            var fruitfulByStep: [Int: Int] = [:]
-            var buffered: [Outcome] = []
-            // Progress counts *planned searches*, not (search, engine) pairs — "2 of 3"
-            // is about the plan the reader can see. A step completes when its last pair
-            // does, whichever engine's that was.
-            var pairsLeft = Dictionary(uniqueKeysWithValues: planned.indices.map { ($0, asked.count) })
-
-            func apply(_ outcome: Outcome, engine: SearchBackend) {
-                if let result = outcome.result {
-                    // Structure only — keys, counts and sizes, never a title or a
-                    // link — so a result the extractor cannot read is diagnosable
-                    // from a log that must not contain results.
-                    // The same label the stage used, so two engines answering one
-                    // planned search do not emit two identical lines about different
-                    // shapes — which is the case this log exists for.
-                    trace.log(label(outcome.step, engine)
-                              + " result shape: \(EvidenceExtractor.shape(of: result))")
-                    buffered.append(outcome)
-                    productive.insert(ObjectIdentifier(engine))
-                    // "Usable" is the extractor's call, made inside the task: a 200
-                    // with zero hits resolves fine, and treating it as an answer
-                    // would leave the next round re-asking a barren query in new
-                    // words — the exact waste `failedQueries` exists to stop.
-                    if outcome.fruitful { fruitfulByStep[outcome.step, default: 0] += 1 }
-                } else if let failure = outcome.failure {
-                    // Buffered rather than appended: failures replay in (step,
-                    // engine) order with the results, so the failure list is the
-                    // same after every run of an identical turn instead of whichever
-                    // engine happened to lose first.
-                    trace.warn("\(label(outcome.step, engine)) failed on "
-                               + "\(engine.backendName): \(failure)")
-                    buffered.append(outcome)
-                }
-                // A step completes when its last pair does, whichever engine's that
-                // was. An unknown step number cannot happen — outcomes only carry
-                // indices this round planned — and is skipped rather than trapping.
-                if let left = pairsLeft[outcome.step] {
-                    pairsLeft[outcome.step] = left - 1
-                    if left == 1 {
-                        attempted += 1
-                        update { $0.searchesCompleted = attempted }
-                    }
-                }
-            }
-
-            /// What the trace calls one (step, engine) pair — built once, in one
-            /// place, so the stage label and the failure label cannot drift apart.
-            func label(_ step: Int, _ engine: SearchBackend) -> String {
-                asked.count > 1
-                    ? "Search \(step + 1) via \(engine.backendName)"
-                    : "Search \(step + 1)"
-            }
-
-            /// The shared body of both paths: run one pair, classify the outcome.
-            /// A cancellation is not a failed search and still propagates. Fruitfulness
-            /// is the extractor's call against the one result, and only deep turns pay
-            /// for the walk — only their rounds read the list.
-            func attempt(_ step: Int, _ engineIndex: Int,
-                         _ stepArguments: [String: Any]) async throws -> Outcome {
-                let engine = indexed[engineIndex].element
-                do {
-                    try Task.checkCancellation()
-                    let label = asked.count > 1
-                        ? "Search \(step + 1) via \(engine.backendName)"
-                        : "Search \(step + 1)"
-                    let result = try await trace.stage(label) {
-                        try await engine.search(arguments: stepArguments)
-                    }
-                    return Outcome(step: step, engine: engineIndex, result: result,
-                                   fruitful: mode == .deep
-                                       && !EvidenceExtractor.sources(from: [result]).isEmpty,
-                                   failure: nil)
-                } catch is CancellationError {
-                    throw ResearchError.cancelled
-                } catch let error as ResearchError where error == .cancelled {
-                    throw error
-                } catch {
-                    // One failed search must not lose the others, and in `deep` that
-                    // now means the other engines and every earlier round too — a turn
-                    // may have spent a dozen billed requests before reaching here.
-                    // Narrowed to `ResearchError` this caught none of the failures the
-                    // transport can raise on its own.
-                    let reason = (error as? ResearchError)?.message ?? String(describing: error)
-                    return Outcome(step: step, engine: engineIndex, result: nil,
-                                   fruitful: false, failure: reason)
-                }
-            }
-
-            // No engine to ask: nothing will run, and the progress label must still
-            // count the plan off — a step only completes when its last pair answers,
-            // and with no pairs that never happens on its own.
-            if asked.isEmpty {
-                attempted += planned.count
-                update { $0.searchesCompleted = attempted }
-                return asked
-            }
-
-            // Stateless engines: the whole round in flight at once. The fan-out is
-            // bounded structurally: a round plans at most `maxSearches` steps, so at
-            // most maxSearches × engines requests leave at once — a dozen HTTP calls
-            // or short-lived CLI processes in any real configuration, which is what
-            // the engines themselves tolerate under a single user key.
-            if !stateless.isEmpty, !planned.isEmpty {
-                try await withThrowingTaskGroup(of: Outcome.self) { group in
-                    for (stepIndex, step) in planned.enumerated() {
-                        for (engineIndex, _) in stateless {
-                            group.addTask {
-                                try await attempt(stepIndex, engineIndex, step.arguments)
-                            }
-                        }
-                    }
-                    for try await outcome in group {
-                        apply(outcome, engine: indexed[outcome.engine].element)
-                    }
-                }
-            }
-            // Stateful engines: one session, one id sequence, as before.
-            for (stepIndex, step) in planned.enumerated() {
-                try Task.checkCancellation()
-                for (engineIndex, _) in stateful {
-                    let outcome = try await attempt(stepIndex, engineIndex, step.arguments)
-                    apply(outcome, engine: indexed[outcome.engine].element)
-                }
-            }
-
-            // Asked of every engine and nothing usable came back — outage or
-            // barren index, the planner only needs the outcome. The query is the
-            // model's own text, safe to hand back to it — the trace rule about not
-            // logging results is about content, and this never reaches the log.
-            // Deduped: a planner that re-asks a dead query anyway must not fill
-            // the next round's context with the same line twice. Capped at the
-            // digest's snippet budget: the list is re-injected into every later
-            // round, and an unbounded model-written string would grow each one.
-            // `asked` is non-empty here by the early return above, so a step with no
-            // fruitfulness really was asked of a real engine and really got nothing.
-            for (stepIndex, step) in planned.enumerated()
-            where mode == .deep && fruitfulByStep[stepIndex, default: 0] == 0 {
-                let query = String(step.displayQuery.prefix(200))
-                if !failedQueries.contains(query) { failedQueries.append(query) }
-            }
-            let ordered = buffered.sorted { one, other in
-                if one.step != other.step { return one.step < other.step }
-                return one.engine < other.engine
-            }
-            rawResults.append(contentsOf: ordered.compactMap(\.result))
-            searchFailures.append(contentsOf: ordered.compactMap(\.failure))
-
-            // Nothing was asked, so nothing was proven unproductive. Without this an
-            // empty plan — which a question carrying links can legitimately produce —
-            // would report every engine as silent, and `deep` would skip the very rounds
-            // that exist to ask what the first pass did not.
-            if planned.isEmpty { return asked }
-            return asked.filter { productive.contains(ObjectIdentifier($0)) }
-        }
-
-        engines = try await runSearches(plan.searches, across: engines)
+        engines = try await runSearches(plan.searches, across: engines,
+                                        mode: mode, state: &searchState)
 
         // 3a — later rounds, `deep` only. Each reads what is on the table and asks for
         // what the first round could not have known was missing, because the gap does not
@@ -951,7 +758,7 @@ final class ResearchRunner: ResearchRunning {
                 // the digest must mark them, or the planner asks for the same page again.
                 let soFar = Self.applyingReads(plannedReads,
                                                to: Self.combined(linked: linked,
-                                                                 results: rawResults))
+                                                                 results: searchState.rawResults))
                 guard ResearchContext.evidence(from: soFar, limit: evidenceLimit).dropped == 0 else {
                     trace.log("Round \(round) not run: the evidence budget is already full")
                     break
@@ -960,7 +767,9 @@ final class ResearchRunner: ResearchRunning {
                 update { $0.stage = .planning }
                 var followExtra: [String: Any] = ["search_tool": search.toolDescriptor,
                                                   "found": Self.digest(of: soFar)]
-                if !failedQueries.isEmpty { followExtra["failed_queries"] = failedQueries }
+                if !searchState.failedQueries.isEmpty {
+                    followExtra["failed_queries"] = searchState.failedQueries
+                }
                 // Stated even at zero: a planner that can see the reads are spent
                 // stops asking for them, where an absent key leaves it guessing —
                 // and guessing costs a round.
@@ -1013,7 +822,8 @@ final class ResearchRunner: ResearchRunning {
                         // enforces it when it does anyway.
                         let candidates = Self.applyingReads(
                             plannedReads,
-                            to: Self.combined(linked: linked, results: rawResults))
+                            to: Self.combined(linked: linked,
+                                              results: searchState.rawResults))
                         let (texts, spent) = await readPlannedPages(
                             follow.readRequests, in: candidates,
                             settings: settings, budget: pageBudget)
@@ -1034,7 +844,6 @@ final class ResearchRunner: ResearchRunning {
                                   + "the page budget is spent")
                     }
                 }
-                try Task.checkCancellation()
 
                 // An empty plan is the documented way to stop, not a failure: a round with
                 // nothing left worth asking should say so rather than fill its quota.
@@ -1049,7 +858,8 @@ final class ResearchRunner: ResearchRunning {
                 // growing would leave the progress label counting past its own total.
                 update { $0.searches = allSearches }
                 update { $0.stage = .searching }
-                engines = try await runSearches(follow.searches, across: engines)
+                engines = try await runSearches(follow.searches, across: engines,
+                                                 mode: mode, state: &searchState)
                 if engines.isEmpty {
                     trace.warn("No search engine is still answering; stopping the rounds")
                     break
@@ -1057,7 +867,7 @@ final class ResearchRunner: ResearchRunning {
             }
         }
 
-        var harvested = Self.combined(linked: linked, results: rawResults)
+        var harvested = Self.combined(linked: linked, results: searchState.rawResults)
         // The pages the rounds asked for, attached after the last rebuild of the list.
         // Keyed by the stable number the digest showed the planner — which is why the
         // numbering may not shift between rounds: a renumbered list would attach a
@@ -1085,10 +895,18 @@ final class ResearchRunner: ResearchRunning {
         // the turn doing another. `alreadyRead` stays the successes, because it answers a
         // different question: whether this turn has any page text at all, which is what
         // the `noPagesRead` notice is about.
+        // The fill's spend comes off the budget the regather round will see: it is
+        // the same turn-wide allowance, and a round handed an already-spent remainder
+        // would re-spend it.
+        let fillSpend = { (before: Int, after: Int) in after - before }
+        let attemptedBeforeFill = current?.pagesAttempted ?? 0
         harvested = await readPages(harvested,
                                     settings: settings,
                                     budget: pageBudget,
                                     alreadyRead: linked.count + plannedReadCount)
+        if let turn = current {
+            pageBudget = max(0, pageBudget - fillSpend(attemptedBeforeFill, turn.pagesAttempted))
+        }
         try Task.checkCancellation()
 
         // Trimmed to what fits the evidence budget *before* it becomes the turn's source
@@ -1096,8 +914,9 @@ final class ResearchRunner: ResearchRunning {
         // full list would validate the answer's citations against sources the model
         // never saw, and would offer the reader a source list the answer could not have
         // used.
-        let (evidence, droppedSources, withheldPageText) = ResearchContext.evidence(
+        let (assembled, droppedSources, withheldPageText) = ResearchContext.evidence(
             from: harvested, limit: evidenceLimit)
+        var evidence = assembled
         var sources = Array(harvested.prefix(evidence.count))
         // A page that did not fit is cleared from the source too, so the list the reader
         // sees and the evidence the model saw agree about which pages were read.
@@ -1117,13 +936,13 @@ final class ResearchRunner: ResearchRunning {
             trace.log("Evidence budget withheld \(withheldPageText.count) page texts")
             update { $0.addNotice(.pageTextTrimmed) }
         }
-        trace.log("Evidence: \(sources.count) sources from \(rawResults.count) results")
+        trace.log("Evidence: \(sources.count) sources from \(searchState.rawResults.count) results")
 
         guard !sources.isEmpty else {
             // Two different situations used to share one message that blamed the
             // question for both. Say which it was: the searches themselves failed, or the
             // server answered and nothing usable came back.
-            if rawResults.isEmpty, let reason = searchFailures.first {
+            if searchState.rawResults.isEmpty, let reason = searchState.searchFailures.first {
                 throw ResearchError("Every web search failed. " + reason)
             }
             throw ResearchError(
@@ -1156,6 +975,522 @@ final class ResearchRunner: ResearchRunning {
             answerExtra["subquestions"] = firstSubquestions
         }
         if !attachments.payload.isEmpty { answerExtra["attachments"] = attachments.payload }
+        update { $0.stage = .answering }
+        var answer = try await streamAnswer(chain: chain, prompt: answerPrompt,
+                                            answerExtra: answerExtra, question: question,
+                                            history: history, today: today,
+                                            attachments: attachments)
+        recordAnsweringModel(from: chain)
+        update { $0.applyCitationValidation(sourceCount: sources.count) }
+        try Task.checkCancellation()
+
+        // 5 — assess.
+        update { $0.stage = .assessing }
+        // A failure here must not fail the turn — see `assess` for why. What it costs
+        // is the findings, and the turn says so rather than pretending nothing was
+        // checked.
+        guard let firstAssessment = try await assess(answer: answer, evidence: evidence,
+                                                     reading: plan.reading, question: question,
+                                                     history: history, today: today,
+                                                     sourceCount: sources.count, chain: chain)
+        else {
+            update { $0.addNotice(.assessmentUnavailable) }
+            return
+        }
+        var assessment = firstAssessment
+        update { turn in
+            turn.findings = assessment.findings
+            turn.limitations = assessment.limitations
+            turn.followups = assessment.followups
+            for notice in assessment.notices { turn.addNotice(notice) }
+        }
+        try Task.checkCancellation()
+
+        // 5b — regather, deep mode only: when the check could not settle something, go
+        // back for the evidence that would settle it, exactly once. Atomic: it adopts
+        // its second answer, second check and enlarged source list only when all three
+        // exist, and any failure leaves the turn exactly as the first check left it.
+        if mode == .deep,
+           assessment.findings.contains(where: { $0.verdict == .insufficient }),
+           !engines.isEmpty,
+           let regathered = try await regather(
+               insufficient: assessment.findings.filter { $0.verdict == .insufficient },
+               followups: assessment.followups,
+               question: question, history: history, today: today, chain: chain,
+               settings: settings, engines: engines, linked: linked,
+               plannedReads: &plannedReads, pageBudget: pageBudget,
+               answerPrompt: answerPrompt, answerExtra: answerExtra,
+               attachments: attachments, evidenceLimit: evidenceLimit,
+               currentAnswer: answer, currentSources: sources,
+               reading: plan.reading,
+               searchState: &searchState) {
+            answer = regathered.answer
+            sources = regathered.sources
+            evidence = regathered.evidence
+            assessment = regathered.assessment
+        }
+
+        // 6 — revise, only when the check found something worth correcting. After a
+        // regather these are the second check's findings and the second answer; the
+        // ordering rule is unchanged — the correction is made against a check that
+        // has actually run.
+        try await revise(answer: answer, findings: assessment.findings, evidence: evidence,
+                         sources: sources, question: question, history: history,
+                         today: today, reading: plan.reading, chain: chain)
+    }
+
+    /// The mutable state of a turn's searching, gathered so it can pass between
+    /// `execute`, the hoisted `runSearches`, and the regather round by `inout`
+    /// rather than living in one nested closure. Values only.
+    private struct SearchRoundState {
+        /// Every result every engine returned, in the order they were run — the
+        /// extractor's input, and what `combined` rebuilds the source list from.
+        var rawResults: [Any] = []
+        /// One reason per failed search call, for the turn's failure message when
+        /// nothing at all came back.
+        var searchFailures: [String] = []
+        /// The display query of every planned search that produced nothing usable on
+        /// any engine — whether the engines errored or the index held nothing. Fed to
+        /// the follow-up planner as `failed_queries`: a round that cannot tell "asked
+        /// and got nothing" from "never asked" re-asks the dead query in new words and
+        /// spends the budget proving the same nothing twice.
+        var failedQueries: [String] = []
+        /// How many planned searches have completed, for the "2 of 3" progress label.
+        var attempted = 0
+    }
+
+    /// One round's searches, asked of every engine still in the running. Returns the
+    /// engines that answered with something, so a later round can stop asking the ones
+    /// that did not — the plan is written against the selected engine's `inputSchema`,
+    // and an engine declaring a different one refuses those arguments every time. It
+    /// costs a request per search to find that out once; it should not cost one per
+    /// round.
+    ///
+    /// Stateless engines answer every (query, engine) pair of the round concurrently;
+    /// stateful ones (an MCP session is one JSON-RPC id sequence over one connection)
+    /// stay serial. The local copies above exist because the fan-out's helpers must
+    /// not touch an inout parameter from concurrent closures.
+    private func runSearches(_ planned: [PlannedSearch],
+                             across asked: [SearchBackend],
+                             mode: Mode,
+                             state: inout SearchRoundState) async throws -> [SearchBackend] {
+        // Local copies, written back once at the end: the fan-out below launches
+        // child tasks whose helpers must not touch an inout parameter, and exclusive
+        // access to `state` is easier to see in one place than to prove across a
+        // task group.
+        var rawResults = state.rawResults
+        var searchFailures = state.searchFailures
+        var failedQueries = state.failedQueries
+        var attempted = state.attempted
+
+        // What one (step, engine) pair settled, whatever way it went. `Any` is the
+        // raw JSON the extractor walks; it is produced in the task and only read in
+        // the parent, which is what `@unchecked Sendable` certifies by hand.
+        struct Outcome: @unchecked Sendable {
+            let step: Int
+            let engine: Int
+            let result: Any?
+            let fruitful: Bool
+            let failure: String?
+        }
+
+        let indexed = Array(asked.enumerated())
+        let stateless = indexed.filter { $0.element.supportsConcurrentCalls }
+        let stateful = indexed.filter { !$0.element.supportsConcurrentCalls }
+
+        var productive: Set<ObjectIdentifier> = []
+        var fruitfulByStep: [Int: Int] = [:]
+        var buffered: [Outcome] = []
+        // Progress counts *planned searches*, not (search, engine) pairs — "2 of 3"
+        // is about the plan the reader can see. A step completes when its last pair
+        // does, whichever engine's that was.
+        var pairsLeft = Dictionary(uniqueKeysWithValues: planned.indices.map { ($0, asked.count) })
+
+        func apply(_ outcome: Outcome, engine: SearchBackend) {
+            if let result = outcome.result {
+                // Structure only — keys, counts and sizes, never a title or a
+                // link — so a result the extractor cannot read is diagnosable
+                // from a log that must not contain results.
+                // The same label the stage used, so two engines answering one
+                // planned search do not emit two identical lines about different
+                // shapes — which is the case this log exists for.
+                trace.log(label(outcome.step, engine)
+                          + " result shape: \(EvidenceExtractor.shape(of: result))")
+                buffered.append(outcome)
+                productive.insert(ObjectIdentifier(engine))
+                // "Usable" is the extractor's call, made inside the task: a 200
+                // with zero hits resolves fine, and treating it as an answer
+                // would leave the next round re-asking a barren query in new
+                // words — the exact waste `failedQueries` exists to stop.
+                if outcome.fruitful { fruitfulByStep[outcome.step, default: 0] += 1 }
+            } else if let failure = outcome.failure {
+                // Buffered rather than appended: failures replay in (step,
+                // engine) order with the results, so the failure list is the
+                // same after every run of an identical turn instead of whichever
+                // engine happened to lose first.
+                trace.warn("\(label(outcome.step, engine)) failed on "
+                           + "\(engine.backendName): \(failure)")
+                buffered.append(outcome)
+            }
+            // A step completes when its last pair does, whichever engine's that
+            // was. An unknown step number cannot happen — outcomes only carry
+            // indices this round planned — and is skipped rather than trapping.
+            if let left = pairsLeft[outcome.step] {
+                pairsLeft[outcome.step] = left - 1
+                if left == 1 {
+                    attempted += 1
+                    update { $0.searchesCompleted = attempted }
+                }
+            }
+        }
+
+        /// What the trace calls one (step, engine) pair — built once, in one
+        /// place, so the stage label and the failure label cannot drift apart.
+        func label(_ step: Int, _ engine: SearchBackend) -> String {
+            asked.count > 1
+                ? "Search \(step + 1) via \(engine.backendName)"
+                : "Search \(step + 1)"
+        }
+
+        /// The shared body of both paths: run one pair, classify the outcome.
+        /// A cancellation is not a failed search and still propagates. Fruitfulness
+        /// is the extractor's call against the one result, and only deep turns pay
+        /// for the walk — only their rounds read the list.
+        func attempt(_ step: Int, _ engineIndex: Int,
+                     _ stepArguments: [String: Any]) async throws -> Outcome {
+            let engine = indexed[engineIndex].element
+            do {
+                try Task.checkCancellation()
+                let result = try await trace.stage(label(step, engine)) {
+                    try await engine.search(arguments: stepArguments)
+                }
+                return Outcome(step: step, engine: engineIndex, result: result,
+                               fruitful: mode == .deep
+                                   && !EvidenceExtractor.sources(from: [result]).isEmpty,
+                               failure: nil)
+            } catch is CancellationError {
+                throw ResearchError.cancelled
+            } catch let error as ResearchError where error == .cancelled {
+                throw error
+            } catch {
+                // One failed search must not lose the others, and in `deep` that
+                // now means the other engines and every earlier round too — a turn
+                // may have spent a dozen billed requests before reaching here.
+                // Narrowed to `ResearchError` this caught none of the failures the
+                // transport can raise on its own.
+                let reason = (error as? ResearchError)?.message ?? String(describing: error)
+                return Outcome(step: step, engine: engineIndex, result: nil,
+                               fruitful: false, failure: reason)
+            }
+        }
+
+        // No engine to ask: nothing will run, and the progress label must still
+        // count the plan off — a step only completes when its last pair answers,
+        // and with no pairs that never happens on its own.
+        if asked.isEmpty {
+            attempted += planned.count
+            update { $0.searchesCompleted = attempted }
+            state.attempted = attempted
+            return asked
+        }
+
+        // Stateless engines: the whole round in flight at once. The fan-out is
+        // bounded structurally: a round plans at most `maxSearches` steps, so at
+        // most maxSearches × engines requests leave at once — a dozen HTTP calls
+        // or short-lived CLI processes in any real configuration, which is what
+        // the engines themselves tolerate under a single user key.
+        if !stateless.isEmpty, !planned.isEmpty {
+            try await withThrowingTaskGroup(of: Outcome.self) { group in
+                for (stepIndex, step) in planned.enumerated() {
+                    for (engineIndex, _) in stateless {
+                        group.addTask {
+                            try await attempt(stepIndex, engineIndex, step.arguments)
+                        }
+                    }
+                }
+                for try await outcome in group {
+                    apply(outcome, engine: indexed[outcome.engine].element)
+                }
+            }
+        }
+        // Stateful engines: one session, one id sequence, as before.
+        for (stepIndex, step) in planned.enumerated() {
+            try Task.checkCancellation()
+            for (engineIndex, _) in stateful {
+                let outcome = try await attempt(stepIndex, engineIndex, step.arguments)
+                apply(outcome, engine: indexed[outcome.engine].element)
+            }
+        }
+
+        // Asked of every engine and nothing usable came back — outage or
+        // barren index, the planner only needs the outcome. The query is the
+        // model's own text, safe to hand back to it — the trace rule about not
+        // logging results is about content, and this never reaches the log.
+        // Deduped: a planner that re-asks a dead query anyway must not fill
+        // the next round's context with the same line twice. Capped at the
+        // digest's snippet budget: the list is re-injected into every later
+        // round, and an unbounded model-written string would grow each one.
+        // `asked` is non-empty here by the early return above, so a step with no
+        // fruitfulness really was asked of a real engine and really got nothing.
+        for (stepIndex, step) in planned.enumerated()
+        where mode == .deep && fruitfulByStep[stepIndex, default: 0] == 0 {
+            let query = String(step.displayQuery.prefix(200))
+            if !failedQueries.contains(query) { failedQueries.append(query) }
+        }
+        let ordered = buffered.sorted { one, other in
+            if one.step != other.step { return one.step < other.step }
+            return one.engine < other.engine
+        }
+        rawResults.append(contentsOf: ordered.compactMap(\.result))
+        searchFailures.append(contentsOf: ordered.compactMap(\.failure))
+
+        state.rawResults = rawResults
+        state.searchFailures = searchFailures
+        state.failedQueries = failedQueries
+        state.attempted = attempted
+
+        // Nothing was asked, so nothing was proven unproductive. Without this an
+        // empty plan — which a question carrying links can legitimately produce —
+        // would report every engine as silent, and `deep` would skip the very rounds
+        // that exist to ask what the first pass did not.
+        if planned.isEmpty { return asked }
+        return asked.filter { productive.contains(ObjectIdentifier($0)) }
+    }
+    /// What a successful regather round produced. Everything in it replaces the first
+    /// pass's version at once — which is why this is a value handed back rather than
+    /// a set of updates applied as the round goes: any failure leaves the turn
+    /// exactly as the first check left it, and there is no partial adoption to undo.
+    private struct Regathered {
+        var answer: String
+        var sources: [Source]
+        var evidence: [[String: Any]]
+        var assessment: AssessmentParser.Assessment
+    }
+
+    /// One more round of evidence, run when the assessment could not settle a claim.
+    ///
+    /// The assessment's `insufficient` findings and `followups` used to be computed,
+    /// displayed, and discarded — in deep mode they are now the brief for exactly one
+    /// more round: plan against the unsettled claims, search, read what the round
+    /// names, answer again over everything, and check again. Once, never in a loop:
+    /// a second `insufficient` is the answer, not a reason to spend another round.
+    ///
+    /// Atomic by construction. The new source list is published only once it exists,
+    /// the second answer streams only after that, and a failure anywhere — planning,
+    /// searching, answering, the second check — returns nil and leaves the turn as
+    /// the first check left it. The one visible exception is `searches`: the round's
+    /// searches did run, and hiding them would make the progress count a lie.
+    private func regather(insufficient: [Finding],
+                          followups: [String],
+                          question: String,
+                          history: [ResearchTurn],
+                          today: String,
+                          chain: ModelChain,
+                          settings: ProviderSettings,
+                          engines: [SearchBackend],
+                          linked: [Source],
+                          plannedReads: inout [Int: String],
+                          pageBudget: Int,
+                          answerPrompt: String,
+                          answerExtra: [String: Any],
+                          attachments: (payload: [[String: String]],
+                                        images: [ChatCompletionsClient.ImagePart],
+                                        imageNames: [String]),
+                          evidenceLimit: Int,
+                          currentAnswer: String,
+                          currentSources: [Source],
+                          reading: String,
+                          searchState: inout SearchRoundState) async throws -> Regathered? {
+        // A round over a full evidence budget cannot show the answer anything new.
+        let withReads = Self.applyingReads(plannedReads, to: currentSources)
+        guard ResearchContext.evidence(from: withReads, limit: evidenceLimit).dropped == 0
+        else {
+            trace.log("No regather round: the evidence budget is already full")
+            return nil
+        }
+
+        update { $0.stage = .planning }
+        var extra: [String: Any] = [
+            "search_tool": engines.first?.toolDescriptor ?? [:],
+            "found": Self.digest(of: withReads),
+            "unsettled": insufficient.map { ["claim": $0.claim, "reasoning": $0.reasoning] },
+        ]
+        if !followups.isEmpty { extra["followups"] = followups }
+        // The same dead-query discipline the rounds enforce: a claim that a failed
+        // query already failed to settle is not settled by re-asking that query.
+        if !searchState.failedQueries.isEmpty {
+            extra["failed_queries"] = searchState.failedQueries
+        }
+        let context = ResearchContext.assemble(
+            question: question, history: history, today: today, extra: extra)
+        // `try?`, for the same reason a later deep round is `try?`: the round is an
+        // improvement on the answer that exists, not a precondition for it.
+        let roundPlan = try? await chain.perform("Regather plan") { chat in
+            let object = try await chat.completeJSON(
+                system: ResearchPrompts.gapRound(maxSearches: Self.maxSearches, today: today),
+                payload: context.payload, label: "Regather plan")
+            return try PlanParser.parse(object, maxSearches: Self.maxSearches)
+        }
+        try Task.checkCancellation()
+        guard let roundPlan else {
+            trace.log("No regather round: it could not be planned")
+            return nil
+        }
+        // Reads are honoured before the no-searches stop, exactly as in the deep
+        // rounds: "nothing left to search, but page 7 would settle it and I have only
+        // its snippet" is a legitimate final move for this round too.
+        var budget = pageBudget
+        if !roundPlan.readRequests.isEmpty, budget > 0 {
+            update { $0.stage = .searching }
+            let candidates = Self.applyingReads(
+                plannedReads, to: Self.combined(linked: linked,
+                                                results: searchState.rawResults))
+            let (texts, spent) = await readPlannedPages(roundPlan.readRequests,
+                                                        in: candidates,
+                                                        settings: settings, budget: budget)
+            budget -= spent
+            for (number, text) in texts where !text.isEmpty {
+                plannedReads[number] = text
+            }
+        }
+        guard !roundPlan.searches.isEmpty else {
+            trace.log("No regather searches: the planner says the web cannot settle this")
+            return nil
+        }
+
+        update { $0.stage = .searching }
+        // The reader sees the round's searches like every other round's: they ran.
+        update { $0.searches += roundPlan.searches }
+        _ = try await runSearches(roundPlan.searches, across: engines,
+                                  mode: .deep, state: &searchState)
+        var harvested = Self.applyingReads(
+            plannedReads, to: Self.combined(linked: linked, results: searchState.rawResults))
+        // The same budget the pre-stop reads already spent from; a round that both
+        // searches and reads gets one allowance, not two. Only the requests the
+        // pre-search pass did not deliver run again — `readableTargets` filters
+        // pages the earlier pass made read, but the *budget* would still be charged
+        // for a request the round had already satisfied.
+        let pendingReads = roundPlan.readRequests.filter { plannedReads[$0] == nil }
+        if !pendingReads.isEmpty, budget > 0 {
+            let (texts, spent) = await readPlannedPages(pendingReads,
+                                                        in: harvested,
+                                                        settings: settings, budget: budget)
+            budget -= spent
+            harvested = Self.applyingReads(texts, to: harvested)
+        }
+
+        // The round must have added something — new sources, or a page the first pass
+        // had only as a snippet — or the second answer would be written over the same
+        // evidence as the first, at the cost of two long calls.
+        //
+        // Newness is measured *after* the evidence trim, against `currentSources`
+        // (itself post-trim): the harvested list can grow past what the budget will
+        // show the model, and counting that shadow growth would send the turn back
+        // for a second answer over evidence identical to the first.
+        let trimmedCount = ResearchContext.evidence(from: harvested,
+                                                    limit: evidenceLimit).entries.count
+        let newSources = trimmedCount - currentSources.count
+        let newTexts = harvested.filter { source in
+            source.wasRead && currentSources.first(where: { $0.number == source.number })?.wasRead != true
+        }.count
+        guard newSources > 0 || newTexts > 0 else {
+            trace.log("Regather round found nothing new; the first answer stands")
+            return nil
+        }
+
+        // Committed from here: the turn gets the enlarged list, then the second answer.
+        // Snapshot first — a failure below restores rather than half-adopts. The
+        // snapshot is taken after the round's searches were appended on purpose: they
+        // did run, and a restore must not pretend they did not.
+        let snapshot = current ?? ResearchTurn(question: question)
+        let (evidence, _, withheld) = ResearchContext.evidence(from: harvested,
+                                                               limit: evidenceLimit)
+        var sources = Array(harvested.prefix(evidence.count))
+        for index in sources.indices where withheld.contains(sources[index].number) {
+            sources[index].fullText = nil
+        }
+        update { turn in
+            turn.sources = sources
+            turn.pagesRead = sources.filter { $0.wasRead }.count
+        }
+
+        var secondExtra = answerExtra
+        secondExtra["evidence"] = evidence
+        secondExtra["highest_source_number"] = evidence.compactMap { $0["number"] as? Int }.max() ?? 0
+        // The first payload's searches_run stopped at the rounds before the answer;
+        // this round's search produced part of what the second answer sees.
+        secondExtra["searches_run"] = (current?.searches ?? []).map {
+            ["purpose": $0.purpose, "query": $0.displayQuery]
+        }
+        update { $0.stage = .answering }
+        update { $0.answer = "" }
+        let second: String
+        do {
+            second = try await streamAnswer(chain: chain, prompt: answerPrompt,
+                                            answerExtra: secondExtra, question: question,
+                                            history: history, today: today,
+                                            attachments: attachments)
+        } catch {
+            let stopped = Task.isCancelled
+                || error is CancellationError
+                || (error as? ResearchError) == ResearchError.cancelled
+            // Restored on a Stop too: the round is atomic, and a turn cancelled
+            // mid-second-answer must not keep the enlarged source list over the
+            // first answer's own list — the half-adopted state the snapshot exists
+            // to prevent. The Stop still propagates.
+            if stopped {
+                update { $0 = snapshot }
+                throw error
+            }
+            trace.warn("Regather answer failed: \(ResearchError.safeLabel(for: error)); "
+                       + "the first answer stands")
+            update { $0 = snapshot }
+            return nil
+        }
+        recordAnsweringModel(from: chain)
+        update { $0.applyCitationValidation(sourceCount: sources.count) }
+        try Task.checkCancellation()
+
+        update { $0.stage = .assessing }
+        guard let secondAssessment = try await assess(
+            answer: second, evidence: evidence, reading: reading,
+            question: question, history: history, today: today,
+            sourceCount: sources.count, chain: chain)
+        else {
+            trace.warn("The second check failed; the first answer and its check stand")
+            update { $0 = snapshot }
+            return nil
+        }
+
+        // Adopted: the second answer stands, the first becomes the draft, and the
+        // findings are the second check's — they grade what is on screen.
+        update { turn in
+            turn.draftAnswer = currentAnswer
+            turn.findings = secondAssessment.findings
+            turn.limitations = secondAssessment.limitations
+            turn.followups = secondAssessment.followups
+            for notice in secondAssessment.notices { turn.addNotice(notice) }
+            turn.addNotice(.answerRegathered)
+        }
+        trace.log("Regather round added \(newSources) source(s), \(newTexts) page text(s)")
+        return Regathered(answer: second, sources: sources,
+                          evidence: evidence, assessment: secondAssessment)
+    }
+
+    /// The answer stage, shared by the first pass and by a regather round's second.
+    ///
+    /// Streams into `turn.answer` as it goes — the stage exists so the user starts
+    /// reading within a second or two — which is why a caller that might discard the
+    /// answer snapshots it first rather than asking this to buffer.
+    private func streamAnswer(chain: ModelChain,
+                              prompt: String,
+                              answerExtra: [String: Any],
+                              question: String,
+                              history: [ResearchTurn],
+                              today: String,
+                              attachments: (payload: [[String: String]],
+                                            images: [ChatCompletionsClient.ImagePart],
+                                            imageNames: [String])) async throws -> String {
         let answerContext = ResearchContext.assemble(
             question: question, history: history, today: today, extra: answerExtra)
         if answerContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
@@ -1184,14 +1519,14 @@ final class ResearchRunner: ResearchRunning {
         let withheldContext = answerImages.isEmpty ? nil : ResearchContext.assemble(
             question: question, history: history, today: today,
             extra: Self.namingImagesUnavailable(answerExtra, attachments))
-        let answer = try await chain.perform("Answer", beforeRetry: { [weak self] in
+        let text = try await chain.perform("Answer", beforeRetry: { [weak self] in
             self?.update { $0.answer = "" }
         }) { chat in
             let images = chat.imagesWillBeSent ? answerImages : []
             let payload = images.isEmpty ? (withheldContext ?? answerContext).payload
                                          : answerContext.payload
             let text = try await chat.streamText(
-                system: answerPrompt, payload: payload,
+                system: prompt, payload: payload,
                 withoutImages: images.isEmpty ? nil : withheldContext?.payload,
                 label: "Answer", images: images
             ) { [weak self] chunk in
@@ -1208,50 +1543,48 @@ final class ResearchRunner: ResearchRunning {
             update { $0.addNotice(.contextTrimmed) }
         }
         if !answerImages.isEmpty, !sentImages { update { $0.addNotice(.imagesNotSent) } }
-        recordAnsweringModel(from: chain)
-        update { $0.applyCitationValidation(sourceCount: sources.count) }
-        try Task.checkCancellation()
+        return text
+    }
 
-        // 5 — assess.
-        update { $0.stage = .assessing }
+    /// The assessment stage, shared by the first pass and by a regather round's
+    /// second check.
+    ///
+    /// Fails soft by returning nil rather than throwing: a reply the parser cannot
+    /// read, an output limit smaller than eight findings, a transient 5xx — none of
+    /// those may fail the turn. The answer has streamed, been validated and been
+    /// read; marking it failed would label it wrong, drop it from every later turn's
+    /// context (which keeps `.complete` turns only), and blame the question for an
+    /// assessment that was cut off. The caller decides what the turn says about it,
+    /// because the honest sentence differs between "the only check failed" and "the
+    /// second check failed after the first one caught something". Cancellation still
+    /// propagates: a Stop is a Stop.
+    private func assess(answer: String,
+                        evidence: [[String: Any]],
+                        reading: String,
+                        question: String,
+                        history: [ResearchTurn],
+                        today: String,
+                        sourceCount: Int,
+                        chain: ModelChain) async throws -> AssessmentParser.Assessment? {
         // Assessment is a fresh call: carry the reading and budgeted history too.
         let assessContext = ResearchContext.assemble(
             question: question, history: history, today: today,
-            extra: ["answer": answer, "evidence": evidence, "reading": plan.reading])
+            extra: ["answer": answer, "evidence": evidence, "reading": reading])
         if assessContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
-        // A failure here — a reply the parser cannot read, an output limit smaller
-        // than eight findings, a transient 5xx — must not fail the turn. The answer has
-        // streamed, been validated and been read; marking it failed would label it
-        // wrong, drop it from every later turn's context (which keeps `.complete` turns
-        // only), and blame the question for an assessment that was cut off. So the turn
-        // completes without findings and says, in a notice, that nothing was checked.
-        // Cancellation still propagates: a Stop is a Stop.
         let assessment: AssessmentParser.Assessment
         do {
             let assessObject = try await chain.perform("Assess") { chat in
                 try await chat.completeJSON(
                     system: ResearchPrompts.assess, payload: assessContext.payload, label: "Assess")
             }
-            assessment = try AssessmentParser.parse(assessObject, sourceCount: sources.count)
+            assessment = try AssessmentParser.parse(assessObject, sourceCount: sourceCount)
         } catch let error as ResearchError where error != ResearchError.cancelled && !Task.isCancelled {
             trace.warn("Assessment unavailable: \(error.message)")
-            update { $0.addNotice(.assessmentUnavailable) }
-            return
-        }
-        update { turn in
-            turn.findings = assessment.findings
-            turn.limitations = assessment.limitations
-            turn.followups = assessment.followups
-            for notice in assessment.notices { turn.addNotice(notice) }
+            return nil
         }
         trace.log("Assessment: \(assessment.findings.count) findings in "
                   + String(format: "%.1fs", trace.elapsed))
-        try Task.checkCancellation()
-
-        // 6 — revise, only when the check found something worth correcting.
-        try await revise(answer: answer, findings: assessment.findings, evidence: evidence,
-                         sources: sources, question: question, history: history,
-                         today: today, reading: plan.reading, chain: chain)
+        return assessment
     }
 
     /// Whether a verdict sends the answer back for correction.
