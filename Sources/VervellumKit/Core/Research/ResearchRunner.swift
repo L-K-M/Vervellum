@@ -1139,9 +1139,13 @@ final class ResearchRunner: ResearchRunning {
         // The deep answer is structured by the first plan's decomposition; a quick
         // turn's is not, because a quick question rarely has five load-bearing parts
         // and headings for one part are scaffolding around a paragraph.
-        let answerPrompt = mode == .deep && !plan.subquestions.isEmpty
-            ? ResearchPrompts.answerDeep : ResearchPrompts.answer
-        if mode == .deep, !plan.subquestions.isEmpty {
+        // One gate for both the prompt and the payload key: the structured answer
+        // prompt promises a "subquestions" list, and a payload without one under
+        // that prompt is a promise broken at the reader's expense.
+        let structuredAnswer = mode == .deep && !plan.subquestions.isEmpty
+        let answerPrompt = structuredAnswer ? ResearchPrompts.answerDeep
+                                            : ResearchPrompts.answer
+        if structuredAnswer {
             answerExtra["subquestions"] = plan.subquestions
         }
         if !attachments.payload.isEmpty { answerExtra["attachments"] = attachments.payload }

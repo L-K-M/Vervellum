@@ -224,8 +224,9 @@ enum ResearchPrompts {
         Work out which factual questions the answer actually depends on, then plan up \
         to \(maxSearches) searches that would resolve them — as few as settle the \
         question, and none at all when it needs no evidence (see the end). Say those \
-        sub-questions out loud in "subquestions": later rounds plan against the ones \
-        the evidence leaves open, and the answer is structured by them. Prefer \
+        sub-questions out loud in "subquestions": in deeper research, later rounds \
+        plan against the ones the evidence leaves open, and the answer takes them as \
+        its sections. Prefer \
         searches that surface primary sources — original documentation, standards, \
         filings, papers, official statistics — and reputable independent reporting \
         over aggregators and content farms. Write each query in the language most \
@@ -246,7 +247,8 @@ enum ResearchPrompts {
         Return {"reading": "...", "subquestions": ["...", "..."], "searches": [{"purpose": "...", "arguments": {...}}]}
         - "reading": one sentence stating how you understand the question, including \
         any ambiguity you had to resolve.
-        - "subquestions": up to five factual sub-questions the answer depends on, in \
+        - "subquestions": up to \(PlanParser.maxSubquestions) factual sub-questions the \
+        answer depends on, in \
         the order an answer should take them. Fewer for a narrow question — one is \
         fine when one settles it.
         - "purpose": a short phrase naming what that search is meant to settle.
