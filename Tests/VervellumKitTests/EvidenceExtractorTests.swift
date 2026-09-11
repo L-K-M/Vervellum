@@ -54,8 +54,14 @@ final class EvidenceExtractorTests: XCTestCase {
         // The varied hits sat below 30 same-domain hits: only a pool wider than
         // maxSources reaches them at all.
         XCTAssertEqual(sources.count, EvidenceExtractor.maxSourcesPerDomain + 6)
-        // Order is preserved: the first four are the farm's top hits, then the rest.
-        XCTAssertEqual(sources.map(\.number), Array(1...sources.count))
+        // Rank order survives the filter — the first four are the farm's top hits,
+        // then the varied sites in the order they were ranked. The numbering alone
+        // would pass under any permutation.
+        XCTAssertEqual(sources.prefix(EvidenceExtractor.maxSourcesPerDomain).map(\.domain),
+                       Array(repeating: "farm.example.com",
+                             count: EvidenceExtractor.maxSourcesPerDomain))
+        XCTAssertEqual(sources.dropFirst(EvidenceExtractor.maxSourcesPerDomain).map(\.domain),
+                       (1...6).map { "site\($0).example.org" })
     }
 
     /// The displayed domain and the key the cap counts are the same computation —
