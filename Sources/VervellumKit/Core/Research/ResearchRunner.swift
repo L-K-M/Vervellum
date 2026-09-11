@@ -685,9 +685,11 @@ final class ResearchRunner: ResearchRunning {
             trace.log("Plan asked for no searches; answering from the linked page(s)")
         }
 
-        // 3 — search. Sequential on purpose: the MCP session is stateful, and one
-        // JSON-RPC id sequence over one connection is the only shape the server
-        // documents. Four searches at ~1s each is well inside the user's patience.
+        // 3 — search. Stateless engines answer every (query, engine) pair
+        // concurrently — deep mode multiplies searches by engines by rounds, and
+        // serialising that is latency bought with nothing. Stateful backends (an MCP
+        // session is one JSON-RPC id sequence over one connection) stay serial: the
+        // protocol documents no other shape.
         update { $0.stage = .searching }
         var rawResults: [Any] = []
         var searchFailures: [String] = []
@@ -705,75 +707,178 @@ final class ResearchRunner: ResearchRunning {
         // and an engine declaring a different one refuses those arguments every time. It
         // costs a request per search to find that out once; it should not cost one per
         // round.
+        //
+        // Stateless engines run every pair of the round concurrently; stateful ones
+        // stay serial. All shared state is mutated in this task only: the concurrent
+        // tasks produce value-typed outcomes and the parent applies them as they
+        // arrive, and the results are buffered and appended in (step, engine) order at
+        // the end, because source numbering follows insertion order and a race would
+        // renumber the evidence between runs of an identical turn.
         func runSearches(_ planned: [PlannedSearch], across asked: [SearchBackend]) async throws
             -> [SearchBackend] {
+            // What one (step, engine) pair settled, whatever way it went. `Any` is the
+            // raw JSON the extractor walks; it is produced in the task and only read in
+            // the parent, which is what `@unchecked Sendable` certifies by hand.
+            struct Outcome: @unchecked Sendable {
+                let step: Int
+                let engine: Int
+                let result: Any?
+                let fruitful: Bool
+                let failure: String?
+            }
+
+            let indexed = Array(asked.enumerated())
+            let stateless = indexed.filter { $0.element.supportsConcurrentCalls }
+            let stateful = indexed.filter { !$0.element.supportsConcurrentCalls }
+
             var productive: Set<ObjectIdentifier> = []
-            for step in planned {
-                try Task.checkCancellation()
-                var fruitful = 0
-                for engine in asked {
-                    do {
-                        let label = asked.count > 1
-                            ? "Search \(attempted + 1) via \(engine.backendName)"
-                            : "Search \(attempted + 1)"
-                        let result = try await trace.stage(label) {
-                            try await engine.search(arguments: step.arguments)
-                        }
-                        // Structure only — keys, counts and sizes, never a title or a
-                        // link — so a result the extractor cannot read is diagnosable
-                        // from a log that must not contain results.
-                        // The same label the stage used, so two engines answering one
-                        // planned search do not emit two identical lines about different
-                        // shapes — which is the case this log exists for.
-                        trace.log(label + " result shape: "
-                                  + "\(EvidenceExtractor.shape(of: result))")
-                        rawResults.append(result)
-                        productive.insert(ObjectIdentifier(engine))
-                        // "Usable" is the extractor's call, made here against the one
-                        // result: a 200 with zero hits resolves fine, and treating it
-                        // as an answer would leave the next round re-asking a barren
-                        // query in new words — the exact waste `failedQueries` exists
-                        // to stop. Only deep rounds read the list, so only deep turns
-                        // pay the walk; the main pass re-extracts everything at once.
-                        if mode == .deep,
-                           !EvidenceExtractor.sources(from: [result]).isEmpty {
-                            fruitful += 1
-                        }
-                    } catch is CancellationError {
-                        throw ResearchError.cancelled
-                    } catch let error as ResearchError where error == .cancelled {
-                        throw error
-                    } catch {
-                        // One failed search must not lose the others, and in `deep` that
-                        // now means the other engines and every earlier round too — a turn
-                        // may have spent a dozen billed requests before reaching here.
-                        // Narrowed to `ResearchError` this caught none of the failures the
-                        // transport can raise on its own. A cancellation is not a failed
-                        // search and still propagates.
-                        let reason = (error as? ResearchError)?.message ?? String(describing: error)
-                        trace.warn("Search \(attempted + 1) failed on "
-                                   + "\(engine.backendName): \(reason)")
-                        searchFailures.append(reason)
+            var fruitfulByStep: [Int: Int] = [:]
+            var buffered: [Outcome] = []
+            // Progress counts *planned searches*, not (search, engine) pairs — "2 of 3"
+            // is about the plan the reader can see. A step completes when its last pair
+            // does, whichever engine's that was.
+            var pairsLeft = Dictionary(uniqueKeysWithValues: planned.indices.map { ($0, asked.count) })
+
+            func apply(_ outcome: Outcome, engine: SearchBackend) {
+                if let result = outcome.result {
+                    // Structure only — keys, counts and sizes, never a title or a
+                    // link — so a result the extractor cannot read is diagnosable
+                    // from a log that must not contain results.
+                    // The same label the stage used, so two engines answering one
+                    // planned search do not emit two identical lines about different
+                    // shapes — which is the case this log exists for.
+                    trace.log(label(outcome.step, engine)
+                              + " result shape: \(EvidenceExtractor.shape(of: result))")
+                    buffered.append(outcome)
+                    productive.insert(ObjectIdentifier(engine))
+                    // "Usable" is the extractor's call, made inside the task: a 200
+                    // with zero hits resolves fine, and treating it as an answer
+                    // would leave the next round re-asking a barren query in new
+                    // words — the exact waste `failedQueries` exists to stop.
+                    if outcome.fruitful { fruitfulByStep[outcome.step, default: 0] += 1 }
+                } else if let failure = outcome.failure {
+                    // Buffered rather than appended: failures replay in (step,
+                    // engine) order with the results, so the failure list is the
+                    // same after every run of an identical turn instead of whichever
+                    // engine happened to lose first.
+                    trace.warn("\(label(outcome.step, engine)) failed on "
+                               + "\(engine.backendName): \(failure)")
+                    buffered.append(outcome)
+                }
+                // A step completes when its last pair does, whichever engine's that
+                // was. An unknown step number cannot happen — outcomes only carry
+                // indices this round planned — and is skipped rather than trapping.
+                if let left = pairsLeft[outcome.step] {
+                    pairsLeft[outcome.step] = left - 1
+                    if left == 1 {
+                        attempted += 1
+                        update { $0.searchesCompleted = attempted }
                     }
                 }
-                // Asked of every engine and nothing usable came back — outage or
-                // barren index, the planner only needs the outcome. The query is the
-                // model's own text, safe to hand back to it — the trace rule about not
-                // logging results is about content, and this never reaches the log.
-                // Deduped: a planner that re-asks a dead query anyway must not fill
-                // the next round's context with the same line twice. Capped at the
-                // digest's snippet budget: the list is re-injected into every later
-                // round, and an unbounded model-written string would grow each one.
-                if mode == .deep, fruitful == 0, !asked.isEmpty {
-                    let query = String(step.displayQuery.prefix(200))
-                    if !failedQueries.contains(query) { failedQueries.append(query) }
-                }
-                // Counted whether the attempts succeeded or failed, and once per planned
-                // search rather than once per request: "2 of 3" is about the plan the
-                // reader can see, not about how many engines it was put to.
-                attempted += 1
-                update { $0.searchesCompleted = attempted }
             }
+
+            /// What the trace calls one (step, engine) pair — built once, in one
+            /// place, so the stage label and the failure label cannot drift apart.
+            func label(_ step: Int, _ engine: SearchBackend) -> String {
+                asked.count > 1
+                    ? "Search \(step + 1) via \(engine.backendName)"
+                    : "Search \(step + 1)"
+            }
+
+            /// The shared body of both paths: run one pair, classify the outcome.
+            /// A cancellation is not a failed search and still propagates. Fruitfulness
+            /// is the extractor's call against the one result, and only deep turns pay
+            /// for the walk — only their rounds read the list.
+            func attempt(_ step: Int, _ engineIndex: Int,
+                         _ stepArguments: [String: Any]) async throws -> Outcome {
+                let engine = indexed[engineIndex].element
+                do {
+                    try Task.checkCancellation()
+                    let label = asked.count > 1
+                        ? "Search \(step + 1) via \(engine.backendName)"
+                        : "Search \(step + 1)"
+                    let result = try await trace.stage(label) {
+                        try await engine.search(arguments: stepArguments)
+                    }
+                    return Outcome(step: step, engine: engineIndex, result: result,
+                                   fruitful: mode == .deep
+                                       && !EvidenceExtractor.sources(from: [result]).isEmpty,
+                                   failure: nil)
+                } catch is CancellationError {
+                    throw ResearchError.cancelled
+                } catch let error as ResearchError where error == .cancelled {
+                    throw error
+                } catch {
+                    // One failed search must not lose the others, and in `deep` that
+                    // now means the other engines and every earlier round too — a turn
+                    // may have spent a dozen billed requests before reaching here.
+                    // Narrowed to `ResearchError` this caught none of the failures the
+                    // transport can raise on its own.
+                    let reason = (error as? ResearchError)?.message ?? String(describing: error)
+                    return Outcome(step: step, engine: engineIndex, result: nil,
+                                   fruitful: false, failure: reason)
+                }
+            }
+
+            // No engine to ask: nothing will run, and the progress label must still
+            // count the plan off — a step only completes when its last pair answers,
+            // and with no pairs that never happens on its own.
+            if asked.isEmpty {
+                attempted += planned.count
+                update { $0.searchesCompleted = attempted }
+                return asked
+            }
+
+            // Stateless engines: the whole round in flight at once. The fan-out is
+            // bounded structurally: a round plans at most `maxSearches` steps, so at
+            // most maxSearches × engines requests leave at once — a dozen HTTP calls
+            // or short-lived CLI processes in any real configuration, which is what
+            // the engines themselves tolerate under a single user key.
+            if !stateless.isEmpty, !planned.isEmpty {
+                try await withThrowingTaskGroup(of: Outcome.self) { group in
+                    for (stepIndex, step) in planned.enumerated() {
+                        for (engineIndex, _) in stateless {
+                            group.addTask {
+                                try await attempt(stepIndex, engineIndex, step.arguments)
+                            }
+                        }
+                    }
+                    for try await outcome in group {
+                        apply(outcome, engine: indexed[outcome.engine].element)
+                    }
+                }
+            }
+            // Stateful engines: one session, one id sequence, as before.
+            for (stepIndex, step) in planned.enumerated() {
+                try Task.checkCancellation()
+                for (engineIndex, _) in stateful {
+                    let outcome = try await attempt(stepIndex, engineIndex, step.arguments)
+                    apply(outcome, engine: indexed[outcome.engine].element)
+                }
+            }
+
+            // Asked of every engine and nothing usable came back — outage or
+            // barren index, the planner only needs the outcome. The query is the
+            // model's own text, safe to hand back to it — the trace rule about not
+            // logging results is about content, and this never reaches the log.
+            // Deduped: a planner that re-asks a dead query anyway must not fill
+            // the next round's context with the same line twice. Capped at the
+            // digest's snippet budget: the list is re-injected into every later
+            // round, and an unbounded model-written string would grow each one.
+            // `asked` is non-empty here by the early return above, so a step with no
+            // fruitfulness really was asked of a real engine and really got nothing.
+            for (stepIndex, step) in planned.enumerated()
+            where mode == .deep && fruitfulByStep[stepIndex, default: 0] == 0 {
+                let query = String(step.displayQuery.prefix(200))
+                if !failedQueries.contains(query) { failedQueries.append(query) }
+            }
+            let ordered = buffered.sorted { one, other in
+                if one.step != other.step { return one.step < other.step }
+                return one.engine < other.engine
+            }
+            rawResults.append(contentsOf: ordered.compactMap(\.result))
+            searchFailures.append(contentsOf: ordered.compactMap(\.failure))
+
             // Nothing was asked, so nothing was proven unproductive. Without this an
             // empty plan — which a question carrying links can legitimately produce —
             // would report every engine as silent, and `deep` would skip the very rounds

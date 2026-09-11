@@ -99,6 +99,10 @@ final class SearXNGClient: SearchBackend {
 
     // MARK: SearchBackend
 
+    /// Each call is one stateless GET; the instance answers as many in parallel as it
+    /// is configured for, which is the instance operator's throttle rather than ours.
+    let supportsConcurrentCalls = true
+
     /// Nothing to do. See the type's documentation for why this is a no-op rather than
     /// a reachability probe.
     func connect() async throws {
