@@ -663,6 +663,13 @@ final class ResearchRunner: ResearchRunning {
         trace.log("Plan: \(plan.searches.count) searches")
         try Task.checkCancellation()
 
+        // The first plan's decomposition, snapshotted: everything downstream — the
+        // rounds' planning target and the answer's section spine — reads this
+        // constant, so no later refactor that rebinds `plan` mid-loop can quietly
+        // restructure the answer under the reader. Follow-ups may echo a
+        // `subquestions` key; their echo is parsed and ignored.
+        let firstSubquestions = plan.subquestions
+
         // The planner is allowed to decide that a question needs no evidence — a
         // definition, a calculation, a transformation of text the user supplied — and
         // `PlanParser` preserves that as an empty list rather than an error. Honour it:
@@ -961,8 +968,8 @@ final class ResearchRunner: ResearchRunning {
                 // The first plan's decomposition, so the round plans against the
                 // sub-questions the evidence leaves open rather than re-deriving a
                 // map of the question from snippets.
-                if !plan.subquestions.isEmpty {
-                    followExtra["subquestions"] = plan.subquestions
+                if !firstSubquestions.isEmpty {
+                    followExtra["subquestions"] = firstSubquestions
                 }
                 let followContext = ResearchContext.assemble(
                     question: question, history: history, today: today, extra: followExtra)
@@ -1142,11 +1149,11 @@ final class ResearchRunner: ResearchRunning {
         // One gate for both the prompt and the payload key: the structured answer
         // prompt promises a "subquestions" list, and a payload without one under
         // that prompt is a promise broken at the reader's expense.
-        let structuredAnswer = mode == .deep && !plan.subquestions.isEmpty
+        let structuredAnswer = mode == .deep && !firstSubquestions.isEmpty
         let answerPrompt = structuredAnswer ? ResearchPrompts.answerDeep
                                             : ResearchPrompts.answer
         if structuredAnswer {
-            answerExtra["subquestions"] = plan.subquestions
+            answerExtra["subquestions"] = firstSubquestions
         }
         if !attachments.payload.isEmpty { answerExtra["attachments"] = attachments.payload }
         let answerContext = ResearchContext.assemble(
