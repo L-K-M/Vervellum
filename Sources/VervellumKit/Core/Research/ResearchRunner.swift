@@ -1010,7 +1010,7 @@ final class ResearchRunner: ResearchRunning {
                followups: assessment.followups,
                question: question, history: history, today: today, chain: chain,
                settings: settings, engines: engines, linked: linked,
-               plannedReads: plannedReads, pageBudget: pageBudget,
+               plannedReads: &plannedReads, pageBudget: pageBudget,
                answerPrompt: answerPrompt, answerExtra: answerExtra,
                attachments: attachments, evidenceLimit: evidenceLimit,
                currentAnswer: answer, currentSources: sources,
@@ -1058,8 +1058,10 @@ final class ResearchRunner: ResearchRunning {
     /// costs a request per search to find that out once; it should not cost one per
     /// round.
     ///
-    /// Sequential on purpose: the MCP session is stateful, and one JSON-RPC id
-    /// sequence over one connection is the only shape the server documents.
+    /// Stateless engines answer every (query, engine) pair of the round concurrently;
+    /// stateful ones (an MCP session is one JSON-RPC id sequence over one connection)
+    /// stay serial. The local copies above exist because the fan-out's helpers must
+    /// not touch an inout parameter from concurrent closures.
     private func runSearches(_ planned: [PlannedSearch],
                              across asked: [SearchBackend],
                              mode: Mode,
@@ -1279,7 +1281,7 @@ final class ResearchRunner: ResearchRunning {
                           settings: ProviderSettings,
                           engines: [SearchBackend],
                           linked: [Source],
-                          plannedReads: [Int: String],
+                          plannedReads: inout [Int: String],
                           pageBudget: Int,
                           answerPrompt: String,
                           answerExtra: [String: Any],
@@ -1317,9 +1319,29 @@ final class ResearchRunner: ResearchRunning {
             return try PlanParser.parse(object, maxSearches: Self.maxSearches)
         }
         try Task.checkCancellation()
-        guard let roundPlan, !roundPlan.searches.isEmpty else {
-            trace.log("No regather round: " + (roundPlan == nil
-                  ? "it could not be planned" : "the planner says the web cannot settle this"))
+        guard let roundPlan else {
+            trace.log("No regather round: it could not be planned")
+            return nil
+        }
+        // Reads are honoured before the no-searches stop, exactly as in the deep
+        // rounds: "nothing left to search, but page 7 would settle it and I have only
+        // its snippet" is a legitimate final move for this round too.
+        var budget = pageBudget
+        if !roundPlan.readRequests.isEmpty, budget > 0 {
+            update { $0.stage = .searching }
+            let candidates = Self.applyingReads(
+                plannedReads, to: Self.combined(linked: linked,
+                                                results: searchState.rawResults))
+            let (texts, spent) = await readPlannedPages(roundPlan.readRequests,
+                                                        in: candidates,
+                                                        settings: settings, budget: budget)
+            budget -= spent
+            for (number, text) in texts where !text.isEmpty {
+                plannedReads[number] = text
+            }
+        }
+        guard !roundPlan.searches.isEmpty else {
+            trace.log("No regather searches: the planner says the web cannot settle this")
             return nil
         }
 
@@ -1330,7 +1352,8 @@ final class ResearchRunner: ResearchRunning {
                                   mode: .deep, state: &searchState)
         var harvested = Self.applyingReads(
             plannedReads, to: Self.combined(linked: linked, results: searchState.rawResults))
-        var budget = pageBudget
+        // The same budget the pre-stop reads already spent from; a round that both
+        // searches and reads gets one allowance, not two.
         if !roundPlan.readRequests.isEmpty, budget > 0 {
             let (texts, spent) = await readPlannedPages(roundPlan.readRequests,
                                                         in: harvested,

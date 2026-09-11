@@ -74,10 +74,15 @@ enum PlanParser {
     private static func subquestions(from value: Any?) -> [String] {
         guard let raw = value as? [Any] else { return [] }
         var questions: [String] = []
+        var seen: Set<String> = []
         for entry in raw {
             guard let question = (entry as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines), !question.isEmpty
             else { continue }
+            // Deduped: each sub-question becomes an answer section, and a repeated
+            // string would produce a repeated heading — the reader has no way to
+            // tell a recap from a copy.
+            guard seen.insert(question).inserted else { continue }
             questions.append(question)
             if questions.count >= maxSubquestions { break }
         }

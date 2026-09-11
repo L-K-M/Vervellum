@@ -163,7 +163,7 @@ enum ResearchPrompts {
 
     /// The planner again, for the round that answers the check's doubts.
     ///
-    /// Same JSON contract as `plan` and `deepFollowUp`, for the same reason: one
+    /// Same JSON contract as `deepFollowUp`, for the same reason: one
     /// parser, one definition of what a plan is. What differs is the trigger — this
     /// round exists because the assessment found claims it could not settle, and it
     /// is handed those claims rather than asked to rediscover them.
