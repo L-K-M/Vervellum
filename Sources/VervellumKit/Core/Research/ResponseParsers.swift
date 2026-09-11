@@ -10,6 +10,12 @@ enum PlanParser {
     struct Plan: Equatable {
         var reading: String
         var searches: [PlannedSearch]
+        /// Sources the planner wants read in full, by the turn's source number.
+        ///
+        /// Only a follow-up round can produce a meaningful one — the first plan is
+        /// written before any source exists — but it is parsed in both, so a planner
+        /// that asks early gets the same contract rather than a silent drop.
+        var readRequests: [Int] = []
     }
 
     static func parse(_ object: [String: Any], maxSearches: Int) throws -> Plan {
@@ -44,7 +50,31 @@ enum PlanParser {
             }
             searches.append(search)
         }
-        return Plan(reading: reading, searches: searches)
+        return Plan(reading: reading, searches: searches,
+                    readRequests: readRequests(from: object["read"]))
+    }
+
+    /// The optional "read" key: numbers of sources whose pages the planner wants
+    /// fetched, as they appear in the digest it was shown.
+    ///
+    /// Lenient the way the assessment's source list is — models write numbers as
+    /// strings — but unforgiving about everything else: a bogus entry is dropped
+    /// rather than reinterpreted, because a read of the wrong page spends a fetch and
+    /// several thousand characters of the evidence budget on it. Capped at the deep
+    /// page allowance so a hallucinated array cannot order an unbounded fetch list;
+    /// the runner's budget is the real gate.
+    private static func readRequests(from value: Any?) -> [Int] {
+        guard let raw = value as? [Any] else { return [] }
+        var seen: Set<Int> = []
+        var requests: [Int] = []
+        for entry in raw {
+            let number = (entry as? Int)
+                ?? (entry as? String).flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            guard let number, number >= 1, seen.insert(number).inserted else { continue }
+            requests.append(number)
+            if requests.count >= PageReaderFactory.maxDeepPages { break }
+        }
+        return requests
     }
 }
 

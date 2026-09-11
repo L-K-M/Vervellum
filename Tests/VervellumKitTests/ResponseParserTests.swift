@@ -56,6 +56,34 @@ final class PlanParserTests: XCTestCase {
         XCTAssertEqual(plan.searches.first?.displayQuery, "top level")
     }
 
+    /// A follow-up round may ask for pages by number. The parser is lenient about
+    /// how a model writes a number and unforgiving about everything else: a bogus
+    /// entry is dropped rather than reinterpreted, because a read of the wrong page
+    /// spends a fetch and a share of the evidence budget on it.
+    func testParsesReadRequestsLeniently() throws {
+        let object: [String: Any] = [
+            "searches": [Any](),
+            "read": [2, "3", 0, -1, "abc", 2, NSNull()] as [Any],
+        ]
+        let plan = try PlanParser.parse(object, maxSearches: 4)
+        XCTAssertEqual(plan.readRequests, [2, 3])
+    }
+
+    /// An absent key is the common case and means "read nothing".
+    func testNoReadKeyMeansNoReadRequests() throws {
+        let plan = try PlanParser.parse(["searches": [Any]()], maxSearches: 4)
+        XCTAssertEqual(plan.readRequests, [])
+    }
+
+    /// A hallucinated list cannot order an unbounded fetch list; the cap is the deep
+    /// page allowance, and the runner's budget is the real gate below it.
+    func testReadRequestsAreCapped() throws {
+        let object: [String: Any] = ["searches": [Any](),
+                                     "read": Array(1...20)]
+        let plan = try PlanParser.parse(object, maxSearches: 4)
+        XCTAssertEqual(plan.readRequests.count, PageReaderFactory.maxDeepPages)
+    }
+
     func testRejectsAnEntryWithNoArguments() {
         let searches: [[String: Any]] = [["purpose": "p"]]
         XCTAssertThrowsError(try PlanParser.parse(["searches": searches], maxSearches: 4))
