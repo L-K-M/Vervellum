@@ -60,8 +60,10 @@ if [ -d "$OUT" ] && [ -n "$(ls -A "$OUT" 2>/dev/null | grep -v "^\\." | head -1)
 fi
 
 # timeout is GNU; macOS has it only as gtimeout from coreutils. Without either,
-# run unbounded rather than fail every question with exit 127.
-TIMEOUT=(:)
+# run unbounded rather than fail every question — and the array stays empty so
+# the binary runs directly; a no-op placeholder would swallow every question
+# into "success" with empty transcripts.
+TIMEOUT=()
 if command -v timeout >/dev/null 2>&1; then
     TIMEOUT=(timeout -k 10 "${VERVELLUM_EVAL_TIMEOUT:-900}")
 elif command -v gtimeout >/dev/null 2>&1; then
@@ -109,7 +111,14 @@ for file in "${questions[@]}"; do
     # that ignores SIGTERM.
     status="ok"
     started=$(date +%s)
-    if "${TIMEOUT[@]}" "$BINARY" "$flag" "$question" \
+    # The empty-array test is spelled out rather than relying on "${TIMEOUT[@]}"
+    # expansion: stock macOS bash errors on that under set -u.
+    if [ ${#TIMEOUT[@]} -gt 0 ]; then
+        runner=("${TIMEOUT[@]}" "$BINARY")
+    else
+        runner=("$BINARY")
+    fi
+    if "${runner[@]}" "$flag" "$question" \
             > "$OUT/$id.transcript.txt" 2> "$OUT/$id.trace.txt"; then
         pass=$((pass + 1))
     else
@@ -159,4 +168,7 @@ if [ "$pass" -eq 0 ]; then
     fi
     exit 1
 fi
+# A partial skip is also a red run: a smoke test with one typo'd header must not
+# quietly measure one question fewer than asked for.
+[ "$skipped" -eq 0 ] || { echo "eval: $skipped question(s) skipped — fix the headers" >&2; exit 1; }
 [ "$fail" -eq 0 ]

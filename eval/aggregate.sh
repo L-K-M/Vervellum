@@ -23,6 +23,12 @@ set -uo pipefail
 
 aggregate() {
     # $1 = dir. Emits "factual citation coverage source_quality calibration passes fails n".
+    # A glob that matches nothing would hand awk a literal pattern to open, and
+    # the caller would read a raw awk error instead of the sentence below.
+    shopt -s nullglob
+    local files=("$1"/*.json)
+    shopt -u nullglob
+    [ "${#files[@]}" -gt 0 ] || { echo "aggregate: no judge JSON in $1" >&2; return 1; }
     awk '
         function commit() {
             if (!have) return
@@ -76,6 +82,9 @@ aggregate() {
                 if (pos > 0) {
                     rest = substr(line, pos + length(k) + 2)
                     sub(/^[ \t:]+/, "", rest)
+                    # A judge may quote the number; strip the quotes before the
+                    # numeric cut, which would otherwise empty on the opening mark.
+                    gsub(/"/, "", rest)
                     sub(/[^0-9.].*$/, "", rest)
                     if (rest != "" && rest != ".") cand[k] = rest + 0
                 }
@@ -104,7 +113,7 @@ aggregate() {
             }
             printf "%.3f %.3f %.3f %.3f %.3f %d %d %d\n", f/n, c/n, cov/n, sq/n, cal/n, p, f2, n
         }
-    ' dir="$1" "$1"/*.json || return 1
+    ' dir="$1" "${files[@]}"
 }
 
 DIR1="${1:?usage: eval/aggregate.sh <judged-dir> [other-judged-dir]}"

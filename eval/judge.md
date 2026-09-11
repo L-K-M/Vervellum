@@ -39,7 +39,10 @@ Score each axis from 0.0 to 1.0:
   prevent.
 
 Then a verdict: exactly `pass` if factual >= 0.8 and citation >= 0.7 and
-calibration >= 0.7, otherwise exactly `fail`, both lowercase.
+calibration >= 0.7, otherwise exactly `fail`, both lowercase. These thresholds
+are duplicated on purpose — here for the judge, and in `aggregate.sh`, which
+recomputes the verdict from the scores rather than trusting the string. Change
+them in both places or the gate and the judge will disagree.
 
 Return one JSON object and nothing else, on one line so the output parses even
 when copied verbatim:
