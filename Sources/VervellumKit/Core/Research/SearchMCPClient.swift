@@ -112,6 +112,10 @@ final class SearchMCPClient: SearchBackend {
 
     // MARK: Search
 
+    /// One JSON-RPC id sequence over one connection: two searches in flight would
+    /// interleave frames, and neither call could be matched to its reply.
+    let supportsConcurrentCalls = false
+
     /// Runs one search. `arguments` come from the model, so they are checked against
     /// the advertised schema first: a missing required key or an invented key means
     /// the model misread the schema, and sending it anyway would spend a request to

@@ -118,6 +118,10 @@ final class KagiCLIClient: SearchBackend {
 
     // MARK: SearchBackend
 
+    /// Each call is one short-lived process with no shared state; two in flight share
+    /// nothing but the metered account, whose rate limit is Kagi's to enforce.
+    let supportsConcurrentCalls = true
+
     /// Nothing to do: the executable was found while the settings were being read, which
     /// is where a missing program is a fixable configuration problem rather than a failed
     /// research turn. Running it here to see whether it works would spend a real Kagi

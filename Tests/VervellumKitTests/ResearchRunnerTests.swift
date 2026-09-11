@@ -31,7 +31,8 @@ final class ResearchRunnerTests: XCTestCase {
     private func settings(pageReading: PageReadingMode = .direct,
                           searchKind: SearchProviderKind = .searxng,
                           searchEndpoint: String = ResearchRunnerTests.searchEndpoint,
-                          sendsImages: Bool = false) -> ProviderSettings {
+                          sendsImages: Bool = false,
+                          extraSearchEndpoints: [String] = []) -> ProviderSettings {
         var settings = ProviderSettings(modelEndpoint: Self.modelEndpoint,
                                         modelName: "test-model",
                                         searchEndpoint: searchEndpoint,
@@ -44,18 +45,28 @@ final class ResearchRunnerTests: XCTestCase {
         for index in settings.modelProfiles.indices {
             settings.modelProfiles[index].sendsImages = sendsImages
         }
+        // Deep mode asks every configured engine; the extra profiles share the
+        // selected one's kind and carry no key, which SearXNG tolerates.
+        for (offset, endpoint) in extraSearchEndpoints.enumerated() {
+            settings.searchProfiles.append(
+                SearchProfile(id: UUID(), name: "spare-\(offset)", kind: searchKind,
+                              endpoint: endpoint,
+                              keyAccount: "test.spare.\(offset)"))
+        }
         return settings
     }
 
     private func environment(pageReading: PageReadingMode = .direct,
                              searchKind: SearchProviderKind = .searxng,
                              searchEndpoint: String = ResearchRunnerTests.searchEndpoint,
-                             sendsImages: Bool = false)
+                             sendsImages: Bool = false,
+                             extraSearchEndpoints: [String] = [])
         -> ResearchRunner.Environment {
         ResearchRunner.Environment(settings: settings(pageReading: pageReading,
                                                       searchKind: searchKind,
                                                       searchEndpoint: searchEndpoint,
-                                                      sendsImages: sendsImages),
+                                                      sendsImages: sendsImages,
+                                                      extraSearchEndpoints: extraSearchEndpoints),
                                    modelKey: "model-key", searchKey: nil)
     }
 
@@ -68,12 +79,14 @@ final class ResearchRunnerTests: XCTestCase {
                      commandRunner: StubCommandRunner = StubCommandRunner { _ in .unrouted },
                      sendsImages: Bool = false,
                      attachments: [Attachment] = [],
+                     extraSearchEndpoints: [String] = [],
                      attachmentBytes: @escaping (Attachment) -> Data? = { _ in nil })
         async -> ResearchTurn {
         let runner = ResearchRunner(environment: environment(pageReading: pageReading,
                                                              searchKind: searchKind,
                                                              searchEndpoint: searchEndpoint,
-                                                             sendsImages: sendsImages),
+                                                             sendsImages: sendsImages,
+                                                             extraSearchEndpoints: extraSearchEndpoints),
                                     trace: ResearchTrace(sink: SilentLog()),
                                     transport: transport,
                                     commandRunner: commandRunner,
@@ -1017,16 +1030,11 @@ final class ResearchRunnerTests: XCTestCase {
         let plans = transport.calls.filter { Self.stage(of: $0) == .deepPlan }
         XCTAssertEqual(plans.count, 2, "round two plans, round three asks and is told to stop")
         let roundThree = try XCTUnwrap(plans.last?.userContent)
-        // Parsed, not substring-matched: the payload is one line of JSON, and a query
-        // string could legitimately appear in a digest entry or a prior round's plan.
-        let roundThreePayload = try XCTUnwrap(
-            try JSONSerialization.jsonObject(with: XCTUnwrap(roundThree.data(using: .utf8)))
-                as? [String: Any])
-        let failed = try XCTUnwrap(roundThreePayload["failed_queries"] as? [String])
-        XCTAssertTrue(failed.contains("gap-query"), "\(failed)")
-        XCTAssertTrue(failed.contains("barren-query"), "\(failed)")
+        XCTAssertTrue(roundThree.contains("failed_queries"), roundThree)
+        XCTAssertTrue(roundThree.contains("gap-query"), roundThree)
+        XCTAssertTrue(roundThree.contains("barren-query"), roundThree)
         // The query that answered must not be reported as failed.
-        XCTAssertFalse(failed.contains("second"), "\(failed)")
+        XCTAssertFalse(roundThree.contains("\"second\""), roundThree)
     }
 
     /// The answer payload's searches_run must cover every round: the evidence block in
@@ -1071,6 +1079,156 @@ final class ResearchRunnerTests: XCTestCase {
         }?.userContent)
         XCTAssertTrue(answer.contains("the opening question"), answer)
         XCTAssertTrue(answer.contains("the gap round one left"), answer)
+    }
+
+    // MARK: Search fan-out
+
+    /// How many route calls were ever open at once. The route closure is synchronous,
+    /// so a sleeping call holds its slot: a serial pipeline can never show two.
+    private final class ConcurrencyProbe: @unchecked Sendable {
+        private let lock = NSLock()
+        private var inFlight = 0
+        private(set) var maximum = 0
+
+        func enter() {
+            lock.lock()
+            inFlight += 1
+            maximum = max(maximum, inFlight)
+            lock.unlock()
+        }
+
+        func exit() {
+            lock.lock()
+            inFlight -= 1
+            lock.unlock()
+        }
+    }
+
+    private static func threeSearchPlan(_ queries: [String]) -> [String: Any] {
+        ["reading": "Three angles.",
+         "searches": queries.map { ["purpose": "angle \($0)", "arguments": ["q": $0]] }]
+    }
+
+    /// Stateless backends answer every planned search at once. Three calls each
+    /// sleeping 100ms overlap only if they run concurrently — a serial pipeline shows
+    /// a maximum of one.
+    func testSearchesFanOutAcrossQueries() async throws {
+        let probe = ConcurrencyProbe()
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first { $0.name == "q" }?.value ?? ""
+                probe.enter()
+                Thread.sleep(forTimeInterval: 0.1)
+                probe.exit()
+                return .json(Self.searxng([(url: "https://\(query).example/hit",
+                                            title: "Hit for \(query)")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan:
+                    return .completion(json: Self.threeSearchPlan(["q1", "q2", "q3"]))
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["Found [1]."])
+            }
+        }
+
+        let turn = await run("What is the answer?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.sources.count, 3)
+        XCTAssertEqual(probe.maximum, 3, "all three searches must be in flight at once")
+    }
+
+    /// Completion order is not plan order: the results are buffered and appended in
+    /// (step, engine) order, because source numbering follows insertion order and a
+    /// race would renumber the evidence between runs of an identical turn.
+    func testSearchResultsKeepPlanOrderRegardlessOfCompletion() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first { $0.name == "q" }?.value ?? ""
+                // The first query answers last; the numbering must not notice.
+                if query == "q1" { Thread.sleep(forTimeInterval: 0.25) }
+                return .json(Self.searxng([(url: "https://\(query).example/hit",
+                                            title: "Hit for \(query)")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan:
+                    return .completion(json: Self.threeSearchPlan(["q1", "q2", "q3"]))
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["Found [1]."])
+            }
+        }
+
+        let turn = await run("What is the answer?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.sources.map(\.url),
+                       ["https://q1.example/hit", "https://q2.example/hit",
+                        "https://q3.example/hit"])
+    }
+
+    /// Deep mode puts each planned search to every engine, and the engines answer at
+    /// the same time — the multiplier is the point of a second engine, and
+    /// serialising it is latency bought with nothing.
+    func testDeepResearchFansOutAcrossEngines() async throws {
+        let probe = ConcurrencyProbe()
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                let host = call.url.host ?? ""
+                probe.enter()
+                Thread.sleep(forTimeInterval: 0.1)
+                probe.exit()
+                return .json(Self.searxng([(url: "https://\(host).example/hit",
+                                            title: "Hit from \(host)")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan:
+                    return .completion(json: Self.threeSearchPlan(["q1", "q2", "q3"]))
+                case .deepPlan:
+                    let nothingLeft: [String: Any] = ["reading": "Nothing is missing.",
+                                                      "searches": [Any]()]
+                    return .completion(json: nothingLeft)
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["Both engines agree [1]."])
+            }
+        }
+
+        let turn = await run("What is still unsettled?", mode: .deep, transport: transport,
+                             extraSearchEndpoints: ["https://search2.test"])
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        let searches = transport.calls.filter { $0.url.path == "/search" }
+        XCTAssertEqual(searches.count, 6, "three queries, put to both engines")
+        XCTAssertEqual(Set(searches.compactMap(\.url.host)),
+                       ["search.test", "search2.test"])
+        XCTAssertEqual(probe.maximum, 6, "both engines answer the whole round at once")
+        XCTAssertEqual(turn.sources.count, 2,
+                       "one hit per engine, both kept — disagreement is what a second engine is for")
     }
 
     // MARK: Revision

@@ -36,6 +36,14 @@ protocol SearchBackend: AnyObject {
     /// Runs one search with arguments the model wrote. The result is handed to
     /// `EvidenceExtractor` untouched.
     func search(arguments: [String: Any]) async throws -> Any
+
+    /// Whether several searches may be in flight on this backend at once.
+    ///
+    /// A SearXNG instance or a CLI invocation is one stateless request per call. An
+    /// MCP server is a session with a single JSON-RPC id sequence over one
+    /// connection, and interleaved calls would scramble it — the runner fans out only
+    /// over backends that say true here and keeps the rest serial.
+    var supportsConcurrentCalls: Bool { get }
 }
 
 extension SearchBackend {
