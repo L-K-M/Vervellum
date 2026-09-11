@@ -1353,16 +1353,20 @@ final class ResearchRunner: ResearchRunning {
                 plannedReads[number] = text
             }
         }
-        guard !roundPlan.searches.isEmpty else {
-            trace.log("No regather searches: the planner says the web cannot settle this")
-            return nil
+        // A reads-only plan is not a stop: pages the round read are new evidence
+        // even with no searches run, and the newness check below decides whether
+        // they justify a second answer the same way it decides for searches.
+        if roundPlan.searches.isEmpty {
+            trace.log("No regather searches: the planner says searching cannot settle this")
         }
 
-        update { $0.stage = .searching }
-        // The reader sees the round's searches like every other round's: they ran.
-        update { $0.searches += roundPlan.searches }
-        _ = try await runSearches(roundPlan.searches, across: engines,
-                                  mode: .deep, state: &searchState)
+        if !roundPlan.searches.isEmpty {
+            update { $0.stage = .searching }
+            // The reader sees the round's searches like every other round's: they ran.
+            update { $0.searches += roundPlan.searches }
+            _ = try await runSearches(roundPlan.searches, across: engines,
+                                      mode: .deep, state: &searchState)
+        }
         var harvested = Self.applyingReads(
             plannedReads, to: Self.combined(linked: linked, results: searchState.rawResults))
         // The same budget the pre-stop reads already spent from; a round that both
