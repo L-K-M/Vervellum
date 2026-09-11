@@ -69,6 +69,20 @@ final class PlanParserTests: XCTestCase {
         XCTAssertEqual(plan.readRequests, [2, 3])
     }
 
+    /// The bridging traps specifically: JSON `true` reads as NSNumber, and
+    /// `NSNumber(true) as? Int` answers 1; a fractional 1.5 rounds to 2 under the
+    /// same cast. Neither may name a page — the request is the model's priority,
+    /// not a lottery over Foundation's type graph.
+    func testReadRequestsRejectBooleansAndFractions() throws {
+        let object: [String: Any] = [
+            "searches": [Any](),
+            "read": [true, false, 1.5, 2.0, "4"] as [Any],
+        ]
+        let plan = try PlanParser.parse(object, maxSearches: 4)
+        XCTAssertEqual(plan.readRequests, [2, 4],
+                       "a whole 2.0 is a 2; a boolean is not a 1 and 1.5 is not a 2")
+    }
+
     /// An absent key is the common case and means "read nothing".
     func testNoReadKeyMeansNoReadRequests() throws {
         let plan = try PlanParser.parse(["searches": [Any]()], maxSearches: 4)

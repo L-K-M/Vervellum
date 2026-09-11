@@ -932,8 +932,11 @@ final class ResearchRunner: ResearchRunning {
         var plannedReads: [Int: String] = [:]
         let evidenceLimit = mode == .deep ? ResearchContext.maxDeepEvidenceCharacters
                                           : ResearchContext.maxEvidenceCharacters
-        var pageBudget = (mode == .deep ? PageReaderFactory.maxDeepPages
-                                        : PageReaderFactory.maxPages) - linkedAttempts
+        // Clamped at zero: `prefix` traps on a negative count, and a turn whose links
+        // spent the whole allowance has simply none left, which is different from
+        // owing one.
+        var pageBudget = max(0, (mode == .deep ? PageReaderFactory.maxDeepPages
+                                               : PageReaderFactory.maxPages) - linkedAttempts)
         if mode == .deep, !engines.isEmpty, Self.maxDeepRounds > 1 {
             for round in 2...Self.maxDeepRounds {
                 try Task.checkCancellation()
@@ -951,6 +954,10 @@ final class ResearchRunner: ResearchRunning {
                 var followExtra: [String: Any] = ["search_tool": search.toolDescriptor,
                                                   "found": Self.digest(of: soFar)]
                 if !failedQueries.isEmpty { followExtra["failed_queries"] = failedQueries }
+                // The read allowance left, stated rather than implied: a planner that
+                // can see two reads left asks for two pages, where one told only that
+                // reads "cost a share of the budget" would guess.
+                if pageBudget > 0 { followExtra["read_budget"] = pageBudget }
                 let followContext = ResearchContext.assemble(
                     question: question, history: history, today: today, extra: followExtra)
                 // `try?`, because a later round failing to plan is not a reason to lose
@@ -983,13 +990,28 @@ final class ResearchRunner: ResearchRunning {
                 // search, but page 7 is decisive and I have only its snippet" is a
                 // legitimate end state, and the round's fetch is the only chance to
                 // honour it.
-                if !follow.readRequests.isEmpty, pageBudget > 0 {
-                    let candidates = Self.combined(linked: linked, results: rawResults)
-                    let (texts, spent) = await readPlannedPages(
-                        follow.readRequests, in: candidates,
-                        settings: settings, budget: pageBudget)
-                    pageBudget -= spent
-                    plannedReads.merge(texts) { _, new in new }
+                if !follow.readRequests.isEmpty {
+                    if pageBudget > 0 {
+                        let candidates = Self.combined(linked: linked, results: rawResults)
+                        let (texts, spent) = await readPlannedPages(
+                            follow.readRequests, in: candidates,
+                            settings: settings, budget: pageBudget)
+                        pageBudget -= spent
+                        // Empties are skipped rather than merged away: Dictionary.merge's
+                        // combining closure only fires for keys that already exist, so
+                        // an empty value for a NEW page would sail straight in — and a
+                        // page recorded as read on a failed fetch is budget spent for
+                        // nothing, with the digest marking it so no round retries it.
+                        for (number, text) in texts where !text.isEmpty {
+                            plannedReads[number] = text
+                        }
+                    } else {
+                        // Said rather than silently skipped: the round still runs its
+                        // searches — only its fetches are gone — and the trace is
+                        // where the difference lands.
+                        trace.log("Round asked for \(follow.readRequests.count) page(s); "
+                                  + "the page budget is spent")
+                    }
                 }
                 try Task.checkCancellation()
 
@@ -1762,12 +1784,19 @@ final class ResearchRunner: ResearchRunning {
                                   in sources: [Source],
                                   settings: ProviderSettings,
                                   budget: Int) async -> (texts: [Int: String], attempted: Int) {
-        let wanted = Set(numbers)
-        let targets = Array(readableTargets(in: sources)
-            .filter { wanted.contains($0.number) }
-            .prefix(budget))
+        // In the model's order, not the source list's: the request is a priority
+        // list, and when the budget takes only some of it, the ones it named first
+        // are the ones it wanted most.
+        let requested = readableTargets(in: sources)
+            .filter { numbers.contains($0.number) }
+            .sorted { left, right in
+                let leftIndex = numbers.firstIndex(of: left.number) ?? .max
+                let rightIndex = numbers.firstIndex(of: right.number) ?? .max
+                return leftIndex < rightIndex
+            }
+        let targets = Array(requested.prefix(budget))
         guard !targets.isEmpty else { return ([:], 0) }
-        trace.log("Round asked for \(wanted.count) page(s) by number; reading \(targets.count)")
+        trace.log("Round asked for \(numbers.count) page(s) by number; reading \(targets.count)")
         let (enriched, _) = await performReads(targets, in: sources, settings: settings)
         var texts: [Int: String] = [:]
         for source in enriched where targets.contains(where: { $0.number == source.number }) {
