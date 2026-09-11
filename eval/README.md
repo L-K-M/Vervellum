@@ -29,10 +29,11 @@ eval/run.sh --only 09            # just 09-cobalt — a cheap smoke run
 
 Keys come from the normal settings, or from `VERVELLUM_MODEL_KEY` /
 `VERVELLUM_SEARCH_KEY` in a container. Deep-mode questions cost several times a
-quick question in billed requests; the bank is twenty questions on purpose. Each
-question is capped at 15 minutes (`VERVELLUM_EVAL_TIMEOUT` to change); a timeout
-counts as a failed question rather than stalling the run. Output lands in
-`eval/runs/`, which is git-ignored.
+quick question in billed requests; the bank is twenty-one questions on purpose.
+Each question is capped at 15 minutes (`VERVELLUM_EVAL_TIMEOUT` to change); with
+`timeout(1)` on PATH — `gtimeout` from coreutils on macOS — a timeout counts as
+a failed question rather than stalling the run, and without one a wedged
+question stalls everything. Output lands in `eval/runs/`, which is git-ignored.
 
 ## Judging
 
