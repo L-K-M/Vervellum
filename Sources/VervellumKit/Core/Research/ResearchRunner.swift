@@ -1504,6 +1504,16 @@ final class ResearchRunner: ResearchRunning {
     /// model a numbering that skips — and a gap is an invitation to cite the number that
     /// is missing, which is the same reason `ResearchContext.evidence` drops a suffix
     /// rather than stepping over an entry that does not fit.
+    ///
+    /// **The numbering is append-only across rebuilds, and the deep rounds depend on
+    /// it.** This function is called again after every round over the whole cumulative
+    /// result list, and `plannedReads` keys fetched page text by number — a number that
+    /// shifted between rebuilds would attach a decisive page to the wrong source, which
+    /// is worse than dropping it. Append-only holds because every filter downstream of
+    /// the numbering (dedupe by first occurrence, the per-domain cap, the pool cap)
+    /// keeps earlier survivors when later results arrive: a new result can only add a
+    /// tail, never reorder or displace what a previous round already numbered. Any new
+    /// filter must preserve that property or key `plannedReads` by URL instead.
     static func combined(linked: [Source], results: [Any]) -> [Source] {
         guard !linked.isEmpty else { return EvidenceExtractor.sources(from: results) }
         // Compared by `canonicalKey`, not by the raw string. A URL pasted out of a

@@ -146,7 +146,7 @@ enum ResearchPrompts {
         answer here and the right one whenever the question is settled. Do not invent \
         a search to fill the round.
 
-        Return {"reading": "...", "searches": [{"purpose": "...", "arguments": {...}}], "read": [2, 7]}
+        Return {"reading": "...", "searches": [{"purpose": "...", "arguments": {...}}]}
         - "reading": one sentence naming the gap this round is trying to close, or \
         saying that the sources already settle the question.
         - "purpose": a short phrase naming what that search is meant to settle.
