@@ -895,10 +895,18 @@ final class ResearchRunner: ResearchRunning {
         // the turn doing another. `alreadyRead` stays the successes, because it answers a
         // different question: whether this turn has any page text at all, which is what
         // the `noPagesRead` notice is about.
+        // The fill's spend comes off the budget the regather round will see: it is
+        // the same turn-wide allowance, and a round handed an already-spent remainder
+        // would re-spend it.
+        let fillSpend = { (before: Int, after: Int) in after - before }
+        let attemptedBeforeFill = current?.pagesAttempted ?? 0
         harvested = await readPages(harvested,
                                     settings: settings,
                                     budget: pageBudget,
                                     alreadyRead: linked.count + plannedReadCount)
+        if let turn = current {
+            pageBudget = max(0, pageBudget - fillSpend(attemptedBeforeFill, turn.pagesAttempted))
+        }
         try Task.checkCancellation()
 
         // Trimmed to what fits the evidence budget *before* it becomes the turn's source
@@ -1308,6 +1316,11 @@ final class ResearchRunner: ResearchRunning {
             "unsettled": insufficient.map { ["claim": $0.claim, "reasoning": $0.reasoning] },
         ]
         if !followups.isEmpty { extra["followups"] = followups }
+        // The same dead-query discipline the rounds enforce: a claim that a failed
+        // query already failed to settle is not settled by re-asking that query.
+        if !searchState.failedQueries.isEmpty {
+            extra["failed_queries"] = searchState.failedQueries
+        }
         let context = ResearchContext.assemble(
             question: question, history: history, today: today, extra: extra)
         // `try?`, for the same reason a later deep round is `try?`: the round is an
@@ -1365,7 +1378,14 @@ final class ResearchRunner: ResearchRunning {
         // The round must have added something — new sources, or a page the first pass
         // had only as a snippet — or the second answer would be written over the same
         // evidence as the first, at the cost of two long calls.
-        let newSources = harvested.count - currentSources.count
+        //
+        // Newness is measured *after* the evidence trim, against `currentSources`
+        // (itself post-trim): the harvested list can grow past what the budget will
+        // show the model, and counting that shadow growth would send the turn back
+        // for a second answer over evidence identical to the first.
+        let trimmedCount = ResearchContext.evidence(from: harvested,
+                                                    limit: evidenceLimit).entries.count
+        let newSources = trimmedCount - currentSources.count
         let newTexts = harvested.filter { source in
             source.wasRead && currentSources.first(where: { $0.number == source.number })?.wasRead != true
         }.count

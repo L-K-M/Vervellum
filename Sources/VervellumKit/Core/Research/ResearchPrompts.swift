@@ -179,7 +179,10 @@ enum ResearchPrompts {
         list; an entry marked [read] has been fetched in full already.
 
         Plan up to \(maxSearches) searches, and name in "read" any listed page whose \
-        full text would settle what the check could not. Prefer searches that could \
+        full text would settle what the check could not. A key called "failed_queries", \
+        when present, lists searches this run already tried that produced nothing \
+        usable — do not re-ask them in new words; the rounds before you established \
+        that ground is barren. Prefer searches that could \
         DISCONFIRM what the unsettled claims assert: a round that only finds more \
         agreement tells the check nothing it does not already know. Do not re-ask \
         what "found" covers, and do not search for a claim that is a matter of \
@@ -201,6 +204,7 @@ enum ResearchPrompts {
         saying the web cannot settle it.
         - "purpose": a short phrase naming what that search is meant to settle.
         - "read": optional — numbers from "found" whose pages you want fetched in full.
+        \(jsonOnly)
         """
     }
 
