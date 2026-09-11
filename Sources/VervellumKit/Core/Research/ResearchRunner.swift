@@ -740,9 +740,6 @@ final class ResearchRunner: ResearchRunning {
             var pairsLeft = Dictionary(uniqueKeysWithValues: planned.indices.map { ($0, asked.count) })
 
             func apply(_ outcome: Outcome, engine: SearchBackend) {
-                let label = asked.count > 1
-                    ? "Search \(outcome.step + 1) via \(engine.backendName)"
-                    : "Search \(outcome.step + 1)"
                 if let result = outcome.result {
                     // Structure only — keys, counts and sizes, never a title or a
                     // link — so a result the extractor cannot read is diagnosable
@@ -750,8 +747,8 @@ final class ResearchRunner: ResearchRunning {
                     // The same label the stage used, so two engines answering one
                     // planned search do not emit two identical lines about different
                     // shapes — which is the case this log exists for.
-                    trace.log(label + " result shape: "
-                              + "\(EvidenceExtractor.shape(of: result))")
+                    trace.log(label(outcome.step, engine)
+                              + " result shape: \(EvidenceExtractor.shape(of: result))")
                     buffered.append(outcome)
                     productive.insert(ObjectIdentifier(engine))
                     // "Usable" is the extractor's call, made inside the task: a 200
@@ -760,8 +757,13 @@ final class ResearchRunner: ResearchRunning {
                     // words — the exact waste `failedQueries` exists to stop.
                     if outcome.fruitful { fruitfulByStep[outcome.step, default: 0] += 1 }
                 } else if let failure = outcome.failure {
-                    trace.warn("\(label) failed on \(engine.backendName): \(failure)")
-                    searchFailures.append(failure)
+                    // Buffered rather than appended: failures replay in (step,
+                    // engine) order with the results, so the failure list is the
+                    // same after every run of an identical turn instead of whichever
+                    // engine happened to lose first.
+                    trace.warn("\(label(outcome.step, engine)) failed on "
+                               + "\(engine.backendName): \(failure)")
+                    buffered.append(outcome)
                 }
                 // A step completes when its last pair does, whichever engine's that
                 // was. An unknown step number cannot happen — outcomes only carry
@@ -773,6 +775,14 @@ final class ResearchRunner: ResearchRunning {
                         update { $0.searchesCompleted = attempted }
                     }
                 }
+            }
+
+            /// What the trace calls one (step, engine) pair — built once, in one
+            /// place, so the stage label and the failure label cannot drift apart.
+            func label(_ step: Int, _ engine: SearchBackend) -> String {
+                asked.count > 1
+                    ? "Search \(step + 1) via \(engine.backendName)"
+                    : "Search \(step + 1)"
             }
 
             /// The shared body of both paths: run one pair, classify the outcome.
@@ -820,9 +830,10 @@ final class ResearchRunner: ResearchRunning {
             }
 
             // Stateless engines: the whole round in flight at once. The fan-out is
-            // bounded structurally — a round plans at most `maxSearches` steps, so the
-            // task count is maxSearches × engines (a dozen in any real configuration),
-            // and same-engine requests share one host queue below URLSession anyway.
+            // bounded structurally: a round plans at most `maxSearches` steps, so at
+            // most maxSearches × engines requests leave at once — a dozen HTTP calls
+            // or short-lived CLI processes in any real configuration, which is what
+            // the engines themselves tolerate under a single user key.
             if !stateless.isEmpty, !planned.isEmpty {
                 try await withThrowingTaskGroup(of: Outcome.self) { group in
                     for (stepIndex, step) in planned.enumerated() {
@@ -854,16 +865,19 @@ final class ResearchRunner: ResearchRunning {
             // the next round's context with the same line twice. Capped at the
             // digest's snippet budget: the list is re-injected into every later
             // round, and an unbounded model-written string would grow each one.
+            // `asked` is non-empty here by the early return above, so a step with no
+            // fruitfulness really was asked of a real engine and really got nothing.
             for (stepIndex, step) in planned.enumerated()
-            where mode == .deep && !asked.isEmpty
-                && fruitfulByStep[stepIndex, default: 0] == 0 {
+            where mode == .deep && fruitfulByStep[stepIndex, default: 0] == 0 {
                 let query = String(step.displayQuery.prefix(200))
                 if !failedQueries.contains(query) { failedQueries.append(query) }
             }
-            rawResults.append(contentsOf: buffered.sorted { one, other in
+            let ordered = buffered.sorted { one, other in
                 if one.step != other.step { return one.step < other.step }
                 return one.engine < other.engine
-            }.compactMap(\.result))
+            }
+            rawResults.append(contentsOf: ordered.compactMap(\.result))
+            searchFailures.append(contentsOf: ordered.compactMap(\.failure))
 
             // Nothing was asked, so nothing was proven unproductive. Without this an
             // empty plan — which a question carrying links can legitimately produce —

@@ -1243,6 +1243,11 @@ final class ResearchRunnerTests: XCTestCase {
         }
         XCTAssertEqual(turn.sources.count, 2,
                        "one hit per engine, both kept — disagreement is what a second engine is for")
+        // The engine axis of the ordering guarantee: within a step, the selected
+        // engine's result precedes the spare's regardless of which answered first,
+        // because evidence numbering follows insertion order.
+        XCTAssertEqual(turn.sources.map { URLComponents(string: $0.url)?.host ?? $0.url },
+                       ["search.test.example", "search2.test.example"])
     }
 
     // MARK: Revision
