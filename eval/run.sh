@@ -13,7 +13,7 @@
 # being measured, and the reason the bank stays small.
 set -uo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 ONLY=""
 if [ "${1:-}" = "--only" ]; then
     ONLY="${2:?--only wants an id prefix}"
@@ -68,6 +68,7 @@ fi
 mkdir -p "$OUT" || { echo "eval: cannot create output dir '$OUT'" >&2; exit 1; }
 pass=0
 fail=0
+skipped=0
 
 for file in "${questions[@]}"; do
     id=$(basename "$file" .txt)
@@ -79,9 +80,11 @@ for file in "${questions[@]}"; do
         research) flag="--ask" ;;
         deep)     flag="--deep" ;;
         direct)   flag="--direct" ;;
-        *)        echo "eval: $id: no usable 'mode:' line — skipping" >&2; continue ;;
+        *)        skipped=$((skipped + 1))
+                  echo "eval: $id: no usable 'mode:' line — skipping" >&2; continue ;;
     esac
     if [ -z "$question" ]; then
+        skipped=$((skipped + 1))
         echo "eval: $id: no 'question:' line — skipping" >&2
         continue
     fi
@@ -125,9 +128,17 @@ for file in "${questions[@]}"; do
 done
 
 echo
-echo "done: $pass ran, $fail failed -> $OUT"
+echo "done: $pass ran, $fail failed, $skipped skipped -> $OUT"
 echo "judge each case with eval/judge.md, then compare across runs as README.md describes"
 # Nothing ran means every question was skipped — a bank of header typos must not
-# exit green any more than a bank that matched nothing.
-[ "$pass" -gt 0 ] || { echo "eval: nothing ran — every question was skipped" >&2; exit 1; }
+# exit green any more than a bank that matched nothing. Told apart from an
+# all-fail run, which is a different diagnosis entirely.
+if [ "$pass" -eq 0 ]; then
+    if [ "$fail" -eq 0 ]; then
+        echo "eval: nothing ran — every question was skipped" >&2
+    else
+        echo "eval: nothing passed — every question failed (see the traces)" >&2
+    fi
+    exit 1
+fi
 [ "$fail" -eq 0 ]

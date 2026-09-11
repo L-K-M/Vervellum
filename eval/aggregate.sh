@@ -18,7 +18,8 @@
 # BSD/macOS awk alike.
 set -uo pipefail
 
-cd "$(dirname "$0")/.."
+# No cd: judged-dir paths resolve against the caller, where before/after pairs
+# live; nothing here reads anything relative to the repo root.
 
 aggregate() {
     # $1 = dir. Emits "factual citation coverage source_quality calibration passes fails n".
@@ -34,12 +35,19 @@ aggregate() {
             else f2++
             have = 0
         }
+        # A new file commits the previous one: files are cases. This rule runs
+        # before the fence rule on purpose: a fenced reply puts ``` on line 1,
+        # and the fence rule would skip this commit and drop the previous
+        # case — the common shape of a judge reply, not an edge.
+        FNR == 1 { commit(); split("", sc) }
         # Fence lines are decoration, not cases.
         /^[ \t]*```/ { next }
-        # A new file commits the previous one: files are cases.
-        FNR == 1 { commit(); split("", sc) }
         /\{.*\}/ {
-            split("", sc)
+            # Parse into a candidate; only a line that actually carries a
+            # factual score replaces the record. Brace-bearing prose after the
+            # JSON must not wipe what was parsed. The last score-bearing line
+            # wins.
+            split("", cand)
             # Each axis is found by its quoted key rather than by field position:
             # a judge may prefix the JSON with prose ("real: {...}"), and values
             # may share a line with anything. index()+substr rather than match():
@@ -52,10 +60,13 @@ aggregate() {
                     rest = substr($0, pos + length(k) + 3)
                     sub(/^[^0-9.]*/, "", rest)
                     sub(/[^0-9.].*$/, "", rest)
-                    if (rest != "" && rest != ".") sc[k] = rest + 0
+                    if (rest != "" && rest != ".") cand[k] = rest + 0
                 }
             }
-            if ("factual" in sc) have = 1
+            if ("factual" in cand) {
+                for (k in cand) sc[k] = cand[k]
+                have = 1
+            }
         }
         END {
             commit()
