@@ -992,7 +992,15 @@ final class ResearchRunner: ResearchRunning {
                 // honour it.
                 if !follow.readRequests.isEmpty {
                     if pageBudget > 0 {
-                        let candidates = Self.combined(linked: linked, results: rawResults)
+                        // Reads applied, so `readableTargets` sees pages earlier
+                        // rounds fetched as read: a repeated request for a page the
+                        // turn already holds must not be re-fetched — and re-charged —
+                        // in a slot a new page could have used. The digest's [read]
+                        // mark asks the planner not to repeat itself; this is what
+                        // enforces it when it does anyway.
+                        let candidates = Self.applyingReads(
+                            plannedReads,
+                            to: Self.combined(linked: linked, results: rawResults))
                         let (texts, spent) = await readPlannedPages(
                             follow.readRequests, in: candidates,
                             settings: settings, budget: pageBudget)
