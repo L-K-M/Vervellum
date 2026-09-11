@@ -171,6 +171,10 @@ final class ResearchRunner: ResearchRunning {
         /// room by dissolving the very things the citations point at. Rounds stop when
         /// the budget is close to spent instead — the check is inline in `execute`,
         /// asked with the same trimmer that decides what the answer sees.
+        ///
+        /// What a round may ask for is documented in `deepFollowUp`'s prompt: searches
+        /// against the gap, and page reads by the digest's stable source numbers —
+        /// the two moves the rounds exist to make.
         case deep
 
         /// Every mode but `direct` gathers evidence before answering.
@@ -213,9 +217,14 @@ final class ResearchRunner: ResearchRunning {
         // several rounds push it past the cap, taking from the front would show a later
         // planner the round-one material it has already planned against and hide what the
         // round before it just found — the opposite of reading the gaps.
+        //
+        // A fetched page is marked rather than re-summarised: the planner asks for
+        // pages by number, and without the mark it cannot tell what it already has —
+        // it would spend fetches re-requesting pages the turn read a round ago.
         sources.suffix(40).map { source in
             let snippet = source.snippet.prefix(200)
-            return "\(source.number). \(source.title) — \(snippet)"
+            let fetched = source.wasRead ? " [read]" : ""
+            return "\(source.number). \(source.title)\(fetched) — \(snippet)"
         }.joined(separator: "\n")
     }
 
@@ -909,12 +918,34 @@ final class ResearchRunner: ResearchRunning {
         // model is entitled to know about the searches that produced its evidence —
         // built from the first plan alone, the list described a fraction of what the
         // evidence block actually contains.
+        //
+        // `plannedReads` holds the texts of pages the rounds asked for by number. They
+        // are keyed by source number rather than attached to a source list, because
+        // `combined` rebuilds that list from raw results after every round — anything
+        // attached mid-loop would be discarded by the next rebuild. Attached once,
+        // after the last combine.
+        //
+        // `pageBudget` is the turn's whole page allowance, deep or not, spent as the
+        // rounds ask for pages and topped up by nobody: the final fill afterwards
+        // backstops what the rounds did not name, it does not get a second allowance.
         var allSearches = plan.searches
+        var plannedReads: [Int: String] = [:]
+        let evidenceLimit = mode == .deep ? ResearchContext.maxDeepEvidenceCharacters
+                                          : ResearchContext.maxEvidenceCharacters
+        // Clamped at zero: `prefix` traps on a negative count, and a turn whose links
+        // spent the whole allowance has simply none left, which is different from
+        // owing one.
+        var pageBudget = max(0, (mode == .deep ? PageReaderFactory.maxDeepPages
+                                               : PageReaderFactory.maxPages) - linkedAttempts)
         if mode == .deep, !engines.isEmpty, Self.maxDeepRounds > 1 {
             for round in 2...Self.maxDeepRounds {
                 try Task.checkCancellation()
-                let soFar = Self.combined(linked: linked, results: rawResults)
-                guard ResearchContext.evidence(from: soFar).dropped == 0 else {
+                // The reads attached: the budget check must count what they cost, and
+                // the digest must mark them, or the planner asks for the same page again.
+                let soFar = Self.applyingReads(plannedReads,
+                                               to: Self.combined(linked: linked,
+                                                                 results: rawResults))
+                guard ResearchContext.evidence(from: soFar, limit: evidenceLimit).dropped == 0 else {
                     trace.log("Round \(round) not run: the evidence budget is already full")
                     break
                 }
@@ -923,6 +954,13 @@ final class ResearchRunner: ResearchRunning {
                 var followExtra: [String: Any] = ["search_tool": search.toolDescriptor,
                                                   "found": Self.digest(of: soFar)]
                 if !failedQueries.isEmpty { followExtra["failed_queries"] = failedQueries }
+                // The read allowance left, stated rather than implied: a planner that
+                // can see two reads left asks for two pages, where one told only that
+                // reads "cost a share of the budget" would guess.
+                // Stated even at zero: a planner that can see the reads are spent
+                // stops asking for them, where an absent key leaves it guessing —
+                // and guessing costs a round.
+                followExtra["read_budget"] = pageBudget
                 let followContext = ResearchContext.assemble(
                     question: question, history: history, today: today, extra: followExtra)
                 // `try?`, because a later round failing to plan is not a reason to lose
@@ -951,6 +989,43 @@ final class ResearchRunner: ResearchRunning {
                     break
                 }
 
+                // Read requests come before the empty-plan stop: "nothing left to
+                // search, but page 7 is decisive and I have only its snippet" is a
+                // legitimate end state, and the round's fetch is the only chance to
+                // honour it.
+                if !follow.readRequests.isEmpty {
+                    if pageBudget > 0 {
+                        // Reads applied, so `readableTargets` sees pages earlier
+                        // rounds fetched as read: a repeated request for a page the
+                        // turn already holds must not be re-fetched — and re-charged —
+                        // in a slot a new page could have used. The digest's [read]
+                        // mark asks the planner not to repeat itself; this is what
+                        // enforces it when it does anyway.
+                        let candidates = Self.applyingReads(
+                            plannedReads,
+                            to: Self.combined(linked: linked, results: rawResults))
+                        let (texts, spent) = await readPlannedPages(
+                            follow.readRequests, in: candidates,
+                            settings: settings, budget: pageBudget)
+                        pageBudget -= spent
+                        // Empties are skipped rather than merged away: Dictionary.merge's
+                        // combining closure only fires for keys that already exist, so
+                        // an empty value for a NEW page would sail straight in — and a
+                        // page recorded as read on a failed fetch is budget spent for
+                        // nothing, with the digest marking it so no round retries it.
+                        for (number, text) in texts where !text.isEmpty {
+                            plannedReads[number] = text
+                        }
+                    } else {
+                        // Said rather than silently skipped: the round still runs its
+                        // searches — only its fetches are gone — and the trace is
+                        // where the difference lands.
+                        trace.log("Round asked for \(follow.readRequests.count) page(s); "
+                                  + "the page budget is spent")
+                    }
+                }
+                try Task.checkCancellation()
+
                 // An empty plan is the documented way to stop, not a failure: a round with
                 // nothing left worth asking should say so rather than fill its quota.
                 guard !follow.searches.isEmpty else {
@@ -973,17 +1048,26 @@ final class ResearchRunner: ResearchRunning {
         }
 
         var harvested = Self.combined(linked: linked, results: rawResults)
+        // The pages the rounds asked for, attached after the last rebuild of the list.
+        // Keyed by the stable number the digest showed the planner — which is why the
+        // numbering may not shift between rounds: a renumbered list would attach a
+        // decisive page to the wrong source.
+        harvested = Self.applyingReads(plannedReads, to: harvested)
+        let plannedReadCount = plannedReads.values.filter { !$0.isEmpty }.count
 
         // 3b — read the pages behind the top sources, if the user asked for that.
         //
-        // Before the budget, not after: what the model is shown has to be decided with
-        // the page text in hand, or a page would be fetched and then silently dropped.
-        // Still inside the searching stage — see `ResearchTurn.runningProgressLabel` for
-        // why this does not get a `ResearchStage` case of its own.
+        // This is the backstop, not the primary mechanism: in a deep turn the rounds
+        // have already spent the same allowance on pages they judged decisive, and what
+        // is left fills in rank order. Before the budget, not after: what the model is
+        // shown has to be decided with the page text in hand, or a page would be
+        // fetched and then silently dropped. Still inside the searching stage — see
+        // `ResearchTurn.runningProgressLabel` for why this does not get a
+        // `ResearchStage` case of its own.
         // What the links already spent comes off the turn's page budget rather than
-        // being added to it: `PageReaderFactory.maxPages` is a statement about one
-        // turn's requests and context, and it does not stop being true because the
-        // pages were chosen by the user instead of by relevance.
+        // being added to it: the allowance is a statement about one turn's requests
+        // and context, and it does not stop being true because the pages were chosen
+        // by the user instead of by relevance.
         //
         // Spent by the *attempts*, not by the reads. A link that would not load still
         // sent a request and still reached a host, so charging only the successes would
@@ -993,8 +1077,8 @@ final class ResearchRunner: ResearchRunning {
         // the `noPagesRead` notice is about.
         harvested = await readPages(harvested,
                                     settings: settings,
-                                    budget: PageReaderFactory.maxPages - linkedAttempts,
-                                    alreadyRead: linked.count)
+                                    budget: pageBudget,
+                                    alreadyRead: linked.count + plannedReadCount)
         try Task.checkCancellation()
 
         // Trimmed to what fits the evidence budget *before* it becomes the turn's source
@@ -1002,7 +1086,8 @@ final class ResearchRunner: ResearchRunning {
         // full list would validate the answer's citations against sources the model
         // never saw, and would offer the reader a source list the answer could not have
         // used.
-        let (evidence, droppedSources, withheldPageText) = ResearchContext.evidence(from: harvested)
+        let (evidence, droppedSources, withheldPageText) = ResearchContext.evidence(
+            from: harvested, limit: evidenceLimit)
         var sources = Array(harvested.prefix(evidence.count))
         // A page that did not fit is cleared from the source too, so the list the reader
         // sees and the evidence the model saw agree about which pages were read.
@@ -1430,6 +1515,16 @@ final class ResearchRunner: ResearchRunning {
     /// model a numbering that skips — and a gap is an invitation to cite the number that
     /// is missing, which is the same reason `ResearchContext.evidence` drops a suffix
     /// rather than stepping over an entry that does not fit.
+    ///
+    /// **The numbering is append-only across rebuilds, and the deep rounds depend on
+    /// it.** This function is called again after every round over the whole cumulative
+    /// result list, and `plannedReads` keys fetched page text by number — a number that
+    /// shifted between rebuilds would attach a decisive page to the wrong source, which
+    /// is worse than dropping it. Append-only holds because every filter downstream of
+    /// the numbering (dedupe by first occurrence, the per-domain cap, the pool cap)
+    /// keeps earlier survivors when later results arrive: a new result can only add a
+    /// tail, never reorder or displace what a previous round already numbered. Any new
+    /// filter must preserve that property or key `plannedReads` by URL instead.
     static func combined(linked: [Source], results: [Any]) -> [Source] {
         guard !linked.isEmpty else { return EvidenceExtractor.sources(from: results) }
         // Compared by `canonicalKey`, not by the raw string. A URL pasted out of a
@@ -1448,6 +1543,24 @@ final class ResearchRunner: ResearchRunning {
             renumbered.number = linked.count + 1 + offset
             return renumbered
         }
+    }
+
+    /// Attaches planner-requested page texts to a rebuilt source list, by number.
+    ///
+    /// The deep loop rebuilds the sources from raw results after every round, so reads
+    /// are kept beside the list in a `[number: text]` map and applied where the list is
+    /// consumed: the budget check (which must count what the reads cost), the digest
+    /// (which must mark what is already read), and the final harvest. A number that no
+    /// longer names a source — the extractor's cap dropped it — is ignored rather than
+    /// resurrected.
+    static func applyingReads(_ reads: [Int: String], to sources: [Source]) -> [Source] {
+        guard !reads.isEmpty else { return sources }
+        var applied = sources
+        for index in applied.indices {
+            guard let text = reads[applied[index].number], !text.isEmpty else { continue }
+            applied[index].fullText = text
+        }
+        return applied
     }
 
     /// A name for a linked source: the host and path the user typed.
@@ -1578,9 +1691,10 @@ final class ResearchRunner: ResearchRunning {
     /// says so rather than the run collapsing over an enrichment.
     ///
     /// `budget` is what is left of the turn's page allowance after the question's own
-    /// links; `alreadyRead` is how many of those answered, and is what keeps the
-    /// `noPagesRead` notice honest — "no page could be read" must not be said over a
-    /// turn that read the page the user pasted.
+    /// links and the deep rounds' requested reads; `alreadyRead` is how many pages the
+    /// turn already has text for, and is what keeps the `noPagesRead` notice honest —
+    /// "no page could be read" must not be said over a turn that read the page the user
+    /// pasted, or one whose rounds read what they asked for.
     private func readPages(_ sources: [Source],
                            settings: ProviderSettings,
                            budget: Int,
@@ -1621,7 +1735,49 @@ final class ResearchRunner: ResearchRunning {
         // the policy working rather than an oversight — this pass cannot tell the
         // question's links from the search results — and it costs a retry the linked
         // pass already had its chance at.
-        let targets = Array(sources.filter { source in
+        let targets = Array(readableTargets(in: sources).prefix(max(0, budget)))
+        guard !targets.isEmpty else {
+            // Nothing survived the filter, so nothing will be fetched — and that is the
+            // one turn where reading visibly did nothing. It gets the sentence a reader
+            // that fetched and failed would get, rather than silence: before this pass
+            // learned to refuse an address, these pages reached the reader and came back
+            // empty, which is what raised the notice. Refusing earlier must not also
+            // mean explaining less. `alreadyRead` keeps it honest — a turn that read the
+            // page the user pasted is not a turn that read nothing.
+            if alreadyRead == 0 { update { $0.addNotice(.noPagesRead) } }
+            return sources
+        }
+
+        let (enriched, read) = await performReads(targets, in: sources, settings: settings)
+        // One honesty rule for every failure shape — reader broken, fetches empty,
+        // targets filtered out: "no page could be read" is said exactly when the turn
+        // has no page text. A reader that could not be built used to raise this even
+        // over a turn that had read the question's links, which was the one claim the
+        // notice exists not to make.
+        if read == 0, alreadyRead == 0 { update { $0.addNotice(.noPagesRead) } }
+        return enriched
+    }
+
+    /// The sources a fetch is both permitted and meaningful for: unread, fetchable,
+    /// and publicly routable. Shared by the rank-order fill and the deep rounds'
+    /// by-number requests, so the two never drift on what may be fetched.
+    ///
+    /// A search result is a URL nobody in this conversation typed. The question's
+    /// own links may point wherever the user pointed them, `http://localhost:3000`
+    /// included — that is the feature working. A URL that arrived from a search
+    /// engine has no such licence: fetching `http://192.168.1.1/admin` because a page
+    /// won a search slot would probe the user's own network and hand what it found to
+    /// the model provider as evidence. The address on the far side of a redirect is
+    /// held to the same rule inside the reader, which is the only other way one
+    /// arrives unasked.
+    /// One consequence worth naming: a question's own link that failed in the linked
+    /// pass (an empty text — a dev server that was briefly down) is unread, so it
+    /// would otherwise be retried here. If it is private, it no longer is. That is
+    /// the policy working rather than an oversight — this pass cannot tell the
+    /// question's links from the search results — and it costs a retry the linked
+    /// pass already had its chance at.
+    private func readableTargets(in sources: [Source]) -> [Source] {
+        sources.filter { source in
             guard !source.wasRead else { return false }
             // Two different skips, so the trace does not report a malformed URL as a
             // private one and send whoever reads it looking in the wrong place.
@@ -1635,19 +1791,53 @@ final class ResearchRunner: ResearchRunning {
                 return false
             }
             return true
-        }.prefix(budget))
-        guard !targets.isEmpty else {
-            // Nothing survived the filter, so nothing will be fetched — and that is the
-            // one turn where reading visibly did nothing. It gets the sentence a reader
-            // that fetched and failed would get, rather than silence: before this pass
-            // learned to refuse an address, these pages reached the reader and came back
-            // empty, which is what raised the notice. Refusing earlier must not also
-            // mean explaining less. `alreadyRead` keeps it honest — a turn that read the
-            // page the user pasted is not a turn that read nothing.
-            if alreadyRead == 0 { update { $0.addNotice(.noPagesRead) } }
-            return sources
         }
+    }
 
+    /// Reads the pages a deep round asked for by source number.
+    ///
+    /// Returns the texts keyed by source number rather than attaching them: the caller
+    /// rebuilds the source list from raw results after every round, and anything
+    /// attached here would be discarded by the next rebuild. `attempted` is what came
+    /// out of the page budget — requests and context are spent whether or not the page
+    /// answered, matching the rule the question's own links are charged by.
+    private func readPlannedPages(_ numbers: [Int],
+                                  in sources: [Source],
+                                  settings: ProviderSettings,
+                                  budget: Int) async -> (texts: [Int: String], attempted: Int) {
+        // In the model's order, not the source list's: the request is a priority
+        // list, and when the budget takes only some of it, the ones it named first
+        // are the ones it wanted most.
+        let requested = readableTargets(in: sources)
+            .filter { numbers.contains($0.number) }
+            .sorted { left, right in
+                let leftIndex = numbers.firstIndex(of: left.number) ?? .max
+                let rightIndex = numbers.firstIndex(of: right.number) ?? .max
+                return leftIndex < rightIndex
+            }
+        let targets = Array(requested.prefix(max(0, budget)))
+        guard !targets.isEmpty else { return ([:], 0) }
+        trace.log("Round asked for \(numbers.count) page(s) by number; reading \(targets.count)")
+        let (enriched, _) = await performReads(targets, in: sources, settings: settings)
+        var texts: [Int: String] = [:]
+        for source in enriched where targets.contains(where: { $0.number == source.number }) {
+            if let text = source.fullText, !text.isEmpty { texts[source.number] = text }
+        }
+        return (texts, targets.count)
+    }
+
+    /// Fetches `targets` and attaches the texts to the sources they belong to. The
+    /// shared core of every read after the question's own links: build the reader,
+    /// account the attempt against the turn, attach what answered.
+    ///
+    /// Never throws and never raises a notice of its own. A reader that cannot be
+    /// built or a page that will not load is a source that keeps its snippet — the
+    /// caller decides what the turn should say about it, because the honest sentence
+    /// depends on what the rest of the turn managed to read.
+    private func performReads(_ targets: [Source],
+                              in sources: [Source],
+                              settings: ProviderSettings)
+        async -> (sources: [Source], read: Int) {
         let reader: PageReading?
         do {
             reader = try PageReaderFactory.make(settings: settings, readerKey: environment.readerKey,
@@ -1655,10 +1845,9 @@ final class ResearchRunner: ResearchRunning {
             try await reader?.connect()
         } catch {
             trace.warn("Page reading unavailable: \(ResearchError.safeLabel(for: error))")
-            update { $0.addNotice(.noPagesRead) }
-            return sources
+            return (sources, 0)
         }
-        guard let reader else { return sources }
+        guard let reader else { return (sources, 0) }
 
         update {
             $0.pagesAttempted += targets.count
@@ -1679,14 +1868,15 @@ final class ResearchRunner: ResearchRunning {
             enriched[index].fullText = text
         }
         let read = pages.values.filter { !$0.isEmpty }.count
-        // One snapshot for the end of the fetch and its result, as above.
+        // One snapshot for the end of the fetch and its result, as above. The count
+        // moves here, in the one place reads happen, so the rank-order fill and the
+        // rounds' requested reads cannot drift on how a page is tallied.
         update {
             $0.pagesInFlight = 0
             $0.pagesRead += read
         }
         trace.log("Pages read: \(read) of \(targets.count)")
-        if read == 0, alreadyRead == 0 { update { $0.addNotice(.noPagesRead) } }
-        return enriched
+        return (enriched, read)
     }
 
     /// The `/direct` path: one streamed call, no search, no citations.

@@ -10,6 +10,12 @@ enum PlanParser {
     struct Plan: Equatable {
         var reading: String
         var searches: [PlannedSearch]
+        /// Sources the planner wants read in full, by the turn's source number.
+        ///
+        /// Only a follow-up round can produce a meaningful one — the first plan is
+        /// written before any source exists — but it is parsed in both, so a planner
+        /// that asks early gets the same contract rather than a silent drop.
+        var readRequests: [Int] = []
     }
 
     static func parse(_ object: [String: Any], maxSearches: Int) throws -> Plan {
@@ -44,7 +50,51 @@ enum PlanParser {
             }
             searches.append(search)
         }
-        return Plan(reading: reading, searches: searches)
+        return Plan(reading: reading, searches: searches,
+                    readRequests: readRequests(from: object["read"]))
+    }
+
+    /// The optional "read" key: numbers of sources whose pages the planner wants
+    /// fetched, as they appear in the digest it was shown.
+    ///
+    /// Lenient the way the assessment's source list is — models write numbers as
+    /// strings — but unforgiving about everything else: a bogus entry is dropped
+    /// rather than reinterpreted, because a read of the wrong page spends a fetch and
+    /// several thousand characters of the evidence budget on it. A JSON `true` is not
+    /// source 1 and a fractional 1.5 is not source 2, whatever NSNumber bridging says
+    /// — the same guard the assessment's citations carry. Capped at the deep page
+    /// allowance so a hallucinated array cannot order an unbounded fetch list; the
+    /// runner's budget is the real gate.
+    private static func readRequests(from value: Any?) -> [Int] {
+        guard let raw = value as? [Any] else { return [] }
+        // The boolean encoding `NSNumber` uses, so `as? Int` cannot smuggle a `true`
+        // through as source 1.
+        let booleanEncoding = String(cString: NSNumber(value: true).objCType)
+        var seen: Set<Int> = []
+        var requests: [Int] = []
+        for entry in raw {
+            let number: Int?
+            // The boolean check comes first, on purpose: `NSNumber(true) as? Int`
+            // happily answers 1, and the next branch would let a `true` name source 1.
+            if let boxed = entry as? NSNumber,
+               String(cString: boxed.objCType) == booleanEncoding {
+                number = nil
+            } else if let exact = entry as? Int {
+                number = exact
+            } else if let boxed = entry as? NSNumber {
+                // Exact integers only: `Double 1.5 as? Int` rounds, and a rounded
+                // citation names a page the model never cited.
+                number = Int(exactly: boxed.doubleValue)
+            } else if let text = entry as? String {
+                number = Int(text.trimmingCharacters(in: .whitespaces))
+            } else {
+                number = nil
+            }
+            guard let number, number >= 1, seen.insert(number).inserted else { continue }
+            requests.append(number)
+            if requests.count >= PageReaderFactory.maxDeepPages { break }
+        }
+        return requests
     }
 }
 

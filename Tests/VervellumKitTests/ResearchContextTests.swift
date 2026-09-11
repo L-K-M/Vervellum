@@ -131,6 +131,17 @@ final class ResearchContextTests: XCTestCase {
 
     // MARK: Evidence budget
 
+    /// The deep ceiling's whole point is that history can still trim to make room:
+    /// a deep evidence budget at or above the context ceiling would make the
+    /// evidence untrimmable and the turn unfixable. Pinned, because the constant's
+    /// comment promises it and a number change would break it silently.
+    func testTheDeepEvidenceCeilingStaysUnderTheContextCeiling() {
+        XCTAssertLessThan(ResearchContext.maxDeepEvidenceCharacters,
+                          ResearchContext.maxCharacters)
+        XCTAssertGreaterThan(ResearchContext.maxDeepEvidenceCharacters,
+                             ResearchContext.maxEvidenceCharacters)
+    }
+
     func testEvidenceIsBudgetedAndReportsWhatWasDropped() {
         let snippet = String(repeating: "e", count: 600)
         let sources = (1...200).map {

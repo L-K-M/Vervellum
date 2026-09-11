@@ -1305,6 +1305,124 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(turn.sources.map(\.number), Array(1...5))
     }
 
+
+    /// The point of stable digest numbers: a round can ask for a page by number, and
+    /// the page is fetched *that round* — before the next round plans against the
+    /// digest, which must then show it as read.
+    func testDeepResearchReadsAPageTheRoundAskedFor() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first { $0.name == "q" }?.value ?? ""
+                return .json(Self.searxng([(url: "https://\(query.prefix(5)).example/hit",
+                                            title: "Hit for \(query)")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan:
+                    return .completion(json: Self.plan("first", purpose: "the opening question"))
+                case .deepPlan:
+                    guard call.systemPrompt?.contains("this is round 2") == true else {
+                        let nothingLeft: [String: Any] = ["reading": "Nothing is missing.",
+                                                          "searches": [Any]()]
+                        return .completion(json: nothingLeft)
+                    }
+                    return .completion(json: [
+                        "reading": "Source 1 is decisive and thin.",
+                        "searches": [["purpose": "the gap", "arguments": ["q": "second"]]],
+                        "read": [1],
+                    ])
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["The read page settles it [1]."])
+            }
+        }
+
+        let turn = await run("What is still unsettled?", mode: .deep, transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertTrue(turn.sources.first?.wasRead == true,
+                      "the page the round asked for must be read")
+
+        // The fetch happened during round two, before the round-three plan was made:
+        // comparing call order, because the final fill would have fetched the same
+        // page and proved nothing about *who* asked.
+        let calls = transport.calls
+        // Matched on the host, not the path: both rounds' hits end in /hit, and the
+        // round-read page is the one named first.example.
+        let fetchIndex = try XCTUnwrap(calls.firstIndex {
+            $0.kind == .fetch && $0.url.host == "first.example"
+        })
+        let roundThreeIndex = try XCTUnwrap(calls.lastIndex {
+            Self.stage(of: $0) == .deepPlan
+        })
+        XCTAssertLessThan(fetchIndex, roundThreeIndex)
+
+        // And the next planner is told the page is already read, so it does not spend
+        // a second fetch asking for it again.
+        let roundThree = try XCTUnwrap(calls[roundThreeIndex].userContent)
+        XCTAssertTrue(roundThree.contains("[read]"), roundThree)
+    }
+
+    /// Deep reads more pages than quick: eight against three, which is the least the
+    /// word can honestly mean. Sized so the fill alone decides it — no round asks for
+    /// anything, so every read here is the backstop spending the raised allowance.
+    func testDeepResearchReadsUpToTheDeepPageBudget() async throws {
+        func fourSearches(_ queries: [String]) -> [String: Any] {
+            ["reading": "Four angles.",
+             "searches": queries.map { ["purpose": "angle \($0)",
+                                        "arguments": ["q": $0]] }]
+        }
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first { $0.name == "q" }?.value ?? ""
+                return .json(Self.searxng([(url: "https://\(query).example/hit",
+                                            title: "Hit for \(query)")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .plan:
+                    return .completion(json: fourSearches(["q1", "q2", "q3", "q4"]))
+                case .deepPlan:
+                    guard call.systemPrompt?.contains("this is round 2") == true else {
+                        let nothingLeft: [String: Any] = ["reading": "Nothing is missing.",
+                                                          "searches": [Any]()]
+                        return .completion(json: nothingLeft)
+                    }
+                    return .completion(json: fourSearches(["q5", "q6", "q7", "q8"]))
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["Eight pages agree [1]."])
+            }
+        }
+
+        let turn = await run("What is still unsettled?", mode: .deep, transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.sources.count, 8)
+        XCTAssertEqual(turn.pagesRead, PageReaderFactory.maxDeepPages,
+                       "the fill must spend the deep allowance, not the quick one")
+        XCTAssertTrue(turn.sources.allSatisfy(\.wasRead))
+
+        // The control: the same shape in quick mode reads the quick allowance.
+        let quickTurn = await run("What is still unsettled?", mode: .research,
+                                  transport: transport)
+        XCTAssertEqual(quickTurn.stage, .complete, quickTurn.failure ?? "no failure recorded")
+        XCTAssertEqual(quickTurn.pagesRead, PageReaderFactory.maxPages)
+    }
     // MARK: Revision
 
     /// Everything the revision stage needs, with the answer and the revision scripted

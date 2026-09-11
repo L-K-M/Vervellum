@@ -18,6 +18,13 @@ enum ResearchContext {
     /// Ceiling on the evidence block alone, so a verbose search provider cannot
     /// crowd out the conversation.
     static let maxEvidenceCharacters = 70_000
+    /// The evidence ceiling for a `deep` turn, which reads up to
+    /// `PageReaderFactory.maxDeepPages` pages at 8,000 characters each. The quick-turn
+    /// ceiling would drop later rounds' sources — the gap-closers the rounds exist to
+    /// find — to make room for round one's pages, which is the one thing a deep turn
+    /// must not do quietly. Still under `maxCharacters` (110_000 above), so history
+    /// trims to make room before anything fixed is lost; pinned by a test.
+    static let maxDeepEvidenceCharacters = 100_000
     /// Prior answers are summarised down to this length: the thread is there for
     /// pronoun resolution and follow-up context, not to be re-read in full.
     static let maxHistoricAnswerCharacters = 1_200
@@ -122,9 +129,10 @@ enum ResearchContext {
                 || turn.attachments.count > maxHistoricAttachments)
     }
 
-    /// The evidence block, trimmed to `maxEvidenceCharacters` by dropping the
-    /// lowest-ranked sources — search tools return results in relevance order, so
-    /// the tail is the cheapest thing to lose.
+    /// The evidence block, trimmed to `limit` by dropping the lowest-ranked
+    /// sources — search tools return results in relevance order, so the tail is the
+    /// cheapest thing to lose. `limit` defaults to the quick-turn ceiling; a deep turn
+    /// passes `maxDeepEvidenceCharacters` for the reason given on that constant.
     ///
     /// It drops a *suffix*, stopping at the first entry that does not fit rather than
     /// skipping it and carrying on. Skipping would leave gaps in the citation numbering
@@ -137,7 +145,7 @@ enum ResearchContext {
     /// in `withheldPageText` so the caller can clear it from the source list. A source
     /// listed as read whose text the model never saw would be the one overstatement this
     /// app cannot afford.
-    static func evidence(from sources: [Source])
+    static func evidence(from sources: [Source], limit: Int = maxEvidenceCharacters)
         -> (entries: [[String: Any]], dropped: Int, withheldPageText: Set<Int>) {
         var entries: [[String: Any]] = []
         var withheld: Set<Int> = []
@@ -152,13 +160,13 @@ enum ResearchContext {
             if let published = source.publishedAt, !published.isEmpty { entry["published"] = published }
             let separator = entries.isEmpty ? 0 : jsonSeparatorBytes
             let bare = measure(entry) + separator
-            guard used + bare <= maxEvidenceCharacters else { break }
+            guard used + bare <= limit else { break }
 
             if source.wasRead, let text = source.fullText {
                 var withText = entry
                 withText["page_text"] = text
                 let full = measure(withText) + separator
-                if used + full <= maxEvidenceCharacters {
+                if used + full <= limit {
                     entry = withText
                     used += full
                 } else {

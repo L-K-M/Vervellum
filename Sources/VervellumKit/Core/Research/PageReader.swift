@@ -43,6 +43,18 @@ enum PageReaderFactory {
     /// page usually pushes the third one's text back out of context again.
     static let maxPages = 3
 
+    /// The most pages a `deep` turn reads, across the question's links, the pages the
+    /// follow-up rounds ask for by number, and the final fill.
+    ///
+    /// Eight, sized against the two budgets it spends. A page is capped at 8,000
+    /// extracted characters (`HTMLTextExtractor.maxCharacters`), so eight pages are
+    /// ~64K characters — inside the deep evidence budget with room for the snippets
+    /// around them, and roughly twice what a quick turn reads, which is the least the
+    /// word "deep" can honestly mean when every comparable tool reads an order of
+    /// magnitude more. The rounds spend the allowance early, on pages the planner
+    /// judged decisive; the final fill backstops what they did not name.
+    static let maxDeepPages = 8
+
     static func make(settings: ProviderSettings,
                      readerKey: String?,
                      trace: ResearchTrace,
