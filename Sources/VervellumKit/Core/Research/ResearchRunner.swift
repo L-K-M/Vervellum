@@ -171,6 +171,10 @@ final class ResearchRunner: ResearchRunning {
         /// room by dissolving the very things the citations point at. Rounds stop when
         /// the budget is close to spent instead — the check is inline in `execute`,
         /// asked with the same trimmer that decides what the answer sees.
+        ///
+        /// What a round may ask for is documented in `deepFollowUp`'s prompt: searches
+        /// against the gap, and page reads by the digest's stable source numbers —
+        /// the two moves the rounds exist to make.
         case deep
 
         /// Every mode but `direct` gathers evidence before answering.
