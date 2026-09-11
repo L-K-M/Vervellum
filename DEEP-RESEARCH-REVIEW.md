@@ -128,12 +128,12 @@ The field has converged on **bounded agentic loops** — the model calls search/
 tools until satisfied, under effort caps — over fixed stage pipelines, because
 reacting to actual results beats planning against a digest. Vervellum's staged
 design buys predictable cost, a fully auditable process trail, and a known stage for
-every degradation. Both positions are planned:
+every degradation. Both positions are now under way:
 
 - The staged pipeline (`/deep-research`) keeps its contract and absorbs the
-  gathering improvements above.
-- A bounded tool loop is added as `/agent-research`, documented in
-  `AGENT-RESEARCH.md` when it lands.
+  gathering improvements above — #98 through #101 landed, #102 and #103 in review.
+- A bounded tool loop runs as `/agent-research`, documented in
+  [`AGENT-RESEARCH.md`](AGENT-RESEARCH.md) — in review as #104.
 
 ## Implemented changes
 
@@ -142,13 +142,18 @@ yet started), `in review`, `landed`, and `declined` (deliberately not implemente
 
 | Gap | Change | Status |
 |---|---|---|
-| G1 | Deep-mode page budget + planner-ranked reads | open |
-| G2 | Planner-requested full-page reads | open |
-| G3 | A bounded evidence round on `insufficient` | open |
-| G4 | Sub-question decomposition in the plan | open |
-| G5 | Failed-query visibility + stable source numbers in the digest; `searches_run` covers every round | in review |
-| G6 | Parallel fan-out across engines and stateless backends | open |
-| G7 | Deep-mode answer structure from the sub-questions | open |
-| G8 | Per-domain diversity cap in evidence assembly | open |
+| G1 | Deep-mode page budget + planner-ranked reads | landed in #101 |
+| G2 | Planner-requested full-page reads | landed in #101 |
+| G3 | A bounded evidence round on `insufficient` | in review, #103 |
+| G4 | Sub-question decomposition in the plan | in review, #102 |
+| G5 | Failed-query visibility + stable source numbers in the digest; `searches_run` covers every round | landed in #98 |
+| G6 | Parallel fan-out across engines and stateless backends | landed in #100 |
+| G7 | Deep-mode answer structure from the sub-questions | in review, #102 |
+| G8 | Per-domain diversity cap in evidence assembly | landed in #99 |
 | G9 | Human plan checkpoint | declined — the system must work without intervention |
-| G10 | Answer-quality eval harness (question bank + LLM judge) | in review |
+| G10 | Answer-quality eval harness (question bank + LLM judge) | landed in #97 |
+
+The architectural fork's second half — the bounded agent loop as `/agent-research` —
+is in review as #104 and documented in [`AGENT-RESEARCH.md`](AGENT-RESEARCH.md).
+`PLAN.md` §3 describes the resulting pipeline: three gathering depths over one
+shared tail.
