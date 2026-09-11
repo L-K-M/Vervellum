@@ -23,6 +23,20 @@ BINARY="${1:-.build/release/vervellum}"
 STAMP=$(date +%Y%m%d-%H%M%S)
 OUT="${2:-eval/runs/$STAMP}"
 
+# Positional arguments only, and a misplaced flag is rejected rather than read as
+# a path: `run.sh binary --only 09` would otherwise name the output dir "--only"
+# and run the whole bank without a word.
+for arg in "$BINARY" "$OUT"; do
+    case "$arg" in
+        -*) echo "eval: options come first — run.sh [--only prefix] [binary] [out-dir]" >&2
+            exit 1 ;;
+    esac
+done
+if [ $# -gt 2 ]; then
+    echo "eval: too many arguments — run.sh [--only prefix] [binary] [out-dir]" >&2
+    exit 1
+fi
+
 if [ ! -x "$BINARY" ]; then
     echo "eval: $BINARY not found or not executable" >&2
     echo "build it first: swift build -c release --product vervellum" >&2
@@ -40,18 +54,18 @@ esac
 
 # A non-empty output dir mixes vintages: stale case files from a changed bank
 # would be judged and diffed as if they belonged to this run.
-if [ -d "$OUT" ] && [ -n "$(ls -A "$OUT" 2>/dev/null)" ]; then
+if [ -d "$OUT" ] && [ -n "$(ls -A "$OUT" 2>/dev/null | grep -v "^\\." | head -1)" ]; then
     echo "eval: $OUT exists and is not empty — use a fresh dir" >&2
     exit 1
 fi
 
 # timeout is GNU; macOS has it only as gtimeout from coreutils. Without either,
 # run unbounded rather than fail every question with exit 127.
-TIMEOUT=""
+TIMEOUT=()
 if command -v timeout >/dev/null 2>&1; then
-    TIMEOUT="timeout -k 10 ${VERVELLUM_EVAL_TIMEOUT:-900}"
+    TIMEOUT=(timeout -k 10 "${VERVELLUM_EVAL_TIMEOUT:-900}")
 elif command -v gtimeout >/dev/null 2>&1; then
-    TIMEOUT="gtimeout -k 10 ${VERVELLUM_EVAL_TIMEOUT:-900}"
+    TIMEOUT=(gtimeout -k 10 "${VERVELLUM_EVAL_TIMEOUT:-900}")
 else
     echo "eval: no timeout(1) found — a wedged question will stall the run" >&2
 fi
@@ -94,7 +108,8 @@ for file in "${questions[@]}"; do
     # counted failure (timeout exits 124), not a stalled run. -k covers a binary
     # that ignores SIGTERM.
     status="ok"
-    if $TIMEOUT "$BINARY" "$flag" "$question" \
+    started=$(date +%s)
+    if "${TIMEOUT[@]}" "$BINARY" "$flag" "$question" \
             > "$OUT/$id.transcript.txt" 2> "$OUT/$id.trace.txt"; then
         pass=$((pass + 1))
     else
@@ -110,6 +125,8 @@ for file in "${questions[@]}"; do
         echo "   $status (see $id.trace.txt)"
     fi
 
+    took=$(($(date +%s) - started))
+
     # The case file is the judge's whole input: rubric lives in judge.md. The
     # header is part of the contract: the status zeroes a failed case rather
     # than grading a partial transcript as a bad answer, and the run date is
@@ -118,6 +135,7 @@ for file in "${questions[@]}"; do
         echo "# Case $id"
         echo "# Run: $STAMP"
         echo "# Status: $status"
+        echo "# Took: ${took}s"
         echo
         cat "$file"
         echo

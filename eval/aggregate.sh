@@ -39,13 +39,21 @@ aggregate() {
         # before the fence rule on purpose: a fenced reply puts ``` on line 1,
         # and the fence rule would skip this commit and drop the previous
         # case — the common shape of a judge reply, not an edge.
-        FNR == 1 { commit(); split("", sc) }
+        FNR == 1 { commit(); split("", sc); pending = ""; depth = 0 }
         # Fence lines are decoration, not cases.
         /^[ \t]*```/ { next }
-        /\{.*\}/ {
-            # Parse into a candidate; only a line that actually carries a
+        {
+            # A judge may pretty-print its JSON across lines: accumulate until
+            # the braces balance, then parse the whole object at once. A
+            # single-line object balances immediately, so nothing changes for
+            # the one-line contract.
+            depth += gsub(/\{/, "&", $0) - gsub(/\}/, "&", $0)
+            pending = pending $0
+            if (depth > 0) next
+            line = pending; pending = ""; depth = 0
+            # Parse into a candidate; only an object that actually carries a
             # factual score replaces the record. Brace-bearing prose after the
-            # JSON must not wipe what was parsed. The last score-bearing line
+            # JSON must not wipe what was parsed. The last score-bearing object
             # wins.
             split("", cand)
             # Each axis is found by its quoted key rather than by field position:
@@ -55,9 +63,9 @@ aggregate() {
             na = split("factual citation coverage source_quality calibration", names, " ")
             for (a = 1; a <= na; a++) {
                 k = names[a]
-                pos = index($0, "\"" k "\":")
+                pos = index(line, "\"" k "\":")
                 if (pos > 0) {
-                    rest = substr($0, pos + length(k) + 3)
+                    rest = substr(line, pos + length(k) + 3)
                     sub(/^[^0-9.]*/, "", rest)
                     sub(/[^0-9.].*$/, "", rest)
                     if (rest != "" && rest != ".") cand[k] = rest + 0
@@ -73,7 +81,7 @@ aggregate() {
             if (n == 0) { printf "no judged cases in %s\n", dir > "/dev/stderr"; exit 1 }
             printf "%.3f %.3f %.3f %.3f %.3f %d %d %d\n", f/n, c/n, cov/n, sq/n, cal/n, p, f2, n
         }
-    ' dir="$1" "$1"/*.json 2>/dev/null || { echo "aggregate: no judge JSON in $1" >&2; return 1; }
+    ' dir="$1" "$1"/*.json || return 1
 }
 
 DIR1="${1:?usage: eval/aggregate.sh <judged-dir> [other-judged-dir]}"
