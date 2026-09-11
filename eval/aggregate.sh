@@ -39,7 +39,7 @@ aggregate() {
         # before the fence rule on purpose: a fenced reply puts ``` on line 1,
         # and the fence rule would skip this commit and drop the previous
         # case — the common shape of a judge reply, not an edge.
-        FNR == 1 { commit(); split("", sc); pending = ""; depth = 0 }
+        FNR == 1 { commit(); split("", sc); pending = ""; depth = 0; files++ }
         # Fence lines are decoration, not cases.
         /^[ \t]*```/ { next }
         {
@@ -63,15 +63,22 @@ aggregate() {
             na = split("factual citation coverage source_quality calibration", names, " ")
             for (a = 1; a <= na; a++) {
                 k = names[a]
-                pos = index(line, "\"" k "\":")
+                # The quoted key alone, then the value after any spaces and the
+                # colon — pretty-printers put a space before the colon too, and
+                # the needle has no business caring.
+                pos = index(line, "\"" k "\"")
                 if (pos > 0) {
-                    rest = substr(line, pos + length(k) + 3)
-                    sub(/^[^0-9.]*/, "", rest)
+                    rest = substr(line, pos + length(k) + 2)
+                    sub(/^[ \t:]+/, "", rest)
                     sub(/[^0-9.].*$/, "", rest)
                     if (rest != "" && rest != ".") cand[k] = rest + 0
                 }
             }
             if ("factual" in cand) {
+                # The whole record, not a merge: a second object missing an axis
+                # must not inherit it from the object before, or the gate would
+                # read a mixture no judge ever wrote.
+                split("", sc)
                 for (k in cand) sc[k] = cand[k]
                 have = 1
             }
@@ -79,6 +86,12 @@ aggregate() {
         END {
             commit()
             if (n == 0) { printf "no judged cases in %s\n", dir > "/dev/stderr"; exit 1 }
+            # Files that produced no case shrink the comparison silently no
+            # longer: the count says which replies never parsed.
+            if (files > n) {
+                printf "warning: %d of %d files in %s produced no readable scores\n", \
+                       files - n, files, dir > "/dev/stderr"
+            }
             printf "%.3f %.3f %.3f %.3f %.3f %d %d %d\n", f/n, c/n, cov/n, sq/n, cal/n, p, f2, n
         }
     ' dir="$1" "$1"/*.json || return 1

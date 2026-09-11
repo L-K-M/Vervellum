@@ -43,11 +43,11 @@ if [ ! -x "$BINARY" ]; then
     exit 1
 fi
 
-# Whole seconds only: anything else makes timeout(1) exit 125 on every question,
-# and twenty identical failures are a poor way to learn about a typo.
+# Whole seconds only, and at least one: anything else makes timeout(1) exit 125
+# on every question, and zero instant-times-out the bank into twenty failures.
 case "${VERVELLUM_EVAL_TIMEOUT:-900}" in
-    ''|*[!0-9]*)
-        echo "eval: VERVELLUM_EVAL_TIMEOUT must be whole seconds (got '${VERVELLUM_EVAL_TIMEOUT-}')" >&2
+    ''|*[!0-9]*|0)
+        echo "eval: VERVELLUM_EVAL_TIMEOUT must be whole seconds, at least 1 (got '${VERVELLUM_EVAL_TIMEOUT-}')" >&2
         exit 1
         ;;
 esac
@@ -61,7 +61,7 @@ fi
 
 # timeout is GNU; macOS has it only as gtimeout from coreutils. Without either,
 # run unbounded rather than fail every question with exit 127.
-TIMEOUT=()
+TIMEOUT=(:)
 if command -v timeout >/dev/null 2>&1; then
     TIMEOUT=(timeout -k 10 "${VERVELLUM_EVAL_TIMEOUT:-900}")
 elif command -v gtimeout >/dev/null 2>&1; then

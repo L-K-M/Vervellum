@@ -13,8 +13,9 @@ that cannot move this score is not a quality improvement.
 
 - `questions/` — one file per question: `mode` (`research`, `deep`, `direct`),
   `question`, `expect` (what a correct answer must establish), `must-not` (what it
-  must not assert). Questions marked `current: true` decay; refresh them when they
-  go stale.
+  must not assert). The question is one line — only the first is sent, so wrap-free
+  phrasing is part of writing a question. Questions marked `current: true` decay;
+  refresh them when they go stale.
 - `run.sh` — runs the bank against a built binary, one transcript per question.
 - `judge.md` — the grading rubric, one model call per case file.
 

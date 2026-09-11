@@ -25,7 +25,9 @@ Score each axis from 0.0 to 1.0:
   your training data.
 - **citation** — does every load-bearing claim carry a citation, and does the
   cited source actually back it? A claim resting on a source that does not say it
-  is worse than no citation: it manufactures trust.
+  is worse than no citation: it manufactures trust. A `mode: direct` case is
+  judged on the opposite: it must cite nothing and must not imply sources —
+  score it 1.0 unless it fabricates a citation or a source, which scores 0.0.
 - **coverage** — are the material parts of the question all addressed? For a
   comparison, both sides; for a "who owns" question, the distinction between
   country and company; and so on.
