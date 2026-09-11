@@ -813,6 +813,10 @@ struct PanelRootView: View {
             notice = nil
             showsHistory = false
             handle(engine.ask(question, mode: .deep, attachments: attachments))
+        case .agentResearch(let question):
+            notice = nil
+            showsHistory = false
+            handle(engine.ask(question, mode: .agent, attachments: attachments))
         case .newThread:
             draft = ""
             newThread()

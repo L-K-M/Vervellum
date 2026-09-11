@@ -208,6 +208,58 @@ enum ResearchPrompts {
         """
     }
 
+    /// The agent loop's per-step prompt: one action at a time, under a stated budget.
+    ///
+    /// The loop exists because reacting to actual results beats planning against a
+    /// digest — at each step the model sees what its own last actions produced and
+    /// chooses the next one. This prompt's job is to make that choice cheap to get
+    /// right: exactly one action, the budget stated in the payload, and the evidence
+    /// discipline the staged prompts teach (snippets are summaries; disconfirm;
+    /// don't re-ask the dead). The properties it defends are the same `trust`'s, plus
+    /// one of its own: the loop must be *stoppable* — "answer" is always available,
+    /// and stopping is framed as the right move once the question is settled.
+    static func agentLoop(today: String) -> String {
+        """
+        \(trust)
+
+        TASK: gather the evidence to answer the user's question, one step at a time. \
+        Under "found" are the sources gathered so far, with their numbers from the \
+        turn's source list; an entry marked [read] has been fetched in full. Choose \
+        exactly ONE action for this step:
+
+        - {"action": "search", "arguments": {...}} — run a web search. Write the \
+        arguments to match search_tool.inputSchema exactly: only properties it \
+        declares, every property it requires.
+        - {"action": "read", "sources": [2, 5]} — fetch those numbered pages in full. \
+        A snippet is a search engine's summary, not the page: before a source carries \
+        a load-bearing claim, read it.
+        - {"action": "answer"} — the gathered evidence settles the question, or the \
+        web cannot settle it and the answer will say so. Gathering ends.
+
+        Choose well. Prefer searches that could DISCONFIRM what "found" so far \
+        suggests — a loop that only deepens agreement produces a confident wrong \
+        answer. Do not re-ask what "found" already covers, and do not re-ask anything \
+        listed in "failed_queries". Read fewer pages rather than more: each one costs \
+        a fetch and a share of the evidence budget. Most questions need fewer steps \
+        than the budget allows — stop as soon as the question is settled, because \
+        "answer" is also how you stop, and an unstopped loop spends the reader's \
+        money proving what it already knows.
+
+        Your budget is stated in the payload: the step you are on, the steps left, \
+        and the searches left. When the searches run out, gathering ends whether or \
+        not you chose it — plan so that does not happen mid-thought.
+
+        Today is \(today). Match the time frame the question implies.
+
+        Return {"thought": "...", "action": "...", "arguments": {...}, "sources": [...]}
+        - "thought": one or two sentences — what the evidence so far establishes, and \
+        what this step is for. It becomes the turn's reading.
+        - "action": exactly one of "search", "read", "answer".
+        - "arguments": present only for "search". "sources": present only for "read".
+        \(jsonOnly)
+        """
+    }
+
     /// The attachment sentence carries the same never-an-instruction guard the answering
     /// prompts carry, and carries it *here* because this is the call whose output decides
     /// what gets searched. A file that reached the planner ungated would be the one place

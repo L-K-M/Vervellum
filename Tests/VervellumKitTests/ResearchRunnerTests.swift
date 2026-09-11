@@ -102,7 +102,7 @@ final class ResearchRunnerTests: XCTestCase {
     /// also a small guard on the prompts themselves: a stage that stopped sending the
     /// prompt it is named for would stop being routed here.
     private enum Stage {
-        case plan, deepPlan, answer, assess, revise, regatherPlan
+        case plan, deepPlan, answer, assess, revise, regatherPlan, agentStep
     }
 
     private static func stage(of call: StubTransport.Call) -> Stage? {
@@ -125,6 +125,9 @@ final class ResearchRunnerTests: XCTestCase {
         if prompt.contains("TASK: correct an answer you are given") { return .revise }
         if prompt.contains("TASK: the answer has been written and checked") {
             return .regatherPlan
+        }
+        if prompt.contains("TASK: gather the evidence to answer the user's question") {
+            return .agentStep
         }
         return nil
     }
@@ -1634,6 +1637,139 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertFalse(transport.calls.contains { Self.stage(of: $0) == .regatherPlan },
                        "quick mode must not plan a regather round")
     }
+
+    // MARK: Agent research
+
+    /// The loop's whole shape in one turn: a search, then a read of what the search
+    /// found, then the model's own decision that the question is settled — and the
+    /// shared tail answering over all of it.
+    func testAgentResearchGathersSearchesReadsThenAnswers() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>The page text for \(call.url.path).</p>")
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "https://a.example/hit",
+                                            title: "The decisive hit")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .agentStep:
+                    // Told apart by the step counter in the payload: search, then read,
+                    // then answer.
+                    if call.userContent?.contains("\"step\":1") == true {
+                        return .completion(json: [
+                            "thought": "Find the baseline.",
+                            "action": "search",
+                            "arguments": ["q": "baseline"],
+                        ])
+                    }
+                    if call.userContent?.contains("\"step\":2") == true {
+                        return .completion(json: [
+                            "thought": "The hit is decisive; read it.",
+                            "action": "read",
+                            "sources": [1],
+                        ])
+                    }
+                    return .completion(json: ["thought": "Settled.", "action": "answer"])
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["The gathered evidence settles it [1]."])
+            }
+        }
+
+        let turn = await run("Does it hold?", mode: .agent, transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.reading, "Settled.",
+                       "the loop's final thought is the turn's reading")
+        XCTAssertEqual(turn.searches.count, 1)
+        XCTAssertEqual(turn.sources.count, 1)
+        XCTAssertTrue(turn.sources.first?.wasRead == true,
+                      "the page the loop asked to read was read")
+        XCTAssertEqual(turn.answer, "The gathered evidence settles it [1].")
+        XCTAssertEqual(turn.findings.count, 1)
+        XCTAssertFalse(transport.calls.contains { Self.stage(of: $0) == .plan },
+                       "the agent loop plans per step; the staged plan never runs")
+    }
+
+    /// The budget is real: a loop that never stops is stopped at the search cap, and
+    /// the turn still answers over what was gathered.
+    func testAgentResearchStopsAtTheSearchBudget() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text.</p>")
+            case .json where call.url.path == "/search":
+                // Every search the same query: the hits dedupe to one source, which is
+                // fine — the assertion is about how many searches ran.
+                return .json(Self.searxng([(url: "https://a.example/hit",
+                                            title: "The only hit")]))
+            case .json:
+                switch Self.stage(of: call) {
+                case .agentStep:
+                    return .completion(json: [
+                        "thought": "One more angle.",
+                        "action": "search",
+                        "arguments": ["q": "the same thing again"],
+                    ])
+                case .assess:
+                    return .completion(json: Self.assessment)
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                return .stream(["Answered from the one source [1]."])
+            }
+        }
+
+        let turn = await run("What is out there?", mode: .agent, transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.searches.count, ResearchRunner.maxAgentSearches,
+                       "the loop must stop at the search cap, not run forever")
+    }
+
+    /// The loop's stop is honoured exactly like the staged planner's: a question it
+    /// decides needs no evidence is answered from the model alone and badged so.
+    func testAgentResearchAnswersUnsourcedWhenNothingIsNeeded() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .fetch:
+                return .html("<p>Text.</p>")
+            case .json where call.url.path == "/search":
+                return .unrouted
+            case .json:
+                switch Self.stage(of: call) {
+                case .agentStep:
+                    return .completion(json: ["thought": "A definition question.",
+                                              "action": "answer"])
+                default:
+                    return .unrouted
+                }
+            case .stream:
+                // Routed by prompt: the direct path answers from the model's own
+                // knowledge, and the wrong stream here would mean the turn kept the
+                // evidence path it should have left.
+                if call.systemPrompt?.contains("from your own knowledge") == true {
+                    return .stream(["A parsec is about 3.26 light-years."])
+                }
+                return .stream(["The gathered evidence settles it [1]."])
+            }
+        }
+
+        let turn = await run("What is a parsec?", mode: .agent, transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, "A parsec is about 3.26 light-years.")
+        XCTAssertTrue(turn.notices.contains(.noEvidence))
+        XCTAssertEqual(turn.reading, "A definition question.")
+        XCTAssertFalse(transport.calls.contains { $0.url.path == "/search" })
+    }
+
 
     // MARK: Revision
 

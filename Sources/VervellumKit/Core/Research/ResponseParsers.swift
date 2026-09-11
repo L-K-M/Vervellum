@@ -133,6 +133,61 @@ enum PlanParser {
     }
 }
 
+/// Validates one step of the agent research loop.
+///
+/// A step is the smallest unit the loop spends: one model call, one action. Strict
+/// on purpose — an ambiguous step is cheap to redo (the loop re-asks with the same
+/// payload) and expensive to guess at (a search run on misunderstood arguments bills
+/// every configured engine).
+enum AgentStepParser {
+
+    /// One parsed step: a thought and exactly one action.
+    struct Step {
+        var thought: String
+        var action: Action
+
+        enum Action {
+            case search(arguments: [String: Any])
+            case read([Int])
+            case answer
+        }
+    }
+
+    static func parse(_ object: [String: Any]) throws -> Step {
+        let thought = (object["thought"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let action = (object["action"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+
+        switch action {
+        case "search":
+            // Arguments the search backends will validate against their schemas; here
+            // the bar is only that they exist and encode — a dictionary of anything
+            // JSON can carry. An empty object is a step with nothing to run.
+            guard let arguments = object["arguments"] as? [String: Any],
+                  !arguments.isEmpty
+            else { throw ResearchError("The agent step's search arguments were unusable.") }
+            return Step(thought: thought, action: .search(arguments: arguments))
+        case "read":
+            // Numbers as leniently as the assessment reads its citations — models
+            // write numbers as strings — but never reinterpreted: what is not a
+            // number names no page.
+            let sources = (object["sources"] as? [Any] ?? []).compactMap { value in
+                (value as? Int)
+                    ?? (value as? String).flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            }.filter { $0 >= 1 }
+            guard !sources.isEmpty else {
+                throw ResearchError("The agent step named no page to read.")
+            }
+            return Step(thought: thought, action: .read(sources))
+        case "answer":
+            return Step(thought: thought, action: .answer)
+        default:
+            throw ResearchError("The agent step named no action Vervellum knows.")
+        }
+    }
+}
+
 /// Validates the model's claim assessment.
 ///
 /// Two rules are enforced here and nowhere else, because they are what separates a
