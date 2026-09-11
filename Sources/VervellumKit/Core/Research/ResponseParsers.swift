@@ -16,7 +16,18 @@ enum PlanParser {
         /// written before any source exists — but it is parsed in both, so a planner
         /// that asks early gets the same contract rather than a silent drop.
         var readRequests: [Int] = []
+        /// The factual sub-questions the planner decided the answer depends on.
+        ///
+        /// Taken from the first plan only: the follow-up rounds plan against the gap,
+        /// and the answer is structured by them, so a later round refining the list
+        /// would restructure prose under the reader. Parsed everywhere, because the
+        /// JSON contract is one contract.
+        var subquestions: [String] = []
     }
+
+    /// The most sub-questions a plan may carry. Five, because they double as the
+    /// answer's sections, and a reader cannot hold more sections than that as a map.
+    static let maxSubquestions = 5
 
     static func parse(_ object: [String: Any], maxSearches: Int) throws -> Plan {
         let reading = (object["reading"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -51,7 +62,26 @@ enum PlanParser {
             searches.append(search)
         }
         return Plan(reading: reading, searches: searches,
-                    readRequests: readRequests(from: object["read"]))
+                    readRequests: readRequests(from: object["read"]),
+                    subquestions: subquestions(from: object["subquestions"]))
+    }
+
+    /// The optional "subquestions" key: plain strings, trimmed, empties dropped.
+    ///
+    /// Anything that is not a string is dropped rather than coerced — a sub-question
+    /// is prose the answer is structured by, and guessing at one costs more than
+    /// losing it. Capped at `maxSubquestions` for the reason given there.
+    private static func subquestions(from value: Any?) -> [String] {
+        guard let raw = value as? [Any] else { return [] }
+        var questions: [String] = []
+        for entry in raw {
+            guard let question = (entry as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !question.isEmpty
+            else { continue }
+            questions.append(question)
+            if questions.count >= maxSubquestions { break }
+        }
+        return questions
     }
 
     /// The optional "read" key: numbers of sources whose pages the planner wants

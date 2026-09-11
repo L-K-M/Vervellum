@@ -663,6 +663,13 @@ final class ResearchRunner: ResearchRunning {
         trace.log("Plan: \(plan.searches.count) searches")
         try Task.checkCancellation()
 
+        // The first plan's decomposition, snapshotted: everything downstream — the
+        // rounds' planning target and the answer's section spine — reads this
+        // constant, so no later refactor that rebinds `plan` mid-loop can quietly
+        // restructure the answer under the reader. Follow-ups may echo a
+        // `subquestions` key; their echo is parsed and ignored.
+        let firstSubquestions = plan.subquestions
+
         // The planner is allowed to decide that a question needs no evidence — a
         // definition, a calculation, a transformation of text the user supplied — and
         // `PlanParser` preserves that as an empty list rather than an error. Honour it:
@@ -954,13 +961,16 @@ final class ResearchRunner: ResearchRunning {
                 var followExtra: [String: Any] = ["search_tool": search.toolDescriptor,
                                                   "found": Self.digest(of: soFar)]
                 if !failedQueries.isEmpty { followExtra["failed_queries"] = failedQueries }
-                // The read allowance left, stated rather than implied: a planner that
-                // can see two reads left asks for two pages, where one told only that
-                // reads "cost a share of the budget" would guess.
                 // Stated even at zero: a planner that can see the reads are spent
                 // stops asking for them, where an absent key leaves it guessing —
                 // and guessing costs a round.
                 followExtra["read_budget"] = pageBudget
+                // The first plan's decomposition, so the round plans against the
+                // sub-questions the evidence leaves open rather than re-deriving a
+                // map of the question from snippets.
+                if !firstSubquestions.isEmpty {
+                    followExtra["subquestions"] = firstSubquestions
+                }
                 let followContext = ResearchContext.assemble(
                     question: question, history: history, today: today, extra: followExtra)
                 // `try?`, because a later round failing to plan is not a reason to lose
@@ -1133,6 +1143,18 @@ final class ResearchRunner: ResearchRunning {
             "evidence": evidence,
             "highest_source_number": evidence.compactMap { $0["number"] as? Int }.max() ?? 0,
         ]
+        // The deep answer is structured by the first plan's decomposition; a quick
+        // turn's is not, because a quick question rarely has five load-bearing parts
+        // and headings for one part are scaffolding around a paragraph.
+        // One gate for both the prompt and the payload key: the structured answer
+        // prompt promises a "subquestions" list, and a payload without one under
+        // that prompt is a promise broken at the reader's expense.
+        let structuredAnswer = mode == .deep && !firstSubquestions.isEmpty
+        let answerPrompt = structuredAnswer ? ResearchPrompts.answerDeep
+                                            : ResearchPrompts.answer
+        if structuredAnswer {
+            answerExtra["subquestions"] = firstSubquestions
+        }
         if !attachments.payload.isEmpty { answerExtra["attachments"] = attachments.payload }
         let answerContext = ResearchContext.assemble(
             question: question, history: history, today: today, extra: answerExtra)
@@ -1169,7 +1191,7 @@ final class ResearchRunner: ResearchRunning {
             let payload = images.isEmpty ? (withheldContext ?? answerContext).payload
                                          : answerContext.payload
             let text = try await chat.streamText(
-                system: ResearchPrompts.answer, payload: payload,
+                system: answerPrompt, payload: payload,
                 withoutImages: images.isEmpty ? nil : withheldContext?.payload,
                 label: "Answer", images: images
             ) { [weak self] chunk in

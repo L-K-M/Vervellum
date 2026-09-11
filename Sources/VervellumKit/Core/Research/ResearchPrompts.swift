@@ -113,8 +113,10 @@ enum ResearchPrompts {
 
         Entries in "found" keep their numbers from the turn's source list, so a number \
         you name here names the same page everywhere else in the run. A key called \
-        "failed_queries", when present, lists searches this run already tried that \
-        produced nothing usable — whether the engines errored or the index held \
+        "subquestions", when present, lists the sub-questions the first round decided \
+        the answer depends on: plan against the ones "found" does not settle. A key \
+        called "failed_queries", when present, lists searches this run already tried \
+        that produced nothing usable — whether the engines errored or the index held \
         nothing for them. Do not re-ask them in new words: a synonym spends a request \
         on ground this run has already covered.
 
@@ -221,7 +223,10 @@ enum ResearchPrompts {
 
         Work out which factual questions the answer actually depends on, then plan up \
         to \(maxSearches) searches that would resolve them — as few as settle the \
-        question, and none at all when it needs no evidence (see the end). Prefer \
+        question, and none at all when it needs no evidence (see the end). Say those \
+        sub-questions out loud in "subquestions": in deeper research, later rounds \
+        plan against the ones the evidence leaves open, and the answer takes them as \
+        its sections. Prefer \
         searches that surface primary sources — original documentation, standards, \
         filings, papers, official statistics — and reputable independent reporting \
         over aggregators and content farms. Write each query in the language most \
@@ -239,9 +244,13 @@ enum ResearchPrompts {
         exactly: use only properties it declares, and include every property it lists \
         as required.
 
-        Return {"reading": "...", "searches": [{"purpose": "...", "arguments": {...}}]}
+        Return {"reading": "...", "subquestions": ["...", "..."], "searches": [{"purpose": "...", "arguments": {...}}]}
         - "reading": one sentence stating how you understand the question, including \
         any ambiguity you had to resolve.
+        - "subquestions": up to \(PlanParser.maxSubquestions) factual sub-questions the \
+        answer depends on, in \
+        the order an answer should take them. Fewer for a narrow question — one is \
+        fine when one settles it.
         - "purpose": a short phrase naming what that search is meant to settle.
 
         If the question genuinely needs no external evidence — a definition, a \
@@ -293,6 +302,26 @@ enum ResearchPrompts {
 
         If the evidence does not answer the question, say so in the first sentence and \
         then report what it does establish.
+        """
+
+    /// The answer prompt for a `deep` turn: `answer` plus a structure to hang it on.
+    ///
+    /// Composed rather than written out, so the citation rule, the snippet/page_text
+    /// distinction and every other property of `answer` exist exactly once. What deep
+    /// adds is a spine: the sub-questions the planner named, answered in order, so a
+    /// long answer is a map of what is known rather than a wall that happens to end.
+    /// The direct answer still comes first — structure is no licence to bury it.
+    static let answerDeep = answer + """
+
+
+        STRUCTURE — deep research. The payload's "subquestions" lists the sub-questions \
+        the planner decided this answer depends on. Open with the direct answer to the \
+        question itself, in the first sentence as always. Then take the sub-questions \
+        in order, each under a "##" heading of its own, citing as you go. A sub-question \
+        the evidence leaves open gets its section anyway, saying so plainly — an \
+        unanswered sub-question named is a finding, and skipping it reads as if it were \
+        settled. Close only if something across the sections needs saying together; do \
+        not pad with a summary of what you just said.
         """
 
     // MARK: Stage 3 — assess
