@@ -251,7 +251,7 @@ sequence over one connection is the only shape the server documents, and MCP sea
 serial for that reason. SearXNG and the Kagi CLI are stateless, and deep mode multiplies
 searches by engines by rounds, so every stateless (query, engine) pair of a round runs
 concurrently. Determinism survives by construction: tasks produce value-typed outcomes, the
-parent applies them serially, and results append in (step, engine) order, because source
+parent applies them serially, and results append in (query, engine) order, because source
 numbering follows insertion order and a race would renumber the evidence between runs of an
 identical turn.
 
