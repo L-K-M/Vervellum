@@ -1,0 +1,5 @@
+mode: research
+current: true
+question: What is the latest stable release of the Swift programming language, and when was it released?
+expect: a version and date consistent with swift.org at the time the eval runs; the answer must state its sources' recency
+must-not: a version older than the one current at eval time presented as latest without a date caveat

@@ -1,0 +1,4 @@
+mode: deep
+question: Who owns and maintains the undersea cables that carry most intercontinental internet traffic, and what happens when one breaks?
+expect: cables are owned by consortia of telecom and tech companies plus a growing share owned outright by hyperscalers (Google, Meta, Microsoft); a small fleet of specialised repair ships maintains them; breaks are repaired by grappling and splicing, and traffic reroutes
+must-not: cables described as owned by governments or by "the internet" as an abstract entity

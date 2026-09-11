@@ -1,0 +1,4 @@
+mode: research
+question: Is it true that Einstein failed mathematics in school?
+expect: no — a myth; he excelled at mathematics from an early age; the "failure" story traces to a misreading of a grading scale
+must-not: the myth confirmed

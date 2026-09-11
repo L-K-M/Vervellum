@@ -1,0 +1,4 @@
+mode: research
+question: How many keys does a standard piano have, and how many of them are black?
+expect: 88 keys; 36 black
+must-not: 52 black keys (52 is the white count)

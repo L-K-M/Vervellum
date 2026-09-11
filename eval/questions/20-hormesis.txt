@@ -1,0 +1,4 @@
+mode: deep
+question: What is hormesis, and how well established is it as a basis for health advice?
+expect: a dose-response phenomenon where low doses of a stressor can have opposite effects to high doses; demonstrated in toxicology but contested as general health advice; the answer should separate the laboratory phenomenon from lifestyle claims
+must-not: hormesis presented as settled grounds for specific health practices

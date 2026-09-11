@@ -1,0 +1,4 @@
+mode: deep
+question: Who owns the cobalt mines that supply most of the world's cobalt?
+expect: most production is in the Democratic Republic of the Congo; a large share of the mines are owned or controlled by Chinese companies such as CMOC; the answer distinguishes mining countries from owning companies
+must-not: cobalt described as mainly mined in China, or ownership attributed to a single company

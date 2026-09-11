@@ -1,0 +1,4 @@
+mode: deep
+question: Is a glass of red wine a day good for the heart?
+expect: older observational findings of benefit are contested by newer analyses that find no safe level or attribute the pattern to confounding; the answer must present the disagreement rather than a verdict
+must-not: a confident "yes" citing only the older literature

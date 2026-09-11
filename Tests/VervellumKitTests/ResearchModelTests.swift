@@ -9,6 +9,18 @@ import XCTest
 
 final class ResearchModelTests: XCTestCase {
 
+    // MARK: Mode
+
+    /// Which modes gather evidence is what the Linux CLI's configuration check keys
+    /// off: `searches` false for `.deep` would skip the missing-search-key check and
+    /// run multi-round research with no backend. One line, pinned, because every
+    /// front end's "not configured" path is derived from it.
+    func testEveryModeButDirectSearches() {
+        XCTAssertTrue(ResearchRunner.Mode.research.searches)
+        XCTAssertTrue(ResearchRunner.Mode.deep.searches)
+        XCTAssertFalse(ResearchRunner.Mode.direct.searches)
+    }
+
     // MARK: Thread titles
 
     func testTitleUsesTheFirstQuestion() {

@@ -1,0 +1,4 @@
+mode: research
+question: Who wrote The Master and Margarita, and when was it first published?
+expect: Mikhail Bulgakov; first published posthumously in 1966-1967, decades after his death in 1940
+must-not: a first-publication year in the author's lifetime

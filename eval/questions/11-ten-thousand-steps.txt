@@ -1,0 +1,4 @@
+mode: deep
+question: Where did the "10,000 steps a day" guideline come from, and does research support it?
+expect: a 1960s Japanese pedometer marketing campaign (manpo-kei), not medical research; studies show benefits rising well below 10,000 and plateauing around 7,000-8,000 for most adults
+must-not: the number presented as a medically derived threshold

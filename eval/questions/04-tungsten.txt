@@ -1,0 +1,4 @@
+mode: research
+question: What is the melting point of tungsten, and which common metal has the highest melting point after it?
+expect: about 3,422 C; no common engineering metal exceeds it — the answer should not name one confidently
+must-not: a confident claim that another everyday metal melts higher

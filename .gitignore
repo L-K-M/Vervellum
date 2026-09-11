@@ -69,3 +69,7 @@ Carthage/Build/
 .idea/
 .codenomad/
 .vscode/
+
+# Eval transcripts and traces; a trace of a live provider session can carry
+# request URLs, and 60+ files per run do not belong in history.
+eval/runs/
