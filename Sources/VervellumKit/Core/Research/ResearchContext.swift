@@ -22,7 +22,8 @@ enum ResearchContext {
     /// `PageReaderFactory.maxDeepPages` pages at 8,000 characters each. The quick-turn
     /// ceiling would drop later rounds' sources — the gap-closers the rounds exist to
     /// find — to make room for round one's pages, which is the one thing a deep turn
-    /// must not do quietly. Still under `maxCharacters`, so history trims first.
+    /// must not do quietly. Still under `maxCharacters` (110_000 above), so history
+    /// trims to make room before anything fixed is lost; pinned by a test.
     static let maxDeepEvidenceCharacters = 100_000
     /// Prior answers are summarised down to this length: the thread is there for
     /// pronoun resolution and follow-up context, not to be re-read in full.

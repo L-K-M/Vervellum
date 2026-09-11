@@ -957,7 +957,10 @@ final class ResearchRunner: ResearchRunning {
                 // The read allowance left, stated rather than implied: a planner that
                 // can see two reads left asks for two pages, where one told only that
                 // reads "cost a share of the budget" would guess.
-                if pageBudget > 0 { followExtra["read_budget"] = pageBudget }
+                // Stated even at zero: a planner that can see the reads are spent
+                // stops asking for them, where an absent key leaves it guessing —
+                // and guessing costs a round.
+                followExtra["read_budget"] = pageBudget
                 let followContext = ResearchContext.assemble(
                     question: question, history: history, today: today, extra: followExtra)
                 // `try?`, because a later round failing to plan is not a reason to lose
