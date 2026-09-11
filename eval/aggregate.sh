@@ -86,7 +86,10 @@ aggregate() {
                     # numeric cut, which would otherwise empty on the opening mark.
                     gsub(/"/, "", rest)
                     sub(/[^0-9.].*$/, "", rest)
-                    if (rest != "" && rest != ".") cand[k] = rest + 0
+                    # The rubric defines 0.0-1.0; anything larger is a judge writing
+                    # 8/10 or 80%, and routing it into the missing-axis warning
+                    # beats letting it silently poison the mean.
+                    if (rest != "" && rest != "." && rest + 0 <= 1) cand[k] = rest + 0
                 }
             }
             if ("factual" in cand) {
