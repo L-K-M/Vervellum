@@ -1444,9 +1444,15 @@ final class ResearchRunnerTests: XCTestCase {
                                       "arguments": ["q": "first"]]],
                     ])
                 case .deepPlan:
-                    let nothingLeft: [String: Any] = ["reading": "Nothing is missing.",
-                                                      "searches": [Any]()]
-                    return .completion(json: nothingLeft)
+                    // A decoy: the round's payload carries a subquestions key, and a
+                    // model may echo one back. The first plan's decomposition is the
+                    // one the answer is structured by — a follow-up's echo must be
+                    // ignored, or later rounds could restructure prose mid-turn.
+                    return .completion(json: [
+                        "reading": "Nothing is missing.",
+                        "searches": [Any](),
+                        "subquestions": ["A decoy question the round invented?"],
+                    ])
                 case .assess:
                     return .completion(json: Self.assessment)
                 default:
@@ -1470,6 +1476,9 @@ final class ResearchRunnerTests: XCTestCase {
         })
         XCTAssertTrue(answerCall.userContent?.contains("subquestions") == true,
                       answerCall.userContent ?? "no answer payload")
+        // The first plan's list, not the round's decoy echo.
+        XCTAssertTrue(answerCall.userContent?.contains("Who owns it?") == true)
+        XCTAssertFalse(answerCall.userContent?.contains("decoy") == true)
         XCTAssertTrue(answerCall.systemPrompt?.contains("STRUCTURE — deep research") == true,
                       "deep mode with subquestions must use the structured answer prompt")
     }
