@@ -37,6 +37,61 @@ final class EvidenceExtractorTests: XCTestCase {
         XCTAssertEqual(EvidenceExtractor.sources(from: [first, second]).count, 1)
     }
 
+    /// Search rank is not a diversity policy: one well-ranked domain can fill the top
+    /// of the list with several spellings of the same page, which the answer then
+    /// reads as independent agreement. The cap keeps any single voice a minority, and
+    /// the wider collection pool is what lets the varied hits below the farm in.
+    func testCapsOneDomainsShareOfTheList() {
+        let farm = (1...30).map { ["title": "Farm \($0)",
+                                   "url": "https://farm.example.com/\($0)"] }
+        let varied = (1...6).map { ["title": "Varied \($0)",
+                                    "url": "https://site\($0).example.org/\($0)"] }
+        let payload: [String: Any] = ["results": farm + varied]
+        let sources = EvidenceExtractor.sources(from: [payload])
+
+        XCTAssertEqual(sources.filter { $0.domain == "farm.example.com" }.count,
+                       EvidenceExtractor.maxSourcesPerDomain)
+        // The varied hits sat below 30 same-domain hits: only a pool wider than
+        // maxSources reaches them at all.
+        XCTAssertEqual(sources.count, EvidenceExtractor.maxSourcesPerDomain + 6)
+        // Rank order survives the filter — the first four are the farm's top hits,
+        // then the varied sites in the order they were ranked. The numbering alone
+        // would pass under any permutation.
+        XCTAssertEqual(sources.prefix(EvidenceExtractor.maxSourcesPerDomain).map(\.domain),
+                       Array(repeating: "farm.example.com",
+                             count: EvidenceExtractor.maxSourcesPerDomain))
+        XCTAssertEqual(sources.dropFirst(EvidenceExtractor.maxSourcesPerDomain).map(\.domain),
+                       (1...6).map { "site\($0).example.org" })
+    }
+
+    /// The displayed domain and the key the cap counts are the same computation —
+    /// pinned, because a drift between them would group citations by one domain while
+    /// showing the reader another.
+    func testDisplayedDomainAndCapKeyCannotDrift() {
+        let cases: [(url: String, domain: String)] = [
+            ("https://WWW.Example.COM/a", "example.com"),
+            ("https://www.example.com/b", "example.com"),
+            ("https://example.com:8443/c", "example.com"),
+            ("https://en.example.org/d", "en.example.org"),
+            ("not a url", "not a url"),
+        ]
+        for (url, domain) in cases {
+            XCTAssertEqual(Source(number: 1, url: url, title: "", snippet: "").domain,
+                           domain, url)
+            XCTAssertEqual(EvidenceExtractor.domainKey(for: url), domain, url)
+        }
+    }
+
+    /// The cap is a ceiling, not a quota: a topic that lives on one site keeps what
+    /// that site has, up to the cap.
+    func testADomainBelowTheCapKeepsEverything() {
+        let payload: [String: Any] = ["results": [
+            ["title": "One", "url": "https://docs.example.com/1"],
+            ["title": "Two", "url": "https://docs.example.com/2"],
+        ]]
+        XCTAssertEqual(EvidenceExtractor.sources(from: [payload]).count, 2)
+    }
+
     func testReadsHitsFromAnMCPTextBlock() {
         let inner = #"{"results":[{"title":"Inner","url":"https://c.example.com/3","snippet":"Three."}]}"#
         let payload: [String: Any] = ["content": [["type": "text", "text": inner]]]
