@@ -1198,7 +1198,8 @@ final class ResearchRunnerTests: XCTestCase {
     /// Deep mode puts each planned search to every engine, and the engines answer at
     /// the same time — the multiplier is the point of a second engine, and
     /// serialising it is latency bought with nothing.
-    func testDeepResearchFansOutAcrossEngines() async throws {        let probe = ConcurrencyProbe()
+    func testDeepResearchFansOutAcrossEngines() async throws {
+        let probe = ConcurrencyProbe()
         let transport = StubTransport { call in
             switch call.kind {
             case .fetch:
@@ -1294,7 +1295,13 @@ final class ResearchRunnerTests: XCTestCase {
         // Five hits survived, numbered in (step, engine) order with no gap where
         // the failed pair would have sat: q1 by both engines, q2 by the selected
         // one only, q3 by both.
-        XCTAssertEqual(turn.sources.map { $0.url.lastPathComponent }, ["q1", "q1", "q2", "q3", "q3"])
+        // Matched on the host, which is the engine: within each pair the selected
+        // engine's hit precedes the spare's, and q2's spare failed so only the
+        // selected one appears — the numbering the failure path must preserve.
+        XCTAssertEqual(turn.sources.map { URLComponents(string: $0.url)?.host },
+                       ["search.test.example", "search2.test.example",
+                        "search.test.example",
+                        "search.test.example", "search2.test.example"])
         XCTAssertEqual(turn.sources.map(\.number), Array(1...5))
     }
 
