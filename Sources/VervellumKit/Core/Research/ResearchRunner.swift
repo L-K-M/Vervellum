@@ -592,8 +592,11 @@ final class ResearchRunner: ResearchRunning {
         var plannedReads: [Int: String] = [:]
         let evidenceLimit = mode == .research ? ResearchContext.maxEvidenceCharacters
                                               : ResearchContext.maxDeepEvidenceCharacters
-        var pageBudget = (mode == .research ? PageReaderFactory.maxPages
-                                            : PageReaderFactory.maxDeepPages) - linkedAttempts
+        // Clamped at zero: `prefix` traps on a negative count, and a turn whose links
+        // spent the whole allowance has simply none left, which is different from
+        // owing one.
+        var pageBudget = max(0, (mode == .research ? PageReaderFactory.maxPages
+                                                  : PageReaderFactory.maxDeepPages) - linkedAttempts)
         var searchState = SearchRoundState()
         var reading = ""
         var subquestions: [String] = []
@@ -1195,6 +1198,9 @@ final class ResearchRunner: ResearchRunning {
                 "search_tool": search.toolDescriptor,
                 "found": Self.digest(of: soFar),
                 "step": steps + 1,
+                // The read allowance left, so a loop that can see it spent stops
+                // asking for pages rather than burning a model call to be told.
+                "read_budget": pageBudget,
                 "max_steps": Self.maxAgentSteps,
                 "searches_used": searchesUsed,
                 "max_searches": Self.maxAgentSearches,
@@ -1244,6 +1250,13 @@ final class ResearchRunner: ResearchRunning {
                 searchesUsed += 1
                 allSearches.append(planned)
                 update { $0.searches = allSearches }
+                // Every engine gone: the loop has nothing left to search with, and
+                // a step that can only search is a step spent proving it. Fall
+                // through to the tail with what is gathered.
+                if engines.isEmpty {
+                    trace.log("Agent loop stopped: no search engine is still answering")
+                    break
+                }
 
             case .read(let numbers):
                 guard !numbers.isEmpty, pageBudget > 0 else { continue }
