@@ -128,10 +128,10 @@ The field has converged on **bounded agentic loops** — the model calls search/
 tools until satisfied, under effort caps — over fixed stage pipelines, because
 reacting to actual results beats planning against a digest. Vervellum's staged
 design buys predictable cost, a fully auditable process trail, and a known stage for
-every degradation. Both positions are planned:
+every degradation. Both positions are now under way:
 
 - The staged pipeline (`/deep-research`) keeps its contract and absorbs the
-  gathering improvements above — landed, #98 through #103.
+  gathering improvements above — #98 through #101 landed, #102 and #103 in review.
 - A bounded tool loop runs as `/agent-research`, documented in
   [`AGENT-RESEARCH.md`](AGENT-RESEARCH.md) — in review as #104.
 
