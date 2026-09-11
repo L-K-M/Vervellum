@@ -810,6 +810,15 @@ final class ResearchRunner: ResearchRunning {
                 }
             }
 
+            // No engine to ask: nothing will run, and the progress label must still
+            // count the plan off — a step only completes when its last pair answers,
+            // and with no pairs that never happens on its own.
+            if asked.isEmpty {
+                attempted += planned.count
+                update { $0.searchesCompleted = attempted }
+                return asked
+            }
+
             // Stateless engines: the whole round in flight at once. The fan-out is
             // bounded structurally — a round plans at most `maxSearches` steps, so the
             // task count is maxSearches × engines (a dozen in any real configuration),
@@ -851,9 +860,10 @@ final class ResearchRunner: ResearchRunning {
                 let query = String(step.displayQuery.prefix(200))
                 if !failedQueries.contains(query) { failedQueries.append(query) }
             }
-            rawResults.append(contentsOf: buffered
-                .sorted { ($0.step, $0.engine) < ($1.step, $1.engine) }
-                .compactMap(\.result))
+            rawResults.append(contentsOf: buffered.sorted { one, other in
+                if one.step != other.step { return one.step < other.step }
+                return one.engine < other.engine
+            }.compactMap(\.result))
 
             // Nothing was asked, so nothing was proven unproductive. Without this an
             // empty plan — which a question carrying links can legitimately produce —

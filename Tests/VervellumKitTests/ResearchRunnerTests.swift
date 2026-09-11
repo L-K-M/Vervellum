@@ -1151,8 +1151,11 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(turn.sources.count, 3)
         // Overlap, not full width: how many tasks the cooperative pool runs at once
         // is a property of the machine, so the assertion is that they overlap at all
-        // — a serial pipeline can never show two, whatever the width.
-        XCTAssertGreaterThan(probe.maximum, 1, "the searches must overlap in flight")
+        // — a serial pipeline can never show two, whatever the width. A one-core
+        // runner cannot overlap anything, so it is skipped rather than lied about.
+        if ProcessInfo.processInfo.activeProcessorCount > 1 {
+            XCTAssertGreaterThan(probe.maximum, 1, "the searches must overlap in flight")
+        }
     }
 
     /// Completion order is not plan order: the results are buffered and appended in
@@ -1234,8 +1237,10 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(searches.count, 6, "three queries, put to both engines")
         XCTAssertEqual(Set(searches.compactMap(\.url.host)),
                        ["search.test", "search2.test"])
-        XCTAssertTrue(probe.maximum > 1,
-                      "both engines' searches must overlap in flight — the pool width is the machine's, the overlap is the design")
+        if ProcessInfo.processInfo.activeProcessorCount > 1 {
+            XCTAssertTrue(probe.maximum > 1,
+                          "both engines' searches must overlap in flight — the pool width is the machine's, the overlap is the design")
+        }
         XCTAssertEqual(turn.sources.count, 2,
                        "one hit per engine, both kept — disagreement is what a second engine is for")
     }

@@ -48,6 +48,13 @@ protocol SearchBackend: AnyObject {
 
 extension SearchBackend {
 
+    /// The conservative default: serialised. A conformer that says nothing is safe
+    /// without knowing the protocol underneath.
+    var supportsConcurrentCalls: Bool { false }
+}
+
+extension SearchBackend {
+
     /// Checks model-written arguments against an advertised schema.
     ///
     /// A missing required key or an invented one means the model misread the schema,
