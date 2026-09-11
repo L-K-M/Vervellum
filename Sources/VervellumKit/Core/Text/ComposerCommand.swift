@@ -21,6 +21,9 @@ enum ComposerCommand: Equatable {
     /// Research over several rounds of planning, each asking for what the last one
     /// could not have known was missing.
     case deepResearch(String)
+    /// Research gathered by an agent loop: the model chooses one search or page read
+    /// at a time under a stated budget, and stops when it judges the question settled.
+    case agentResearch(String)
     case newThread
     case openHistory
     case openSettings
@@ -43,6 +46,7 @@ enum ComposerCommand: Equatable {
 
     /// Commands offered in the composer's completion list.
     static let catalogue: [Entry] = [
+        Entry(name: "agent-research", summary: "An agent loop gathers the evidence: one search or page read at a time until it judges the question settled"),
         Entry(name: "deep-research", summary: "Research over several rounds, following up what the first pass missed"),
         Entry(name: "direct", summary: "Answer from the model alone, with no web evidence"),
         Entry(name: "model", summary: "List the configured models, or switch to one by name"),
@@ -71,6 +75,9 @@ enum ComposerCommand: Equatable {
             // a model as prose. `isHalfTypedCommand` reads the nil and declines to
             // withhold Return a second time.
             return rest.isEmpty ? nil : .deepResearch(rest)
+        case "agent-research":
+            // Same shape as `/deep-research`: a mode that wants a question.
+            return rest.isEmpty ? nil : .agentResearch(rest)
         case "direct":
             // "/direct" with nothing after it is a mode request with no question yet,
             // not an empty question — leave it to the caller to keep the composer open.

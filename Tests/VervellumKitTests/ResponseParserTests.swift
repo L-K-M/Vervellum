@@ -9,6 +9,41 @@ import XCTest
 
 final class PlanParserTests: XCTestCase {
 
+    // MARK: Agent steps
+
+    /// One action, exactly — the loop spends a model call and possibly a billed
+    /// search per step, so an ambiguous step is refused rather than guessed at.
+    func testParsesEachAgentAction() throws {
+        let search = try AgentStepParser.parse([
+            "thought": "Find it.", "action": "SEARCH",
+            "arguments": ["q": "baseline"],
+        ])
+        guard case .search(let arguments) = search.action else {
+            return XCTFail("expected a search action")
+        }
+        XCTAssertEqual(search.thought, "Find it.")
+        XCTAssertEqual(arguments["q"] as? String, "baseline")
+
+        let read = try AgentStepParser.parse([
+            "thought": "Read it.", "action": "read", "sources": ["2", 5, "x", 0] as [Any],
+        ])
+        guard case .read(let numbers) = read.action else {
+            return XCTFail("expected a read action")
+        }
+        XCTAssertEqual(numbers, [2, 5], "string numbers are read; junk and zeros are not")
+
+        let answer = try AgentStepParser.parse(["thought": "Done.", "action": "answer"])
+        guard case .answer = answer.action else { return XCTFail("expected an answer action") }
+    }
+
+    func testRejectsAnUnknownOrMissingAction() {
+        XCTAssertThrowsError(try AgentStepParser.parse(["thought": "…", "action": "think"]))
+        XCTAssertThrowsError(try AgentStepParser.parse(["thought": "…"]))
+        XCTAssertThrowsError(try AgentStepParser.parse([
+            "thought": "…", "action": "search", "arguments": [String: Any](),
+        ]))
+    }
+
     func testParsesAWellFormedPlan() throws {
         // Written as typed locals rather than a nested literal: in an `Any` position a
         // heterogeneous or empty collection literal has no inferable type.

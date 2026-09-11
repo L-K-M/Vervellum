@@ -176,6 +176,12 @@ final class ResearchRunner: ResearchRunning {
         /// against the gap, and page reads by the digest's stable source numbers —
         /// the two moves the rounds exist to make.
         case deep
+        /// The full pipeline with a different gatherer: the model chooses one action at
+        /// a time — search, read, or stop — under stated caps, and sees what each
+        /// action produced before choosing the next. The tail (answer, assess, revise)
+        /// is shared with the staged path; see `AGENT-RESEARCH.md` for the design and
+        /// the reasoning.
+        case agent
 
         /// Every mode but `direct` gathers evidence before answering.
         var searches: Bool { self != .direct }
@@ -188,6 +194,7 @@ final class ResearchRunner: ResearchRunning {
             case .research: return "research"
             case .direct: return "direct"
             case .deep: return "deep"
+            case .agent: return "agent"
             }
         }
     }
@@ -568,6 +575,267 @@ final class ResearchRunner: ResearchRunning {
         // here rather than after a planning call the user has already cancelled.
         try Task.checkCancellation()
 
+        // 2 — gather evidence. Two paths share everything from here on: the staged
+        // pipeline (`research`, `deep`) plans once and, in deep mode, follows up in
+        // rounds; the agent loop interleaves planning with searching and reading under
+        // its own budget. Both leave their findings in this same state, and the tail
+        // below answers over it — the citation rule, the check and the revision are
+        // gathering-agnostic on purpose.
+        //
+        // `pageBudget` is the turn's whole page allowance, spent as either path asks
+        // for pages: the question's links already came off it, and the staged path's
+        // final fill backstops what its rounds did not name. `plannedReads` holds
+        // pages asked for by number, keyed by source number rather than attached,
+        // because `combined` rebuilds the source list and anything attached earlier
+        // would be discarded by the next rebuild.
+        var allSearches: [PlannedSearch] = []
+        var plannedReads: [Int: String] = [:]
+        let evidenceLimit = mode == .research ? ResearchContext.maxEvidenceCharacters
+                                              : ResearchContext.maxDeepEvidenceCharacters
+        // Clamped at zero: `prefix` traps on a negative count, and a turn whose links
+        // spent the whole allowance has simply none left, which is different from
+        // owing one.
+        var pageBudget = max(0, (mode == .research ? PageReaderFactory.maxPages
+                                                  : PageReaderFactory.maxDeepPages) - linkedAttempts)
+        var searchState = SearchRoundState()
+        var reading = ""
+        var subquestions: [String] = []
+
+        if mode == .agent {
+            switch try await agentLoop(
+                question: question, history: history, today: today, chain: chain,
+                search: search, settings: settings, engines: &engines, linked: linked,
+                evidenceLimit: evidenceLimit, pageBudget: &pageBudget,
+                plannedReads: &plannedReads, allSearches: &allSearches,
+                searchState: &searchState, attachments: attachments) {
+            case .gathered(let loopReading):
+                reading = loopReading
+            case .nothingToGather:
+                // The loop's own decision that the question needs no evidence — the
+                // same honour as the staged planner's, and the same badge.
+                trace.log("The agent loop chose to answer without evidence")
+                update {
+                    $0.addNotice(.noEvidence)
+                    if $0.reading.isEmpty {
+                        $0.reading = "The loop decided this question needs no web evidence."
+                    }
+                }
+                try await answerDirectly(chain: chain, question: question, history: history,
+                                         today: today, attachments: attachments)
+                return
+            }
+        } else if let staged = try await stagedGathering(
+            mode: mode, question: question, history: history, today: today, chain: chain,
+            search: search, settings: settings, engines: &engines, linked: linked,
+            attachments: attachments, evidenceLimit: evidenceLimit,
+            pageBudget: &pageBudget, plannedReads: &plannedReads,
+            allSearches: &allSearches, searchState: &searchState) {
+            reading = staged.reading
+            subquestions = staged.subquestions
+        } else {
+            // The staged planner answered without evidence inside `stagedGathering`.
+            return
+        }
+        try Task.checkCancellation()
+
+        var harvested = Self.combined(linked: linked, results: searchState.rawResults)
+        // The pages the rounds asked for, attached after the last rebuild of the list.
+        // Keyed by the stable number the digest showed the planner — which is why the
+        // numbering may not shift between rounds: a renumbered list would attach a
+        // decisive page to the wrong source.
+        harvested = Self.applyingReads(plannedReads, to: harvested)
+        let plannedReadCount = plannedReads.values.filter { !$0.isEmpty }.count
+
+        // 3b — read the pages behind the top sources, if the user asked for that.
+        //
+        // This is the backstop, not the primary mechanism: in a deep turn the rounds
+        // have already spent the same allowance on pages they judged decisive, and what
+        // is left fills in rank order. The agent loop skips it by design — reading on
+        // demand was its whole job, and a rank-order fill afterwards would spend what
+        // the loop chose to save. Before the budget, not after: what the model is
+        // shown has to be decided with the page text in hand, or a page would be
+        // fetched and then silently dropped. Still inside the searching stage — see
+        // `ResearchTurn.runningProgressLabel` for why this does not get a
+        // `ResearchStage` case of its own.
+        // What the links already spent comes off the turn's page budget rather than
+        // being added to it: the allowance is a statement about one turn's requests
+        // and context, and it does not stop being true because the pages were chosen
+        // by the user instead of by relevance.
+        //
+        // Spent by the *attempts*, not by the reads. A link that would not load still
+        // sent a request and still reached a host, so charging only the successes would
+        // let three dead links buy three more fetches — the ceiling saying one thing and
+        // the turn doing another. `alreadyRead` stays the successes, because it answers a
+        // different question: whether this turn has any page text at all, which is what
+        // the `noPagesRead` notice is about.
+        if mode != .agent {
+            // The fill's spend comes off the budget the regather round will see: it
+            // is the same turn-wide allowance, and a round handed an already-spent
+            // remainder would re-spend it.
+            let attemptedBeforeFill = current?.pagesAttempted ?? 0
+            harvested = await readPages(harvested,
+                                        settings: settings,
+                                        budget: pageBudget,
+                                        alreadyRead: linked.count + plannedReadCount)
+            if let turn = current {
+                pageBudget = max(0, pageBudget - (turn.pagesAttempted - attemptedBeforeFill))
+            }
+        }
+        try Task.checkCancellation()
+
+        // Trimmed to what fits the evidence budget *before* it becomes the turn's source
+        // list. The model is only shown the kept prefix, so a turn that recorded the
+        // full list would validate the answer's citations against sources the model
+        // never saw, and would offer the reader a source list the answer could not have
+        // used.
+        let (assembled, droppedSources, withheldPageText) = ResearchContext.evidence(
+            from: harvested, limit: evidenceLimit)
+        var evidence = assembled
+        var sources = Array(harvested.prefix(evidence.count))
+        // A page that did not fit is cleared from the source too, so the list the reader
+        // sees and the evidence the model saw agree about which pages were read.
+        for index in sources.indices where withheldPageText.contains(sources[index].number) {
+            sources[index].fullText = nil
+        }
+        let kept = sources
+        update { turn in
+            turn.sources = kept
+            turn.pagesRead = kept.filter { $0.wasRead }.count
+        }
+        if droppedSources > 0 {
+            trace.log("Evidence budget dropped \(droppedSources) sources")
+            update { $0.addNotice(.evidenceTrimmed) }
+        }
+        if !withheldPageText.isEmpty {
+            trace.log("Evidence budget withheld \(withheldPageText.count) page texts")
+            update { $0.addNotice(.pageTextTrimmed) }
+        }
+        trace.log("Evidence: \(sources.count) sources from \(searchState.rawResults.count) results")
+
+        guard !sources.isEmpty else {
+            // Two different situations used to share one message that blamed the
+            // question for both. Say which it was: the searches themselves failed, or the
+            // server answered and nothing usable came back.
+            if searchState.rawResults.isEmpty, let reason = searchState.searchFailures.first {
+                throw ResearchError("Every web search failed. " + reason)
+            }
+            throw ResearchError(
+                "The web search returned no usable sources for this question. Try rephrasing "
+                + "it, or use /direct to answer without evidence.")
+        }
+        try Task.checkCancellation()
+
+        // 4 — answer, streamed.
+        update { $0.stage = .answering }
+        let searchesRun: [[String: String]] = allSearches.map {
+            ["purpose": $0.purpose, "query": $0.displayQuery]
+        }
+        var answerExtra: [String: Any] = [
+            "reading": reading,
+            "searches_run": searchesRun,
+            "evidence": evidence,
+            "highest_source_number": evidence.compactMap { $0["number"] as? Int }.max() ?? 0,
+        ]
+        // One gate for both the prompt and the payload key: the structured answer
+        // prompt promises a "subquestions" list, and a payload without one under
+        // that prompt is a promise broken at the reader's expense.
+        let structuredAnswer = mode == .deep && !subquestions.isEmpty
+        let answerPrompt = structuredAnswer ? ResearchPrompts.answerDeep
+                                            : ResearchPrompts.answer
+        if structuredAnswer {
+            answerExtra["subquestions"] = subquestions
+        }
+        if !attachments.payload.isEmpty { answerExtra["attachments"] = attachments.payload }
+        var answer = try await streamAnswer(chain: chain, prompt: answerPrompt,
+                                            answerExtra: answerExtra, question: question,
+                                            history: history, today: today,
+                                            attachments: attachments)
+        recordAnsweringModel(from: chain)
+        update { $0.applyCitationValidation(sourceCount: sources.count) }
+        try Task.checkCancellation()
+
+        // 5 — assess.
+        update { $0.stage = .assessing }
+        // A failure here must not fail the turn — see `assess` for why. What it costs
+        // is the findings, and the turn says so rather than pretending nothing was
+        // checked.
+        guard let firstAssessment = try await assess(answer: answer, evidence: evidence,
+                                                     reading: reading, question: question,
+                                                     history: history, today: today,
+                                                     sourceCount: sources.count, chain: chain)
+        else {
+            update { $0.addNotice(.assessmentUnavailable) }
+            return
+        }
+        var assessment = firstAssessment
+        update { turn in
+            turn.findings = assessment.findings
+            turn.limitations = assessment.limitations
+            turn.followups = assessment.followups
+            for notice in assessment.notices { turn.addNotice(notice) }
+        }
+        try Task.checkCancellation()
+
+        // 5b — regather, deep mode only: when the check could not settle something, go
+        // back for the evidence that would settle it, exactly once. Atomic: it adopts
+        // its second answer, second check and enlarged source list only when all three
+        // exist, and any failure leaves the turn exactly as the first check left it.
+        if mode == .deep,
+           assessment.findings.contains(where: { $0.verdict == .insufficient }),
+           !engines.isEmpty,
+           let regathered = try await regather(
+               insufficient: assessment.findings.filter { $0.verdict == .insufficient },
+               followups: assessment.followups,
+               question: question, history: history, today: today, chain: chain,
+               settings: settings, engines: engines, linked: linked,
+               plannedReads: &plannedReads, pageBudget: pageBudget,
+               answerPrompt: answerPrompt, answerExtra: answerExtra,
+               attachments: attachments, evidenceLimit: evidenceLimit,
+               currentAnswer: answer, currentSources: sources,
+               reading: reading,
+               searchState: &searchState) {
+            answer = regathered.answer
+            sources = regathered.sources
+            evidence = regathered.evidence
+            assessment = regathered.assessment
+        }
+
+        // 6 — revise, only when the check found something worth correcting. After a
+        // regather these are the second check's findings and the second answer; the
+        // ordering rule is unchanged — the correction is made against a check that
+        // has actually run.
+        try await revise(answer: answer, findings: assessment.findings, evidence: evidence,
+                         sources: sources, question: question, history: history,
+                         today: today, reading: reading, chain: chain)
+    }
+
+    // MARK: Staged gathering
+
+    /// The staged gathering path: one plan, its searches, and `deep` mode's follow-up
+    /// rounds. The agent loop is the other gathering path; both leave their findings in
+    /// the shared state and the tail in `execute` answers over it.
+    ///
+    /// Returns the reading and the sub-questions the answer is structured by, or nil
+    /// when the planner decided the question needs no evidence at all and the turn has
+    /// already answered without it — the caller treats nil as "finished, stop here".
+    private func stagedGathering(mode: Mode,
+                                 question: String,
+                                 history: [ResearchTurn],
+                                 today: String,
+                                 chain: ModelChain,
+                                 search: SearchBackend,
+                                 settings: ProviderSettings,
+                                 engines: inout [SearchBackend],
+                                 linked: [Source],
+                                 attachments: (payload: [[String: String]],
+                                               images: [ChatCompletionsClient.ImagePart],
+                                               imageNames: [String]),
+                                 evidenceLimit: Int,
+                                 pageBudget: inout Int,
+                                 plannedReads: inout [Int: String],
+                                 allSearches: inout [PlannedSearch],
+                                 searchState: inout SearchRoundState)
+        async throws -> (reading: String, subquestions: [String])? {
         // 2 — plan.
         var planExtra: [String: Any] = ["search_tool": search.toolDescriptor]
         // The whole text, not an excerpt as `linked_pages` gets. A linked page is
@@ -690,7 +958,7 @@ final class ResearchRunner: ResearchRunning {
             }
             try await answerDirectly(chain: chain, question: question, history: history,
                                      today: today, attachments: attachments)
-            return
+            return nil
         }
         if plan.searches.isEmpty {
             // The other half of that branch: a plan with no searches and a question that
@@ -707,10 +975,9 @@ final class ResearchRunner: ResearchRunning {
         // session is one JSON-RPC id sequence over one connection) stay serial: the
         // protocol documents no other shape.
         update { $0.stage = .searching }
-        var searchState = SearchRoundState()
-
         engines = try await runSearches(plan.searches, across: engines,
                                         mode: mode, state: &searchState)
+        allSearches = plan.searches
 
         // 3a — later rounds, `deep` only. Each reads what is on the table and asks for
         // what the first round could not have known was missing, because the gap does not
@@ -718,7 +985,7 @@ final class ResearchRunner: ResearchRunning {
         //
         // Evidence is carried whole between rounds rather than summarised. The answer may
         // cite only the numbered sources this turn collected, so a digest would buy room
-        // by dissolving the things the citations point at. Rounds stop as the budget
+        // by dissolving the very things the citations point at. Rounds stop as the budget
         // fills instead — and the budget is asked with the same trimmer that will decide
         // what the answer sees, rather than a second rule that could disagree with it.
         // The follow-up *planner* is given a digest, which is a different matter: it
@@ -726,31 +993,6 @@ final class ResearchRunner: ResearchRunning {
         // `maxDeepRounds > 1` before the range: `2...1` is a runtime trap rather than an
         // empty loop, so setting the ceiling to one round would crash every deep turn
         // instead of quietly doing one. The constant is meant to be tuneable.
-        //
-        // `allSearches` accumulates every round's plan rather than living inside the
-        // block: the answer payload's `searches_run` is built from it, and the answer
-        // model is entitled to know about the searches that produced its evidence —
-        // built from the first plan alone, the list described a fraction of what the
-        // evidence block actually contains.
-        //
-        // `plannedReads` holds the texts of pages the rounds asked for by number. They
-        // are keyed by source number rather than attached to a source list, because
-        // `combined` rebuilds that list from raw results after every round — anything
-        // attached mid-loop would be discarded by the next rebuild. Attached once,
-        // after the last combine.
-        //
-        // `pageBudget` is the turn's whole page allowance, deep or not, spent as the
-        // rounds ask for pages and topped up by nobody: the final fill afterwards
-        // backstops what the rounds did not name, it does not get a second allowance.
-        var allSearches = plan.searches
-        var plannedReads: [Int: String] = [:]
-        let evidenceLimit = mode == .deep ? ResearchContext.maxDeepEvidenceCharacters
-                                          : ResearchContext.maxEvidenceCharacters
-        // Clamped at zero: `prefix` traps on a negative count, and a turn whose links
-        // spent the whole allowance has simply none left, which is different from
-        // owing one.
-        var pageBudget = max(0, (mode == .deep ? PageReaderFactory.maxDeepPages
-                                               : PageReaderFactory.maxPages) - linkedAttempts)
         if mode == .deep, !engines.isEmpty, Self.maxDeepRounds > 1 {
             for round in 2...Self.maxDeepRounds {
                 try Task.checkCancellation()
@@ -867,176 +1109,171 @@ final class ResearchRunner: ResearchRunning {
             }
         }
 
-        var harvested = Self.combined(linked: linked, results: searchState.rawResults)
-        // The pages the rounds asked for, attached after the last rebuild of the list.
-        // Keyed by the stable number the digest showed the planner — which is why the
-        // numbering may not shift between rounds: a renumbered list would attach a
-        // decisive page to the wrong source.
-        harvested = Self.applyingReads(plannedReads, to: harvested)
-        let plannedReadCount = plannedReads.values.filter { !$0.isEmpty }.count
+        return (reading: plan.reading, subquestions: firstSubquestions)
+    }
 
-        // 3b — read the pages behind the top sources, if the user asked for that.
-        //
-        // This is the backstop, not the primary mechanism: in a deep turn the rounds
-        // have already spent the same allowance on pages they judged decisive, and what
-        // is left fills in rank order. Before the budget, not after: what the model is
-        // shown has to be decided with the page text in hand, or a page would be
-        // fetched and then silently dropped. Still inside the searching stage — see
-        // `ResearchTurn.runningProgressLabel` for why this does not get a
-        // `ResearchStage` case of its own.
-        // What the links already spent comes off the turn's page budget rather than
-        // being added to it: the allowance is a statement about one turn's requests
-        // and context, and it does not stop being true because the pages were chosen
-        // by the user instead of by relevance.
-        //
-        // Spent by the *attempts*, not by the reads. A link that would not load still
-        // sent a request and still reached a host, so charging only the successes would
-        // let three dead links buy three more fetches — the ceiling saying one thing and
-        // the turn doing another. `alreadyRead` stays the successes, because it answers a
-        // different question: whether this turn has any page text at all, which is what
-        // the `noPagesRead` notice is about.
-        // The fill's spend comes off the budget the regather round will see: it is
-        // the same turn-wide allowance, and a round handed an already-spent remainder
-        // would re-spend it.
-        let fillSpend = { (before: Int, after: Int) in after - before }
-        let attemptedBeforeFill = current?.pagesAttempted ?? 0
-        harvested = await readPages(harvested,
-                                    settings: settings,
-                                    budget: pageBudget,
-                                    alreadyRead: linked.count + plannedReadCount)
-        if let turn = current {
-            pageBudget = max(0, pageBudget - fillSpend(attemptedBeforeFill, turn.pagesAttempted))
-        }
-        try Task.checkCancellation()
+    // MARK: Agent loop
 
-        // Trimmed to what fits the evidence budget *before* it becomes the turn's source
-        // list. The model is only shown the kept prefix, so a turn that recorded the
-        // full list would validate the answer's citations against sources the model
-        // never saw, and would offer the reader a source list the answer could not have
-        // used.
-        let (assembled, droppedSources, withheldPageText) = ResearchContext.evidence(
-            from: harvested, limit: evidenceLimit)
-        var evidence = assembled
-        var sources = Array(harvested.prefix(evidence.count))
-        // A page that did not fit is cleared from the source too, so the list the reader
-        // sees and the evidence the model saw agree about which pages were read.
-        for index in sources.indices where withheldPageText.contains(sources[index].number) {
-            sources[index].fullText = nil
-        }
-        let kept = sources
-        update { turn in
-            turn.sources = kept
-            turn.pagesRead = kept.filter { $0.wasRead }.count
-        }
-        if droppedSources > 0 {
-            trace.log("Evidence budget dropped \(droppedSources) sources")
-            update { $0.addNotice(.evidenceTrimmed) }
-        }
-        if !withheldPageText.isEmpty {
-            trace.log("Evidence budget withheld \(withheldPageText.count) page texts")
-            update { $0.addNotice(.pageTextTrimmed) }
-        }
-        trace.log("Evidence: \(sources.count) sources from \(searchState.rawResults.count) results")
+    /// The outcome of an agent loop: evidence to answer over, or the loop's own
+    /// decision that the question needs none.
+    private enum LoopOutcome {
+        case gathered(reading: String)
+        case nothingToGather
+    }
 
-        guard !sources.isEmpty else {
-            // Two different situations used to share one message that blamed the
-            // question for both. Say which it was: the searches themselves failed, or the
-            // server answered and nothing usable came back.
-            if searchState.rawResults.isEmpty, let reason = searchState.searchFailures.first {
-                throw ResearchError("Every web search failed. " + reason)
+    /// The most steps the agent loop may take, search or read alike. Sixteen bounds a
+    /// read-heavy loop (reads are cheap in billed requests but not in wall clock);
+    /// a search-heavy loop hits the search cap first, with steps to spare for the
+    /// reads and the stop.
+    static let maxAgentSteps = 16
+    /// The most searches the agent loop may run across the whole turn. The same
+    /// ceiling as the staged pipeline's worst case (4 × 3 rounds) — reacting to
+    /// results may find more to react to, but an unbounded loop is the one thing
+    /// this architecture exists not to be.
+    static let maxAgentSearches = 12
+
+    /// The agentic gathering path: the model chooses one action at a time — search,
+    /// read, or stop — and sees what each action produced before choosing the next.
+    ///
+    /// This is the loop the field converged on: reacting to actual results beats
+    /// planning against a digest, because the gap does not exist until something has
+    /// been looked up. Vervellum's version keeps everything the staged pipeline
+    /// guarantees — the numbered source list is still Vervellum's, the pages are
+    /// still fetched by it, nothing the model writes becomes a command, and the
+    /// answer/assess/revise tail is shared untouched. Only *who decides the next
+    /// search* differs, and the caps make that decision auditable: every step is a
+    /// model call, every action lands on the turn, and the budget is stated in each
+    /// payload so the model plans against it.
+    ///
+    /// The loop ends on "answer", on a budget, on a full evidence budget, or on an
+    /// unparseable step — all of which fall through to the shared tail with whatever
+    /// exists, exactly as the staged path's failures do.
+    private func agentLoop(question: String,
+                           history: [ResearchTurn],
+                           today: String,
+                           chain: ModelChain,
+                           search: SearchBackend,
+                           settings: ProviderSettings,
+                           engines: inout [SearchBackend],
+                           linked: [Source],
+                           evidenceLimit: Int,
+                           pageBudget: inout Int,
+                           plannedReads: inout [Int: String],
+                           allSearches: inout [PlannedSearch],
+                           searchState: inout SearchRoundState,
+                           attachments: (payload: [[String: String]],
+                                         images: [ChatCompletionsClient.ImagePart],
+                                         imageNames: [String])) async throws -> LoopOutcome {
+        var steps = 0
+        var searchesUsed = 0
+        var lastThought = ""
+
+        while true {
+            try Task.checkCancellation()
+            let soFar = Self.applyingReads(
+                plannedReads,
+                to: Self.combined(linked: linked, results: searchState.rawResults))
+
+            // A full evidence budget ends the loop like a round-full staged turn: more
+            // sources would be fetched and then silently dropped by the trimmer.
+            if ResearchContext.evidence(from: soFar, limit: evidenceLimit).dropped != 0 {
+                trace.log("Agent loop stopped: the evidence budget is full")
+                break
             }
-            throw ResearchError(
-                "The web search returned no usable sources for this question. Try rephrasing "
-                + "it, or use /direct to answer without evidence.")
-        }
-        try Task.checkCancellation()
+            // The step budget ends it without another model call — the model was told
+            // the budget in every payload, and spending a call to be told again buys
+            // nothing. The search budget likewise, when nothing has been read lately.
+            if steps >= Self.maxAgentSteps {
+                trace.log("Agent loop stopped: out of steps")
+                break
+            }
+            if searchesUsed >= Self.maxAgentSearches {
+                trace.log("Agent loop stopped: out of searches")
+                break
+            }
 
-        // 4 — answer, streamed.
-        update { $0.stage = .answering }
-        let searchesRun: [[String: String]] = allSearches.map {
-            ["purpose": $0.purpose, "query": $0.displayQuery]
-        }
-        var answerExtra: [String: Any] = [
-            "reading": plan.reading,
-            "searches_run": searchesRun,
-            "evidence": evidence,
-            "highest_source_number": evidence.compactMap { $0["number"] as? Int }.max() ?? 0,
-        ]
-        // The deep answer is structured by the first plan's decomposition; a quick
-        // turn's is not, because a quick question rarely has five load-bearing parts
-        // and headings for one part are scaffolding around a paragraph.
-        // One gate for both the prompt and the payload key: the structured answer
-        // prompt promises a "subquestions" list, and a payload without one under
-        // that prompt is a promise broken at the reader's expense.
-        let structuredAnswer = mode == .deep && !firstSubquestions.isEmpty
-        let answerPrompt = structuredAnswer ? ResearchPrompts.answerDeep
-                                            : ResearchPrompts.answer
-        if structuredAnswer {
-            answerExtra["subquestions"] = firstSubquestions
-        }
-        if !attachments.payload.isEmpty { answerExtra["attachments"] = attachments.payload }
-        update { $0.stage = .answering }
-        var answer = try await streamAnswer(chain: chain, prompt: answerPrompt,
-                                            answerExtra: answerExtra, question: question,
-                                            history: history, today: today,
-                                            attachments: attachments)
-        recordAnsweringModel(from: chain)
-        update { $0.applyCitationValidation(sourceCount: sources.count) }
-        try Task.checkCancellation()
+            update { $0.stage = .planning }
+            var extra: [String: Any] = [
+                "search_tool": search.toolDescriptor,
+                "found": Self.digest(of: soFar),
+                "step": steps + 1,
+                // The read allowance left, so a loop that can see it spent stops
+                // asking for pages rather than burning a model call to be told.
+                "read_budget": pageBudget,
+                "max_steps": Self.maxAgentSteps,
+                "searches_used": searchesUsed,
+                "max_searches": Self.maxAgentSearches,
+            ]
+            if !searchState.failedQueries.isEmpty {
+                extra["failed_queries"] = searchState.failedQueries
+            }
+            if !attachments.payload.isEmpty { extra["attachments"] = attachments.payload }
+            let context = ResearchContext.assemble(
+                question: question, history: history, today: today, extra: extra)
+            // `try?`: a step the parser cannot read ends the loop rather than the
+            // turn — what has been gathered is real, and the tail can answer over it.
+            let step = try? await chain.perform("Agent step \(steps + 1)") { chat in
+                let object = try await chat.completeJSON(
+                    system: ResearchPrompts.agentLoop(today: today),
+                    payload: context.payload, label: "Agent step \(steps + 1)")
+                return try AgentStepParser.parse(object)
+            }
+            try Task.checkCancellation()
+            guard let step else {
+                trace.warn("Agent step could not be read; answering from what is gathered")
+                break
+            }
+            steps += 1
+            lastThought = step.thought
+            // The reading evolves with the loop: the panel shows what the gatherer
+            // currently understands, the way the staged path shows the plan's reading.
+            update { $0.reading = step.thought }
 
-        // 5 — assess.
-        update { $0.stage = .assessing }
-        // A failure here must not fail the turn — see `assess` for why. What it costs
-        // is the findings, and the turn says so rather than pretending nothing was
-        // checked.
-        guard let firstAssessment = try await assess(answer: answer, evidence: evidence,
-                                                     reading: plan.reading, question: question,
-                                                     history: history, today: today,
-                                                     sourceCount: sources.count, chain: chain)
-        else {
-            update { $0.addNotice(.assessmentUnavailable) }
-            return
-        }
-        var assessment = firstAssessment
-        update { turn in
-            turn.findings = assessment.findings
-            turn.limitations = assessment.limitations
-            turn.followups = assessment.followups
-            for notice in assessment.notices { turn.addNotice(notice) }
-        }
-        try Task.checkCancellation()
+            switch step.action {
+            case .answer:
+                trace.log("Agent loop chose to answer after \(steps) step(s)")
+                return soFar.isEmpty ? .nothingToGather : .gathered(reading: step.thought)
 
-        // 5b — regather, deep mode only: when the check could not settle something, go
-        // back for the evidence that would settle it, exactly once. Atomic: it adopts
-        // its second answer, second check and enlarged source list only when all three
-        // exist, and any failure leaves the turn exactly as the first check left it.
-        if mode == .deep,
-           assessment.findings.contains(where: { $0.verdict == .insufficient }),
-           !engines.isEmpty,
-           let regathered = try await regather(
-               insufficient: assessment.findings.filter { $0.verdict == .insufficient },
-               followups: assessment.followups,
-               question: question, history: history, today: today, chain: chain,
-               settings: settings, engines: engines, linked: linked,
-               plannedReads: &plannedReads, pageBudget: pageBudget,
-               answerPrompt: answerPrompt, answerExtra: answerExtra,
-               attachments: attachments, evidenceLimit: evidenceLimit,
-               currentAnswer: answer, currentSources: sources,
-               reading: plan.reading,
-               searchState: &searchState) {
-            answer = regathered.answer
-            sources = regathered.sources
-            evidence = regathered.evidence
-            assessment = regathered.assessment
+            case .search(let arguments):
+                guard let planned = PlannedSearch(
+                    purpose: step.thought.isEmpty
+                        ? "Agent search" : String(step.thought.prefix(80)),
+                    arguments: arguments)
+                else {
+                    trace.warn("Agent search arguments could not be encoded; step skipped")
+                    continue
+                }
+                update { $0.stage = .searching }
+                engines = try await runSearches([planned], across: engines,
+                                                mode: .deep, state: &searchState)
+                searchesUsed += 1
+                allSearches.append(planned)
+                update { $0.searches = allSearches }
+                // Every engine gone: the loop has nothing left to search with, and
+                // a step that can only search is a step spent proving it. Fall
+                // through to the tail with what is gathered.
+                if engines.isEmpty {
+                    trace.log("Agent loop stopped: no search engine is still answering")
+                    break
+                }
+
+            case .read(let numbers):
+                guard !numbers.isEmpty, pageBudget > 0 else { continue }
+                update { $0.stage = .searching }
+                let (texts, spent) = await readPlannedPages(numbers, in: soFar,
+                                                            settings: settings,
+                                                            budget: pageBudget)
+                pageBudget -= spent
+                plannedReads.merge(texts) { _, new in new }
+            }
         }
 
-        // 6 — revise, only when the check found something worth correcting. After a
-        // regather these are the second check's findings and the second answer; the
-        // ordering rule is unchanged — the correction is made against a check that
-        // has actually run.
-        try await revise(answer: answer, findings: assessment.findings, evidence: evidence,
-                         sources: sources, question: question, history: history,
-                         today: today, reading: plan.reading, chain: chain)
+        // The budget ended the loop rather than the model. That is not "no evidence
+        // needed" — the loop was stopped, not satisfied — so even an empty gather
+        // goes to the tail, whose guard says "no usable sources" honestly.
+        trace.log("Agent loop ran \(steps) step(s), \(searchesUsed) search(es)")
+        update { $0.reading = lastThought }
+        return .gathered(reading: lastThought)
     }
 
     /// The mutable state of a turn's searching, gathered so it can pass between
@@ -1066,10 +1303,8 @@ final class ResearchRunner: ResearchRunning {
     /// costs a request per search to find that out once; it should not cost one per
     /// round.
     ///
-    /// Stateless engines answer every (query, engine) pair of the round concurrently;
-    /// stateful ones (an MCP session is one JSON-RPC id sequence over one connection)
-    /// stay serial. The local copies above exist because the fan-out's helpers must
-    /// not touch an inout parameter from concurrent closures.
+    /// Sequential on purpose: the MCP session is stateful, and one JSON-RPC id
+    /// sequence over one connection is the only shape the server documents.
     private func runSearches(_ planned: [PlannedSearch],
                              across asked: [SearchBackend],
                              mode: Mode,
@@ -1353,16 +1588,20 @@ final class ResearchRunner: ResearchRunning {
                 plannedReads[number] = text
             }
         }
-        guard !roundPlan.searches.isEmpty else {
-            trace.log("No regather searches: the planner says the web cannot settle this")
-            return nil
+        // A reads-only plan is not a stop: pages the round read are new evidence
+        // even with no searches run, and the newness check below decides whether
+        // they justify a second answer the same way it decides for searches.
+        if roundPlan.searches.isEmpty {
+            trace.log("No regather searches: the planner says searching cannot settle this")
         }
 
-        update { $0.stage = .searching }
-        // The reader sees the round's searches like every other round's: they ran.
-        update { $0.searches += roundPlan.searches }
-        _ = try await runSearches(roundPlan.searches, across: engines,
-                                  mode: .deep, state: &searchState)
+        if !roundPlan.searches.isEmpty {
+            update { $0.stage = .searching }
+            // The reader sees the round's searches like every other round's: they ran.
+            update { $0.searches += roundPlan.searches }
+            _ = try await runSearches(roundPlan.searches, across: engines,
+                                      mode: .deep, state: &searchState)
+        }
         var harvested = Self.applyingReads(
             plannedReads, to: Self.combined(linked: linked, results: searchState.rawResults))
         // The same budget the pre-stop reads already spent from; a round that both

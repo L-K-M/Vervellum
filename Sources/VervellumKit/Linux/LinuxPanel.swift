@@ -299,6 +299,9 @@ final class LinuxPanel {
         case .deepResearch(let question):
             GTK.setText(composer, "")
             ask(question, mode: .deep, attaching: takePendingAttachments())
+        case .agentResearch(let question):
+            GTK.setText(composer, "")
+            ask(question, mode: .agent, attaching: takePendingAttachments())
         }
     }
 

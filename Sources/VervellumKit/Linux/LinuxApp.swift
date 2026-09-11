@@ -46,6 +46,12 @@ public enum VervellumLinuxApp {
                 return 2
             }
             return runHeadless(question: arguments.dropFirst().joined(separator: " "), mode: .deep)
+        case "--agent":
+            guard arguments.count > 1 else {
+                FileHandle.standardError.write(Data("usage: vervellum --agent \"your question\"\n".utf8))
+                return 2
+            }
+            return runHeadless(question: arguments.dropFirst().joined(separator: " "), mode: .agent)
         case "--direct":
             guard arguments.count > 1 else {
                 FileHandle.standardError.write(Data("usage: vervellum --direct \"your question\"\n".utf8))
@@ -75,6 +81,8 @@ public enum VervellumLinuxApp {
               vervellum --ask "question"    research a question and print the answer
               vervellum --deep "question"   research over several rounds, following up
                                             what the first pass missed
+              vervellum --agent "question"  research with an agent loop: one search or
+                                            page read at a time until it is satisfied
               vervellum --direct "question" answer without searching, badged as unsourced
               vervellum --install-shortcut  bind the summon shortcut in your desktop
               vervellum --version
