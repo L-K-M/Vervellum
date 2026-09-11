@@ -1366,9 +1366,13 @@ final class ResearchRunner: ResearchRunning {
         var harvested = Self.applyingReads(
             plannedReads, to: Self.combined(linked: linked, results: searchState.rawResults))
         // The same budget the pre-stop reads already spent from; a round that both
-        // searches and reads gets one allowance, not two.
-        if !roundPlan.readRequests.isEmpty, budget > 0 {
-            let (texts, spent) = await readPlannedPages(roundPlan.readRequests,
+        // searches and reads gets one allowance, not two. Only the requests the
+        // pre-search pass did not deliver run again — `readableTargets` filters
+        // pages the earlier pass made read, but the *budget* would still be charged
+        // for a request the round had already satisfied.
+        let pendingReads = roundPlan.readRequests.filter { plannedReads[$0] == nil }
+        if !pendingReads.isEmpty, budget > 0 {
+            let (texts, spent) = await readPlannedPages(pendingReads,
                                                         in: harvested,
                                                         settings: settings, budget: budget)
             budget -= spent
@@ -1430,7 +1434,14 @@ final class ResearchRunner: ResearchRunning {
             let stopped = Task.isCancelled
                 || error is CancellationError
                 || (error as? ResearchError) == ResearchError.cancelled
-            guard !stopped else { throw error }
+            // Restored on a Stop too: the round is atomic, and a turn cancelled
+            // mid-second-answer must not keep the enlarged source list over the
+            // first answer's own list — the half-adopted state the snapshot exists
+            // to prevent. The Stop still propagates.
+            if stopped {
+                update { $0 = snapshot }
+                throw error
+            }
             trace.warn("Regather answer failed: \(ResearchError.safeLabel(for: error)); "
                        + "the first answer stands")
             update { $0 = snapshot }

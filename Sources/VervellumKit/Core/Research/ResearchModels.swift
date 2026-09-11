@@ -308,8 +308,8 @@ enum TurnNotice: String, Codable, Equatable {
                 + "the one that answered."
         case .answerRegathered:
             return "The first check found claims the evidence could not settle, so this "
-                + "turn gathered more evidence and answered again. The findings below "
-                + "grade this answer; the first draft is kept for comparison."
+                + "turn went back for more evidence and answered again. The findings "
+                + "below grade this answer; the first draft is kept for comparison."
         case .attachmentNotStored:
             return "An attachment could not be saved, so it will not be here when this "
                 + "thread is reopened. The answer was written with it — only the stored "
