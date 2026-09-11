@@ -127,4 +127,7 @@ done
 echo
 echo "done: $pass ran, $fail failed -> $OUT"
 echo "judge each case with eval/judge.md, then compare across runs as README.md describes"
+# Nothing ran means every question was skipped — a bank of header typos must not
+# exit green any more than a bank that matched nothing.
+[ "$pass" -gt 0 ] || { echo "eval: nothing ran — every question was skipped" >&2; exit 1; }
 [ "$fail" -eq 0 ]

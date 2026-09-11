@@ -1,0 +1,4 @@
+mode: direct
+question: What is a parsec, and roughly how far is it?
+expect: the distance at which one astronomical unit subtends one arcsecond, about 3.26 light-years; stated as unsourced model knowledge with no citation markers
+must-not: any bracketed citation or claim that web sources were consulted

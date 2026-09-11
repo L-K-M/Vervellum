@@ -13,13 +13,12 @@ cd "$(dirname "$0")/.."
 aggregate() {
     # $1 = dir. Emits "factual citation coverage source_quality calibration passes fails n".
     awk '
-        # Strip markdown fences and isolate the first {...} on the line.
-        /^\s*```/ { next }
+        # Strip markdown fences and isolate the first {...} on the line. POSIX
+        # character classes only: \s is a gawk-ism, and this script must behave the
+        # same under macOS awk as under GNU awk.
+        /^[ \t]*```/ { next }
         /\{.*\}/ {
             line = $0
-            for (i = 1; i <= 5; i++) {
-                key = substr("factual citation coverage source_quality calibration", (i-1)*11+1, 10)
-            }
             for (k in keys) delete keys[k]
             while (match(line, /"(factual|citation|coverage|source_quality|calibration)": *[0-9.]+/)) {
                 part = substr(line, RSTART, RLENGTH)
@@ -32,8 +31,11 @@ aggregate() {
             if ("factual" in keys) {
                 f += keys["factual"]; c += keys["citation"]; cov += keys["coverage"]
                 sq += keys["source_quality"]; cal += keys["calibration"]; n++
+                # The verdict is counted only for a line that produced scores: a
+                # brace-bearing prose line is not a case, and tallying it would
+                # overstate failures against a smaller n.
+                if ($0 ~ /"verdict": *"pass"/) p++; else f2++
             }
-            if ($0 ~ /"verdict": *"pass"/) p++; else f2++
         }
         END {
             if (n == 0) { printf "no judged cases in %s\n", dir > "/dev/stderr"; exit 1 }
