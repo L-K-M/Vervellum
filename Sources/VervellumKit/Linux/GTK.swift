@@ -320,6 +320,16 @@ enum GTK {
         gtk_widget_add_css_class(widget, name)
     }
 
+    /// A thin vertical rule, for separating groups inside a horizontal box.
+    ///
+    /// There is no `removeStyle` counterpart to `addStyle` here and none is wanted: a
+    /// row whose selection changes is rebuilt (`removeAllChildren` then append), which
+    /// is what the attachment row already does, so a widget never has to un-learn a
+    /// class it was given.
+    static func verticalSeparator() -> Widget {
+        gtk_separator_new(GTK_ORIENTATION_VERTICAL)
+    }
+
     // MARK: Text
 
     /// A wrapping, selectable label carrying Pango markup.

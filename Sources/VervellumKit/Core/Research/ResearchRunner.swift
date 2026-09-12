@@ -157,47 +157,16 @@ final class ResearchRunner: ResearchRunning {
         }
     }
 
-    enum Mode {
-        /// The full pipeline.
-        case research
-        /// No search: answer from the model's own knowledge, badged as unsourced.
-        case direct
-        /// The full pipeline, but the plan is allowed to come back for more. Each round
-        /// reads what the last one found and asks for what is still missing; the answer
-        /// is written once, over everything gathered.
-        ///
-        /// Evidence is kept whole rather than summarised between rounds. The answer may
-        /// cite only the numbered sources this turn collected, so a digest would buy
-        /// room by dissolving the very things the citations point at. Rounds stop when
-        /// the budget is close to spent instead — the check is inline in `execute`,
-        /// asked with the same trimmer that decides what the answer sees.
-        ///
-        /// What a round may ask for is documented in `deepFollowUp`'s prompt: searches
-        /// against the gap, and page reads by the digest's stable source numbers —
-        /// the two moves the rounds exist to make.
-        case deep
-        /// The full pipeline with a different gatherer: the model chooses one action at
-        /// a time — search, read, or stop — under stated caps, and sees what each
-        /// action produced before choosing the next. The tail (answer, assess, revise)
-        /// is shared with the staged path; see `AGENT-RESEARCH.md` for the design and
-        /// the reasoning.
-        case agent
-
-        /// Every mode but `direct` gathers evidence before answering.
-        var searches: Bool { self != .direct }
-
-        /// What the trace calls this. Named here rather than spelled at the call site,
-        /// which was a ternary and so had no room for a third answer — it would have
-        /// logged `deep` turns as `research` and been right about nothing.
-        var traceName: String {
-            switch self {
-            case .research: return "research"
-            case .direct: return "direct"
-            case .deep: return "deep"
-            case .agent: return "agent"
-            }
-        }
-    }
+    /// The levels a turn can be asked at, and everything the reader is told about them.
+    ///
+    /// A type alias rather than the enum that used to be declared here: the runner takes
+    /// the level as a parameter called `mode` in a dozen signatures and switches on it in
+    /// a dozen more, and the name the *reader* sees is now owned by `ResearchLevel`,
+    /// which also carries the labels, the command words and the generated cost lines the
+    /// two front ends and the CLI all print. One type, one file, and the runner's own
+    /// spelling left alone so this change stayed about the levels rather than about
+    /// renaming a parameter.
+    typealias Mode = ResearchLevel
 
     /// The most rounds of planning `deep` may run, the first included.
     ///
@@ -721,7 +690,7 @@ final class ResearchRunner: ResearchRunning {
             }
             throw ResearchError(
                 "The web search returned no usable sources for this question. Try rephrasing "
-                + "it, or use /direct to answer without evidence.")
+                + "it, or ask at /\(ResearchLevel.direct.command) to answer without evidence.")
         }
         try Task.checkCancellation()
 
@@ -941,17 +910,22 @@ final class ResearchRunner: ResearchRunning {
         // The planner is allowed to decide that a question needs no evidence — a
         // definition, a calculation, a transformation of text the user supplied — and
         // `PlanParser` preserves that as an empty list rather than an error. Honour it:
-        // answer from the model alone, badged exactly as `/direct` is, instead of failing
+        // answer from the model alone, badged exactly as a no-search turn is, instead of failing
         // the turn with "no sources were found" for a question that never asked for any.
         // The reading stays on the turn, because it is where the planner says why.
         if plan.searches.isEmpty, linked.isEmpty {
             trace.log("Plan asked for no searches; answering without evidence")
             update { turn in
                 turn.addNotice(.noEvidence)
-                // The reading is also the discriminator between "the planner chose not
-                // to search" and "/direct" (see `wasAskedDirectly`): a planner that
-                // returned an empty list and no reading would otherwise make Retry
-                // re-ask in direct mode, skipping the planner the user never opted out of.
+                // The reading is what tells a reader why nothing was searched on a turn
+                // that carries the same no-evidence badge a no-search turn does. It used
+                // to be load-bearing beyond that — the only thing separating the two
+                // cases, and so what kept Retry from re-asking this turn without a
+                // planner the user never opted out of — but the turn now records the
+                // level it was asked at, and `wasAskedDirectly` reads that instead. It is
+                // still written here, and still matters for a thread saved before levels
+                // existed: `ResearchTurn`'s decoder falls back to exactly this
+                // discrimination when a document carries no level.
                 if turn.reading.isEmpty {
                     turn.reading = "The planner decided this question needs no web evidence."
                 }

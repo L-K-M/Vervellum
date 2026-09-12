@@ -14,16 +14,21 @@ import Foundation
 ///
 /// Pure and dependency-free, so it is fully unit-testable.
 enum ComposerCommand: Equatable {
-    /// Research normally.
-    case ask(String)
-    /// Answer without searching.
-    case direct(String)
-    /// Research over several rounds of planning, each asking for what the last one
-    /// could not have known was missing.
-    case deepResearch(String)
-    /// Research gathered by an agent loop: the model chooses one search or page read
-    /// at a time under a stated budget, and stops when it judges the question settled.
-    case agentResearch(String)
+    /// A question to research.
+    ///
+    /// `level` is the level *this question* is asked at, and nil is the answer most of
+    /// the time: it means "whatever the selector is set to", which is the sticky
+    /// preference the panel's chip writes. A non-nil level comes from the reader having
+    /// typed one — `/no-search why is the sky blue` — and is deliberately a **one-shot
+    /// override**: it does not move the chip.
+    ///
+    /// That is the opposite of how `/model` behaves, and the difference is the point.
+    /// `/model` names a persistent piece of configuration, and typing it is how you
+    /// change it. A level is a property of the question you are asking now, and the one
+    /// that would hurt to make sticky by accident is `/no-search`: a reader who asked
+    /// one throwaway question without search would otherwise have silently turned a
+    /// citation tool into an unsourced one for every question after it.
+    case ask(String, level: ResearchLevel?)
     case newThread
     case openHistory
     case openSettings
@@ -45,10 +50,19 @@ enum ComposerCommand: Equatable {
     }
 
     /// Commands offered in the composer's completion list.
-    static let catalogue: [Entry] = [
-        Entry(name: "agent-research", summary: "An agent loop gathers the evidence: one search or page read at a time until it judges the question settled"),
-        Entry(name: "deep-research", summary: "Research over several rounds, following up what the first pass missed"),
-        Entry(name: "direct", summary: "Answer from the model alone, with no web evidence"),
+    ///
+    /// The four levels lead, in the order the selector shows them, and they are
+    /// generated from `ResearchLevel` rather than typed: the list and the chip describe
+    /// the same four things, and a summary written twice is a summary that disagrees
+    /// with itself after the first edit.
+    ///
+    /// Only the canonical command word gets a row. `/direct`, `/deep-research` and
+    /// `/agent-research` still work — `parse` knows them — but listing them would put
+    /// seven rows in front of a reader looking for four levels, which is the confusion
+    /// this whole change exists to remove.
+    static let catalogue: [Entry] = ResearchLevel.ordered.map {
+        Entry(name: $0.command, summary: $0.summary)
+    } + [
         Entry(name: "model", summary: "List the configured models, or switch to one by name"),
         Entry(name: "new", summary: "Start a fresh thread"),
         Entry(name: "history", summary: "Search earlier threads"),
@@ -61,27 +75,26 @@ enum ComposerCommand: Equatable {
     static func parse(_ input: String) -> ComposerCommand? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        guard trimmed.hasPrefix("/") else { return .ask(trimmed) }
+        guard trimmed.hasPrefix("/") else { return .ask(trimmed, level: nil) }
 
         let body = trimmed.dropFirst()
         let split = body.firstIndex(where: { $0.isWhitespace })
         let word = String(split.map { body[..<$0] } ?? body).lowercased()
         let rest = split.map { String(body[$0...]).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
 
+        // A level word is argument-wanting: the bare word names a level with no question
+        // yet, so the composer keeps the text rather than sending "/deep-rounds" to a
+        // model as prose. `isHalfTypedCommand` reads the nil and declines to withhold
+        // Return a second time.
+        //
+        // Asked before the switch, and through `ResearchLevel.named`, so the canonical
+        // words and the older aliases are one lookup against one table. Spelling seven
+        // cases out here is how the list and the parser drift.
+        if let level = ResearchLevel.named(word) {
+            return rest.isEmpty ? nil : .ask(rest, level: level)
+        }
+
         switch word {
-        case "deep-research":
-            // Argument-wanting, like `/direct`: the bare word is a mode with no question
-            // yet, so the composer keeps the text rather than sending "/deep-research" to
-            // a model as prose. `isHalfTypedCommand` reads the nil and declines to
-            // withhold Return a second time.
-            return rest.isEmpty ? nil : .deepResearch(rest)
-        case "agent-research":
-            // Same shape as `/deep-research`: a mode that wants a question.
-            return rest.isEmpty ? nil : .agentResearch(rest)
-        case "direct":
-            // "/direct" with nothing after it is a mode request with no question yet,
-            // not an empty question — leave it to the caller to keep the composer open.
-            return rest.isEmpty ? nil : .direct(rest)
         case "model", "models":
             // Unlike "/direct", a bare "/model" is a complete request: list them.
             return .selectModel(rest)
@@ -97,7 +110,7 @@ enum ComposerCommand: Equatable {
             return .showHelp
         default:
             // Not a command Vervellum knows: it is part of the question.
-            return .ask(trimmed)
+            return .ask(trimmed, level: nil)
         }
     }
 
@@ -345,9 +358,34 @@ enum ComposerCommand: Equatable {
     }
 
     /// The help text `/help` prints into the thread.
+    ///
+    /// The levels are lifted out of the command list into a section of their own. In one
+    /// flat list they read as four unrelated commands, which is exactly how they read in
+    /// the panel before there was a selector — and the thing worth saying about them is
+    /// the relationship between them, which no per-row summary can carry.
     static var helpText: String {
-        let rows = catalogue.map { "- `/\($0.name)` — \($0.summary)" }.joined(separator: "\n")
+        let levelWords = Set(ResearchLevel.ordered.map(\.command))
+        let levels = ResearchLevel.ordered.map { level in
+            "- `/\(level.command)` **\(level.displayName)** — \(level.summary)"
+        }.joined(separator: "\n")
+        let rows = catalogue
+            .filter { !levelWords.contains($0.name) }
+            .map { "- `/\($0.name)` — \($0.summary)" }
+            .joined(separator: "\n")
         return """
+            ## How hard to look
+
+            Every question is asked at one of four levels, set by the selector above the \
+            composer and remembered until you change it. Typing one of these commands \
+            asks *this* question at that level without moving the selector.
+
+            \(levels)
+
+            **\(ResearchLevel.standard.displayName)** is the level a new install asks at. \
+            **\(ResearchLevel.deep.displayName)** and **\(ResearchLevel.agent.displayName)** \
+            spend the same page and evidence allowance as each other; they differ in who \
+            picks the next search — planned rounds, or a loop reacting to each result.
+
             ## Commands
 
             \(rows)

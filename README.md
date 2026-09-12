@@ -91,7 +91,17 @@ runs the searches and answers based on current sources.
   picture, and the turn says the image was left out. Untick **Send attached images**
   for a provider that accepts the part and silently ignores it. Both front ends: ⌘V or
   a drag on macOS, Ctrl-V or a drag on Linux.
-- **`/direct`** answers with no search at all, and is clearly badged as unsourced.
+- **One dial: how hard to look.** Four levels, shown in a selector above the composer
+  with what each one does and what it may spend, and remembered until you change it.
+  **No search** answers from the model alone and is badged as unsourced; **One pass**
+  plans a round of searches, answers, then checks the answer against what it found;
+  **Deep rounds** comes back up to three times for what the last round missed, putting
+  every planned search to every engine you have configured; **Agent loop** spends the
+  same page and evidence allowance as Deep rounds, but the model picks one search or
+  page read at a time and stops when it judges the question settled. Each is also a
+  command — `/no-search`, `/one-pass`, `/deep-rounds`, `/agent-loop` — and typing one
+  asks *that* question at *that* level without moving the selector. The older
+  `/direct`, `/deep-research` and `/agent-research` still work.
 - **Bring your own providers.** An OpenAI-compatible Chat Completions endpoint, and
   for search an HTTP MCP server — recognized tools include z.ai, Brave, Tavily,
   Exa and SearXNG, and only recognized tool names are accepted — or a **SearXNG
@@ -212,7 +222,14 @@ export VERVELLUM_MODEL_KEY=…  VERVELLUM_SEARCH_KEY=…
 
 No desktop at all? `vervellum --ask "your question"` runs the whole pipeline and
 prints the answer, its verdicts, and its sources. It needs no display and no
-session bus.
+session bus. Each level has its own flag — `--no-search`, `--one-pass`,
+`--deep-rounds`, `--agent-loop`, with `--direct`, `--deep` and `--agent` still
+working — and `--ask` is One pass, whatever the panel's selector is set to, so a
+script keeps costing what it did yesterday. `vervellum --help` prints what each
+level spends.
+
+The default level is `researchLevel` in `settings.json`, one of `"direct"`,
+`"research"` (the default), `"deep"` or `"agent"`. The panel's selector writes it.
 
 > [!NOTE]
 > On GNOME Wayland the Linux build is an ordinary window, not an edge-docked

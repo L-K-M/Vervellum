@@ -63,6 +63,25 @@ final class CorePreferencesTests: XCTestCase {
 
     /// On by design: a false positive costs a re-typed word, a false negative sends a
     /// live credential to a third party.
+    /// The level is sticky, so it has to survive the write — and it has to survive a
+    /// file that a hand edit, an interrupted sync, or a newer build left holding a word
+    /// this build does not know. A panel that could not ask anything because a settings
+    /// file said "exhaustive" would be unfixable from inside the app.
+    func testTheResearchLevelRoundTripsAndSurvivesDamage() {
+        XCTAssertEqual(preferences().researchLevel, .research,
+                       "a new install researches in one pass")
+
+        let settings = preferences()
+        settings.researchLevel = .deep
+        XCTAssertEqual(settings.researchLevel, .deep)
+        XCTAssertEqual(preferences(["researchLevel": "agent"]).researchLevel, .agent,
+                       "the stored word is the level's own raw value")
+
+        XCTAssertEqual(preferences(["researchLevel": "exhaustive"]).researchLevel, .research)
+        XCTAssertEqual(preferences(["researchLevel": ""]).researchLevel, .research)
+        XCTAssertEqual(preferences(["researchLevel": 7]).researchLevel, .research)
+    }
+
     func testRedactionIsOnByDefault() {
         XCTAssertTrue(preferences().redactSecrets)
     }

@@ -33,6 +33,14 @@ final class LinuxPanel {
     /// One row per attached file, above the composer. Rebuilt rather than diffed, like
     /// the thread: there are at most four of them.
     private let attachmentBox: GTK.Widget
+    /// The four level buttons, rebuilt whenever the selection moves.
+    private let levelBox: GTK.Widget
+    /// What the selected level does and what it may spend, under the buttons.
+    ///
+    /// Always on screen rather than in a tooltip: the GTK panel has no completion list
+    /// and no Settings window, so a tooltip would put the only explanation of the only
+    /// research control behind a hover a keyboard never performs.
+    private let levelSummary: GTK.Widget
 
     private var thread = ResearchThread()
     /// What is attached to the question being typed, bytes and all.
@@ -68,6 +76,8 @@ final class LinuxPanel {
         composer = GTK.textView()
         statusLabel = GTK.markupLabel("")
         attachmentBox = GTK.verticalBox(spacing: 4)
+        levelBox = GTK.horizontalBox(spacing: 4)
+        levelSummary = GTK.markupLabel("")
         // Created without a handler: `wireComposer` attaches the real one once `self`
         // is fully initialised. Connecting a placeholder here and another later would
         // leave *both* attached, and the placeholder would still fire.
@@ -87,6 +97,7 @@ final class LinuxPanel {
         // Draws the (empty) attachment row once, which is what hides it: GTK4 shows a
         // widget by default, and an empty box still takes its spacing.
         renderAttachments()
+        renderLevelSelector()
         render()
     }
 
@@ -138,6 +149,9 @@ final class LinuxPanel {
         GTK.addStyle(statusLabel, "status")
         GTK.append(footer, statusLabel)
         GTK.append(footer, attachmentBox)
+        GTK.append(footer, levelBox)
+        GTK.addStyle(levelSummary, "status")
+        GTK.append(footer, levelSummary)
 
         let row = GTK.horizontalBox(spacing: 8)
         // The composer grows with its content and then scrolls. Those two scrolled-window
@@ -150,6 +164,45 @@ final class LinuxPanel {
         GTK.append(row, sendButton)
         GTK.append(footer, row)
         return footer
+    }
+
+    /// Draws the level buttons and the line explaining the selected one.
+    ///
+    /// Rebuilt rather than restyled in place: `GTK.addStyle` adds a CSS class and there
+    /// is no counterpart that removes one, so the row that shows which of four buttons
+    /// is selected is the one row that must be thrown away and built again. It is four
+    /// buttons; the attachment row above it already works this way.
+    ///
+    /// The separators are where `ResearchLevel.beginsGroup` says the scale stops — see
+    /// that type for why those two places and not others.
+    private func renderLevelSelector() {
+        GTK.removeAllChildren(of: levelBox)
+        let selected = environment.preferences.researchLevel
+
+        for level in ResearchLevel.ordered {
+            if level.beginsGroup { GTK.append(levelBox, GTK.verticalSeparator()) }
+            // The selected button carries its state in its *label* as well as its CSS
+            // class. A theme decides what a class looks like and some decide nothing at
+            // all, and a selector whose selection is invisible under the user's theme
+            // would be worse than no selector: the bullet is not a decoration, it is the
+            // answer to "which one am I asking at".
+            let title = level == selected ? "• " + level.displayName : level.displayName
+            let button = GTK.button(title) { [weak self] in
+                guard let self else { return }
+                self.environment.preferences.researchLevel = level
+                self.renderLevelSelector()
+            }
+            GTK.addStyle(button, "level")
+            if level == selected { GTK.addStyle(button, "level-selected") }
+            // The selected button stays enabled. Disabling it would dim the one button
+            // that is meant to stand out, and every theme draws "insensitive" as "you
+            // cannot have this" rather than "you already have it". Clicking it again
+            // rewrites the same preference and redraws the same row.
+            GTK.append(levelBox, button)
+        }
+
+        let settings = environment.preferences.providerSettings
+        GTK.setMarkup(levelSummary, GTK.escape(selected.summary + " " + selected.cost(settings)))
     }
 
     private func wireComposer() {
@@ -290,18 +343,12 @@ final class LinuxPanel {
         case .selectModel(let name):
             GTK.setText(composer, "")
             selectModel(named: name)
-        case .ask(let question):
+        case .ask(let question, let level):
             GTK.setText(composer, "")
-            ask(question, mode: .research, attaching: takePendingAttachments())
-        case .direct(let question):
-            GTK.setText(composer, "")
-            ask(question, mode: .direct, attaching: takePendingAttachments())
-        case .deepResearch(let question):
-            GTK.setText(composer, "")
-            ask(question, mode: .deep, attaching: takePendingAttachments())
-        case .agentResearch(let question):
-            GTK.setText(composer, "")
-            ask(question, mode: .agent, attaching: takePendingAttachments())
+            // A typed level is this question's alone; the selector keeps whatever it was
+            // set to, and nil means "whatever it says". See `ComposerCommand.ask`.
+            ask(question, mode: level ?? environment.preferences.researchLevel,
+                attaching: takePendingAttachments())
         }
     }
 
@@ -337,6 +384,7 @@ final class LinuxPanel {
                      lostAttachments: Bool = false) {
         var draft = ResearchTurn(question: question)
         draft.model = environment.preferences.providerSettings.modelName
+        draft.level = mode
         if mode == .direct { draft.notices = [.noEvidence] }
         if lostAttachments { draft.addNotice(.attachmentMissing) }
         draft.attachments = attached.map { $0.attachment }
@@ -428,7 +476,9 @@ final class LinuxPanel {
     /// belongs — the same rule the macOS engine follows.
     private func retry(_ turn: ResearchTurn) {
         guard !isRunning else { return }
-        let mode: ResearchRunner.Mode = turn.wasAskedDirectly ? .direct : .research
+        // The level the turn was asked at, which it now records — so a deep or agent
+        // turn is retried as one, rather than quietly re-asked as a single pass.
+        let mode = turn.level
         // Asked again means asked with what it was asked with. The bytes are still in
         // the store — the turn being retried is what keeps them reachable — and one
         // whose bytes have gone is dropped rather than listed on a turn that could not
@@ -682,6 +732,8 @@ final class LinuxPanel {
             .question { font-size: 1.05em; }
             .composer { border: 1px solid alpha(currentColor, 0.2); border-radius: 8px; }
             .status { opacity: 0.7; }
+            .level { padding: 2px 8px; font-size: 0.9em; }
+            .level-selected { font-weight: bold; }
             """
     }
 }

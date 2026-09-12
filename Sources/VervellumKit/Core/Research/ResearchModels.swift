@@ -439,6 +439,24 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// of the stream rather than naming the provider that is being tried. Blank and late
     /// beats confident and wrong.
     var model: String = ""
+    /// The level this turn was asked at.
+    ///
+    /// Stored, unlike the derivation `wasAskedDirectly` performs below, because three
+    /// of the four levels leave no trace a reader or a retry could recover: a `deep`
+    /// turn and an `agent` turn are indistinguishable from a one-pass turn once they
+    /// have finished, so Retry re-asked them as one pass and quietly spent a third of
+    /// the budget the question was asked with.
+    ///
+    /// Defaulted rather than required by the initializer for the same reason every other
+    /// late field is: a turn is built by three call sites and mutated into shape, and the
+    /// default is the level the app has always asked at.
+    ///
+    /// Both directions across a version boundary are safe, which is the bar a field on
+    /// this type has to clear: a document written *before* this field lands in the
+    /// decoder below, and a document written *here* opened by an older build is fine
+    /// because a keyed container ignores a key it has no case for. Only the third
+    /// direction needs code, and it has it — a level this build does not know.
+    var level: ResearchLevel = .standard
 
     init(question: String, askedAt: Date = Date()) {
         self.question = question
@@ -469,7 +487,7 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         case id, question, askedAt, attachments, stage, reading, searches, searchesCompleted, sources
         case pagesAttempted, pagesRead
         case answer, draftAnswer, findings, limitations, followups, notices, failure
-        case duration, model
+        case duration, model, level
     }
 
     init(from decoder: Decoder) throws {
@@ -515,18 +533,28 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         failure = try container.decodeIfPresent(String.self, forKey: .failure)
         duration = try container.decodeIfPresent(TimeInterval.self, forKey: .duration)
         model = try container.decode(String.self, forKey: .model)
+        // Absent from every document written before levels existed, and — unlike the
+        // other tolerant fields here — capable of being *present and unreadable*, since
+        // a build that shipped a level this one does not have would have written its
+        // name. Both fall back to the derivation the app used before the field existed,
+        // which is the honest answer: it is what this turn would have been called.
+        // `try?` flattened deliberately: `decodeIfPresent` answers nil for a missing key
+        // and throws for an unreadable one, and both mean the same thing here.
+        let stored = (try? container.decodeIfPresent(ResearchLevel.self, forKey: .level)) ?? nil
+        level = stored ?? (notices.contains(.noEvidence) && reading.isEmpty ? .direct : .standard)
     }
 
-    /// Whether this turn was asked with `/direct`.
+    /// Whether this turn was asked without searching.
     ///
-    /// Derived rather than stored, so the on-disk document did not have to change. Both
-    /// front ends attach `noEvidence` when a turn is *created* in direct mode; the runner
-    /// attaches the same notice when the planner decided a question needed no search.
-    /// The two are told apart by `reading`: the planner writes one, and direct mode
-    /// never runs the planner. Retry uses this to re-ask the way the user asked.
-    var wasAskedDirectly: Bool {
-        notices.contains(.noEvidence) && reading.isEmpty
-    }
+    /// Now a reading of the stored `level`, and kept as a name because the *question* it
+    /// answers is asked in several places and is not the same as "is `level` `.direct`"
+    /// to a reader skimming: a turn can carry the no-evidence notice because the planner
+    /// returned an empty plan, and that turn was not asked directly.
+    ///
+    /// The derivation it used to perform — `noEvidence` and an empty `reading`, telling a
+    /// direct turn from one the planner decided needed no search — now lives in the
+    /// decoder, which is the one place a turn without a stored level can still arrive.
+    var wasAskedDirectly: Bool { level == .direct }
 
     /// The stage label for a running turn, with live progress where there is any:
     /// "Searching the web · 2 of 3" rather than a static label for the whole stage.

@@ -541,7 +541,7 @@ struct ProviderSettings: Equatable, Codable {
     /// Only the *selected* provider is validated. A second profile the user is halfway
     /// through configuring must not block a question asked with the first one.
     ///
-    /// `requiresSearch` is false for the `/direct` mode, which never contacts the search
+    /// `requiresSearch` is false for the no-search level, which never contacts the search
     /// server. Validating the search endpoint there would block the one mode that works
     /// when search is misconfigured — which is exactly when a user reaches for it.
     func problems(hasModelKey: Bool, hasSearchKey: Bool, requiresSearch: Bool = true) -> [String] {

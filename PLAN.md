@@ -213,9 +213,14 @@ plan. That is honoured rather than treated as a failure: the turn is answered fr
 model alone and badged exactly as `/direct` is, with the reading kept as the
 explanation of why nothing was searched.
 
-**Three gathering depths, one tail.** The plan also names up to five sub-questions the
-answer depends from; in deep mode they become the answer's sections. The default turn
-runs stage 2 once. `/deep-research` lets the plan come back: up to three planned
+**Four levels, one tail.** How hard a turn looks things up is one setting — see
+`ResearchLevel`, which owns the four names, their command words and the generated cost
+lines the panel chip, the GTK button row, `/help` and `--help` all print. It is sticky;
+typing a level's command asks one question at that level without moving it.
+
+The plan also names up to five sub-questions the
+answer depends from; in deep mode they become the answer's sections. **One pass**
+runs stage 2 once. **Deep rounds** (`/deep-rounds`) lets the plan come back: up to three planned
 rounds of searches (a fourth, unplanned round runs only when the check below cannot
 settle a claim), each shown a digest of
 what the last found (with stable source numbers, `[read]` marks, and the queries that
@@ -224,14 +229,20 @@ number, spent from a larger deep allowance (8 pages, a 100K evidence ceiling) wi
 rank-order fill backstopping what the rounds did not name. When the check cannot
 settle a claim, one more round is planned against exactly those claims and the turn
 answers again over the enlarged evidence — atomic: adopted only when the second
-answer, second check and new sources all exist. `/agent-research` replaces staged
+answer, second check and new sources all exist. **Agent loop** (`/agent-loop`) replaces staged
 rounds with a bounded tool loop — one search, page read, or stop per step under stated
 caps — reacting to actual results instead of planning against a digest; it is
 documented in [`AGENT-RESEARCH.md`](AGENT-RESEARCH.md), and the comparison that
 produced all of this is in [`DEEP-RESEARCH-REVIEW.md`](DEEP-RESEARCH-REVIEW.md).
 Everything after gathering — the numbered evidence, the streamed answer, the check,
-the revision — is shared code across all three depths, so the guarantees do not vary
-by mode.
+the revision — is shared code across every level, so the guarantees do not vary by
+level. **No search** (`/no-search`) is the level that does not reach this diagram at
+all: it short-circuits before gathering, so there is no evidence, no citation
+validation and no assessment, which is why the selector draws a rule above it rather
+than presenting it as the bottom rung of one scale. Agent loop is ruled off at the
+other end for the opposite reason: it spends Deep rounds' page and evidence allowance
+exactly, and differs in who chooses the next search rather than in how much it may
+look.
 
 **Why stage 4 runs after stage 3, not beside it.** It does not depend on the prose, so
 it could run in parallel and halve the perceived latency. It does not, because
@@ -429,8 +440,10 @@ Copy and the Linux CLI include every source cited by either the answer or its
 findings. Failed or stopped research keeps its partial answer, sources, and caveats;
 incomplete turns are labelled so an exported answer cannot imply a finished check.
 
-Everything reachable from the header is also reachable by typing: `/direct`, `/new`,
-`/history`, `/settings`, `/copy`, `/help`. Slash parsing is deliberately strict — a
+Everything reachable from the header is also reachable by typing: the four levels
+(`/no-search`, `/one-pass`, `/deep-rounds`, `/agent-loop`, plus the older `/direct`,
+`/deep-research` and `/agent-research`), `/new`, `/history`, `/settings`, `/copy`,
+`/help`. Slash parsing is deliberately strict — a
 leading slash is only a command when the word after it is one Vervellum knows, so
 "/etc/hosts is world readable, right?" stays a question.
 

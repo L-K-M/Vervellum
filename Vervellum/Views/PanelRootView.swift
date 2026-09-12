@@ -88,7 +88,7 @@ struct PanelRootView: View {
     /// spoken by `announceSelection` the moment the reader arrows to a row, and by the
     /// row's own `.isSelected` trait when the VoiceOver cursor reaches it. The two
     /// moments that *do* change what Return means are both spoken already: leaving the
-    /// list, and taking a row — `submitFromComposer` says "Selected /deep-research"
+    /// list, and taking a row — `submitFromComposer` says "Selected /deep-rounds"
     /// after Return fills the field, so the completion is never the silent step.
     private var effectiveCompletionIndex: Int? {
         ComposerCommand.offeredRowIndex(explicit: explicitCompletionIndex,
@@ -108,6 +108,10 @@ struct PanelRootView: View {
     /// Named rather than inlined: the height estimate silently drifts when the button
     /// is restyled, and the bug is invisible until the composer wraps a line early.
     private static let sendButtonReservation: CGFloat = 24 + PanelTheme.Space.small
+
+    /// Whether the research-level list is open above the composer. See `levelPicker`,
+    /// and `backOut` for where it sits in what Escape undoes.
+    @State private var showsLevelPicker = false
 
     /// Whether the providers are configured, sampled rather than computed.
     ///
@@ -327,8 +331,17 @@ struct PanelRootView: View {
                     .foregroundStyle(PanelTheme.Palette.verdict(.mixed))
                     .padding(.horizontal, PanelTheme.Space.small)
             }
-            if preferences.providerSettings.modelProfiles.count > 1 {
-                modelPicker
+            // The level chip is always shown; the model chip only when there is a choice
+            // to make. That asymmetry is deliberate: a second model is a thing some
+            // installs have, but every question is asked at *some* level, and a control
+            // that appeared only once you had changed something would be a control
+            // nobody discovers.
+            HStack(spacing: PanelTheme.Space.small) {
+                levelPicker
+                if preferences.providerSettings.modelProfiles.count > 1 {
+                    modelPicker
+                }
+                Spacer(minLength: 0)
             }
             if queueFullNote {
                 Label("Up to \(ResearchEngine.maxQueued) questions can wait at once. "
@@ -349,6 +362,21 @@ struct PanelRootView: View {
                     guard let removed = attachments.first(where: { $0.id == id }) else { return }
                     attachments.removeAll { $0.id == id }
                     announce("Removed \(removed.attachment.name)")
+                }
+            }
+            // Inline rather than in a `.popover`, and that is not a style preference.
+            // This panel is a non-activating `NSPanel` that floats over other apps'
+            // full-screen windows; an `NSPopover` from one is a second window whose
+            // focus behaviour there is exactly the kind of thing that works until
+            // somebody runs it on a Space with a full-screen app. The composer already
+            // opens a list upward for `/` completions, so this is the gesture the panel
+            // has, in the place a reader already looks.
+            if showsLevelPicker {
+                LevelPickerView(selected: preferences.researchLevel,
+                                settings: preferences.providerSettings) { level in
+                    preferences.researchLevel = level
+                    showsLevelPicker = false
+                    announce("Research level, \(level.displayName)")
                 }
             }
             if let completions = visibleCompletions {
@@ -531,12 +559,22 @@ struct PanelRootView: View {
                         Image(systemName: "clock")
                             .font(PanelTheme.Font.at(9, textScale))
                             .foregroundStyle(PanelTheme.Palette.tertiaryText)
-                        Text(item.mode == .direct ? "/direct \(item.question)" : item.question)
+                        Text(item.question)
                             .font(PanelTheme.Font.caption(textScale))
                             .foregroundStyle(PanelTheme.Palette.secondaryText)
                             .lineLimit(1)
                             .truncationMode(.tail)
                         Spacer(minLength: 0)
+                        // The level each waiting question will run at. The queue can
+                        // hold questions asked at different levels — the chip moves, and
+                        // a typed command overrides it for one question — so a row that
+                        // named only the question would leave the reader unable to tell
+                        // which of three waiting questions is the expensive one. It used
+                        // to show a "/direct" prefix, which said this for one level out
+                        // of four.
+                        Text(item.mode.displayName)
+                            .font(PanelTheme.Font.at(9, textScale))
+                            .foregroundStyle(PanelTheme.Palette.tertiaryText)
                         if !item.attachments.isEmpty {
                             // Asking clears the chips, and a queued question's files are
                             // then invisible for the whole wait — so the one question
@@ -655,6 +693,45 @@ struct PanelRootView: View {
     /// Shown only when there is more than one to choose between: with a single provider
     /// the control offers no choice, and the model that answered is already recorded on
     /// every turn. `/model` reaches the same setting from the keyboard.
+    /// The chip that says how hard the next question will look things up, and the
+    /// popover that explains the four levels.
+    ///
+    /// A popover rather than a `Menu` like `modelPicker` above, because the brief this
+    /// answers is "show some kind of explanation for the mode" and a menu cannot: an
+    /// `NSMenuItem` is one line of text, so the summary would have to go in a tooltip —
+    /// unreachable from the keyboard, unread by VoiceOver until the pointer lands — or
+    /// be crushed onto the title line. Four two-line rows in a popover also give the
+    /// group rules somewhere to live, and those rules are half of what the control is
+    /// for: see `ResearchLevel` for why `No search` and `Agent loop` sit apart from the
+    /// two rungs in the middle.
+    private var levelPicker: some View {
+        Button { showsLevelPicker.toggle() } label: {
+            HStack(spacing: PanelTheme.Space.tight) {
+                // `slider.horizontal.3` rather than one of the `dial`/`gauge` symbols:
+                // it has existed since macOS 11, and the deployment target here is 14.
+                Image(systemName: "slider.horizontal.3")
+                    .font(PanelTheme.Font.at(9, textScale))
+                Text(preferences.researchLevel.displayName)
+                    .font(PanelTheme.Font.caption(textScale))
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(PanelTheme.Font.at(7, textScale))
+            }
+            .foregroundStyle(PanelTheme.Palette.secondaryText)
+            .padding(.horizontal, PanelTheme.Space.small)
+            .padding(.vertical, 2)
+            .background(PanelTheme.Palette.chipFill,
+                        in: RoundedRectangle(cornerRadius: PanelTheme.Radius.chip,
+                                             style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("How hard the next question looks things up (/\(preferences.researchLevel.command))")
+        .accessibilityLabel("Research level, \(preferences.researchLevel.displayName)")
+        .accessibilityHint("Choose how hard the next question looks things up")
+        .accessibilityAddTraits(showsLevelPicker ? .isSelected : [])
+    }
+
     private var modelPicker: some View {
         Menu {
             ForEach(preferences.providerSettings.modelProfiles) { profile in
@@ -767,7 +844,7 @@ struct PanelRootView: View {
         // A half-typed command on screen — `/h` under `history` and `help` — is a command
         // being chosen, and `parse` would send it to the model as a question, spending a
         // real request on a typo. Declining keeps the text so the next keystroke finishes
-        // the word, which is what `/direct` with no argument already does below.
+        // the word, which is what a bare level word already does below.
         //
         // Here rather than beside the Return key, because Return is not the only way in:
         // the panel's own submit shortcut calls this directly, and so would anything
@@ -799,24 +876,15 @@ struct PanelRootView: View {
         switch ComposerCommand.parse(text) {
         case .none:
             return
-        case .ask(let question):
+        case .ask(let question, let level):
             notice = nil
             // The composer is live while the history list is open, and a question
             // asked from there must not run invisibly behind it.
             showsHistory = false
-            handle(engine.ask(question, mode: .research, attachments: attachments))
-        case .direct(let question):
-            notice = nil
-            showsHistory = false
-            handle(engine.ask(question, mode: .direct, attachments: attachments))
-        case .deepResearch(let question):
-            notice = nil
-            showsHistory = false
-            handle(engine.ask(question, mode: .deep, attachments: attachments))
-        case .agentResearch(let question):
-            notice = nil
-            showsHistory = false
-            handle(engine.ask(question, mode: .agent, attachments: attachments))
+            // A typed level is this question's alone and leaves the chip where it is;
+            // nil means "whatever the chip says", which `ask` resolves. The reasoning is
+            // on `ComposerCommand.ask`.
+            handle(engine.ask(question, mode: level, attachments: attachments))
         case .newThread:
             draft = ""
             newThread()
@@ -977,6 +1045,11 @@ struct PanelRootView: View {
             // a change of meaning nobody is told about is the thing the announcements on
             // the way in exist to prevent.
             announce(Self.leftCommandListCopy)
+        } else if showsLevelPicker {
+            // Above the history list and the draft for the same reason the completion
+            // list is: it is the most recently opened thing, so it is the first one
+            // Escape should take back.
+            showsLevelPicker = false
         } else if showsHistory {
             showsHistory = false
         } else if notice != nil {
@@ -1105,7 +1178,7 @@ struct PanelRootView: View {
     /// Fills the composer with the chosen command, exactly as clicking the row does.
     ///
     /// It does not *run* the command. A completion is a way to finish typing, and
-    /// several of these take an argument — `/model gpt-4o`, `/direct <question>` — so
+    /// several of these take an argument — `/model gpt-4o`, `/no-search <question>` — so
     /// running on selection would make the argument unreachable for half the list. The
     /// trailing space is where the argument goes; a command that takes none is one more
     /// Return away, which is what clicking has always cost.

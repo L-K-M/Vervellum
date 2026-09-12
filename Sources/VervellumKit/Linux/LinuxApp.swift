@@ -35,36 +35,27 @@ public enum VervellumLinuxApp {
         case "--install-shortcut":
             return ShortcutInstaller.install() ? 0 : 1
         case "--ask":
-            guard arguments.count > 1 else {
-                FileHandle.standardError.write(Data("usage: vervellum --ask \"your question\"\n".utf8))
-                return 2
-            }
-            return runHeadless(question: arguments.dropFirst().joined(separator: " "), mode: .research)
-        case "--deep":
-            guard arguments.count > 1 else {
-                FileHandle.standardError.write(Data("usage: vervellum --deep \"your question\"\n".utf8))
-                return 2
-            }
-            return runHeadless(question: arguments.dropFirst().joined(separator: " "), mode: .deep)
-        case "--agent":
-            guard arguments.count > 1 else {
-                FileHandle.standardError.write(Data("usage: vervellum --agent \"your question\"\n".utf8))
-                return 2
-            }
-            return runHeadless(question: arguments.dropFirst().joined(separator: " "), mode: .agent)
-        case "--direct":
-            guard arguments.count > 1 else {
-                FileHandle.standardError.write(Data("usage: vervellum --direct \"your question\"\n".utf8))
-                return 2
-            }
-            return runHeadless(question: arguments.dropFirst().joined(separator: " "), mode: .direct)
+            return ask(arguments, flag: "--ask", level: ResearchLevel.standard)
         case "--gapplication-service":
             // D-Bus activation passes this. GLib's own convention, and it must not be
             // treated as an unknown option: the session bus starts the app this way when
             // the keyboard shortcut fires and nothing is running yet.
             return runPanel(asService: true)
-        case .some(let unknown) where unknown.hasPrefix("-"):
-            FileHandle.standardError.write(Data("vervellum: unknown option \(unknown)\n".utf8))
+        case .some(let flag) where flag.hasPrefix("-"):
+            // Every level's own flag, and the older spellings, from one table — see
+            // `level(for:)`. Asked here rather than in a `where` clause of its own, so
+            // the lookup happens once and its answer is the one that is used: a `where`
+            // that tested it and a body that asked again would need a fallback for a
+            // case that cannot occur, which is a line nobody can ever check.
+            //
+            // After `--ask`, which is not a level: it is the verb, and it means the
+            // level this app has always asked at rather than whatever the panel's
+            // selector was last set to. A script that pins nothing must not change
+            // behaviour because somebody moved a chip.
+            if let level = level(for: flag) {
+                return ask(arguments, flag: flag, level: level)
+            }
+            FileHandle.standardError.write(Data("vervellum: unknown option \(flag)\n".utf8))
             printUsage()
             return 2
         default:
@@ -72,21 +63,81 @@ public enum VervellumLinuxApp {
         }
     }
 
+    /// The level a `--flag` names, or nil when it names something else.
+    ///
+    /// Both the canonical `--deep-rounds` and the older `--deep` shapes, because a flag
+    /// is the half of this app most likely to be sitting in somebody's shell script.
+    private static func level(for flag: String) -> ResearchLevel? {
+        guard flag.hasPrefix("--") else { return nil }
+        let word = String(flag.dropFirst(2))
+        if let named = ResearchLevel.named(word) { return named }
+        // The pre-levels flags, which were the level's bare name rather than its command
+        // word: `--deep`, `--agent`, `--direct`.
+        return ResearchLevel.ordered.first { $0.rawValue == word.lowercased() }
+    }
+
+    /// Runs one headless turn from `--flag "question"`, or explains the usage.
+    private static func ask(_ arguments: [String], flag: String,
+                            level: ResearchLevel) -> Int32 {
+        guard arguments.count > 1 else {
+            FileHandle.standardError.write(
+                Data("usage: vervellum \(flag) \"your question\"\n".utf8))
+            return 2
+        }
+        return runHeadless(question: arguments.dropFirst().joined(separator: " "), mode: level)
+    }
+
+    /// Wraps `text` at `width` columns, indenting every line after the first.
+    ///
+    /// Hand-rolled because the alternative on Linux is `NSAttributedString` layout, and
+    /// this is a terminal: words, spaces, and a column count is the whole problem.
+    private static func wrapped(_ text: String, width: Int, indent: Int) -> String {
+        let padding = String(repeating: " ", count: indent)
+        var lines: [String] = []
+        var line = ""
+        for word in text.split(separator: " ") {
+            if line.isEmpty {
+                line = String(word)
+            } else if line.count + 1 + word.count <= width {
+                line += " " + word
+            } else {
+                lines.append(line)
+                line = String(word)
+            }
+        }
+        if !line.isEmpty { lines.append(line) }
+        return lines.joined(separator: "\n" + padding)
+    }
+
     private static func printUsage() {
+        // Two columns, wrapped at the width the rest of this text is written to, with a
+        // hanging indent under the flag. Built rather than typed because the summaries
+        // come from `ResearchLevel` — the same words the panel and `/help` show — and
+        // those are longer than a line.
+        let gutter = 17
+        let levels = ResearchLevel.ordered.map { level -> String in
+            let flag = "  --\(level.command)".padding(toLength: gutter, withPad: " ",
+                                                      startingAt: 0)
+            // No display name: the flag *is* the name, hyphenated. Printing both
+            // ("--no-search  No search — Answers from…") puts two em-dashes in one line.
+            let prose = level.summary
+            return flag + wrapped(prose, width: 78 - gutter, indent: gutter)
+        }.joined(separator: "\n")
         print("""
             vervellum — a hotkey-summoned research panel
 
             USAGE
-              vervellum                    start the panel (or toggle a running one)
+              vervellum                     start the panel (or toggle a running one)
               vervellum --ask "question"    research a question and print the answer
-              vervellum --deep "question"   research over several rounds, following up
-                                            what the first pass missed
-              vervellum --agent "question"  research with an agent loop: one search or
-                                            page read at a time until it is satisfied
-              vervellum --direct "question" answer without searching, badged as unsourced
               vervellum --install-shortcut  bind the summon shortcut in your desktop
               vervellum --version
               vervellum --help
+
+            HOW HARD TO LOOK
+            \(levels)
+
+              --ask asks at the level above named \(ResearchLevel.standard.displayName).
+              The older flags --direct, --deep and --agent still work.
 
             The panel is toggled by a desktop keyboard shortcut, which runs:
               gapplication action \(applicationID) toggle
@@ -126,6 +177,7 @@ public enum VervellumLinuxApp {
             attachmentBytes: { _ in nil })
         var draft = ResearchTurn(question: question)
         draft.model = environment.preferences.providerSettings.modelName
+        draft.level = mode
         if mode == .direct { draft.notices = [.noEvidence] }
         // Immutable from here: the task's closure cannot capture a mutable variable.
         let turn = draft

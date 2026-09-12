@@ -458,20 +458,89 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertFalse(decoded.isRevising, "a persisted flag would outlive its request")
     }
 
-    /// Retry has to know how a turn was asked, and the document does not store it: a
-    /// `/direct` turn and a turn the planner decided needed no search both carry the
-    /// no-evidence notice, and only the second has a reading.
-    func testDirectTurnsAreToldApartFromPlannerDecidedOnes() {
+    /// Retry has to know how a turn was asked, and the turn now records it. The notice
+    /// is not the answer and never was a complete one: a turn the *planner* decided
+    /// needed no search carries the same no-evidence notice as a no-search turn, and a
+    /// deep or agent turn carries nothing distinguishing at all.
+    func testWhetherATurnWasAskedWithoutSearchIsTheLevelItRecords() {
         var direct = ResearchTurn(question: "Q")
-        direct.notices = [.noEvidence]
+        direct.level = .direct
         XCTAssertTrue(direct.wasAskedDirectly)
 
+        // The planner's own empty plan: the same notice, on a turn that was asked at a
+        // level that searches. Retrying it must research it again in full.
         var plannerDecided = ResearchTurn(question: "Q")
         plannerDecided.reading = "Pure arithmetic; no evidence needed."
         plannerDecided.addNotice(.noEvidence)
         XCTAssertFalse(plannerDecided.wasAskedDirectly)
 
         XCTAssertFalse(ResearchTurn(question: "Q").wasAskedDirectly)
+    }
+
+    /// The level survives a save and a load, which is the whole reason it is stored:
+    /// without it Retry re-asked a deep or agent turn as a single pass, spending a
+    /// fraction of the budget the question was asked with.
+    func testTheLevelSurvivesARoundTrip() throws {
+        for level in ResearchLevel.ordered {
+            var turn = ResearchTurn(question: "Q")
+            turn.level = level
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let decoded = try decoder.decode(ResearchTurn.self, from: try encoder.encode(turn))
+            XCTAssertEqual(decoded.level, level)
+        }
+    }
+
+    /// Every thread saved before levels existed is a document without the key, and the
+    /// decoder has to name a level anyway. It answers with the one the app used to
+    /// derive from the notice — so an old `/direct` turn still retries without search,
+    /// and everything else retries as the pass it was.
+    ///
+    /// The unreadable case is here too, and it is not hypothetical in the other
+    /// direction: a *newer* build that shipped a fifth level would write its name into a
+    /// file this one then opens. A `keyNotFound` or a `dataCorrupted` here would take
+    /// the whole library with it, which is the failure `ResearchTurn`'s hand-written
+    /// decoder exists to prevent.
+    func testATurnSavedBeforeLevelsExistedStillLoads() throws {
+        func decode(_ edit: (inout [String: Any]) -> Void) throws -> ResearchTurn {
+            var turn = ResearchTurn(question: "Q")
+            turn.stage = .complete
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(
+                with: try encoder.encode(turn)) as? [String: Any])
+            edit(&object)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(ResearchTurn.self,
+                                      from: try JSONSerialization.data(withJSONObject: object))
+        }
+
+        // A `/direct` turn as an older build wrote it: the notice, and no reading.
+        let direct = try decode { object in
+            object.removeValue(forKey: "level")
+            object["notices"] = ["noEvidence"]
+            object["reading"] = ""
+        }
+        XCTAssertEqual(direct.level, .direct)
+
+        // The planner's empty plan, which wrote a reading alongside the same notice.
+        let planned = try decode { object in
+            object.removeValue(forKey: "level")
+            object["notices"] = ["noEvidence"]
+            object["reading"] = "Pure arithmetic; no evidence needed."
+        }
+        XCTAssertEqual(planned.level, .standard)
+
+        // An ordinary researched turn.
+        let ordinary = try decode { object in object.removeValue(forKey: "level") }
+        XCTAssertEqual(ordinary.level, .standard)
+
+        // A level this build does not have, written by one that did.
+        let unknown = try decode { object in object["level"] = "exhaustive" }
+        XCTAssertEqual(unknown.level, .standard)
     }
 
     /// A turn can move down the chain more than once, and the runner posts the notice on
