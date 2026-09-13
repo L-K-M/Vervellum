@@ -34,12 +34,16 @@ struct LevelPickerView: View {
 
             ForEach(ResearchLevel.ordered) { level in
                 if level.beginsGroup {
-                    Divider().padding(.vertical, PanelTheme.Space.tight)
+                    Divider()
+                        .overlay(PanelTheme.Palette.hairline)
+                        .padding(.vertical, PanelTheme.Space.tight)
                 }
                 row(level)
             }
 
-            Divider().padding(.top, PanelTheme.Space.tight)
+            Divider()
+                .overlay(PanelTheme.Palette.hairline)
+                .padding(.top, PanelTheme.Space.tight)
             // Concatenated, so this is a String rather than a string literal and
             // `Text` takes it verbatim — no markdown pass, and therefore no backticks
             // around the command, which would render as backticks.
