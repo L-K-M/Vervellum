@@ -63,27 +63,42 @@ final class CorePreferencesTests: XCTestCase {
 
     /// On by design: a false positive costs a re-typed word, a false negative sends a
     /// live credential to a third party.
+    func testRedactionIsOnByDefault() {
+        XCTAssertTrue(preferences().redactSecrets)
+    }
+
     /// The level is sticky, so it has to survive the write — and it has to survive a
     /// file that a hand edit, an interrupted sync, or a newer build left holding a word
     /// this build does not know. A panel that could not ask anything because a settings
     /// file said "exhaustive" would be unfixable from inside the app.
-    func testTheResearchLevelRoundTripsAndSurvivesDamage() {
+    ///
+    /// The write is read back through a *second* `CorePreferences` over the same store,
+    /// which is the only arrangement that tests what the property is for. Reading the
+    /// instance that was just written to proves nothing: a setter that persisted under
+    /// the wrong key, or never persisted at all, would answer from the same value in
+    /// memory and pass — while the setting silently failed to survive a relaunch, which
+    /// is the entire point of it being sticky.
+    func testTheResearchLevelSurvivesTheWrite() {
         XCTAssertEqual(preferences().researchLevel, .research,
                        "a new install researches in one pass")
 
-        let settings = preferences()
-        settings.researchLevel = .deep
-        XCTAssertEqual(settings.researchLevel, .deep)
+        let store = MemorySettingsStore()
+        let writer = CorePreferences(store: store)
+        writer.researchLevel = .deep
+        XCTAssertEqual(CorePreferences(store: store).researchLevel, .deep,
+                       "the write has to land where a fresh instance reads")
+
         XCTAssertEqual(preferences(["researchLevel": "agent"]).researchLevel, .agent,
                        "the stored word is the level's own raw value")
+    }
 
+    /// A stored word this build cannot read falls back rather than failing. All three
+    /// shapes damage takes: a level a newer build wrote, an empty string, and a value
+    /// that is not a string at all.
+    func testAnUnreadableResearchLevelFallsBackToTheDefault() {
         XCTAssertEqual(preferences(["researchLevel": "exhaustive"]).researchLevel, .research)
         XCTAssertEqual(preferences(["researchLevel": ""]).researchLevel, .research)
         XCTAssertEqual(preferences(["researchLevel": 7]).researchLevel, .research)
-    }
-
-    func testRedactionIsOnByDefault() {
-        XCTAssertTrue(preferences().redactSecrets)
     }
 
     func testRoundTripsThroughTheStore() {

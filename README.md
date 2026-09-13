@@ -229,7 +229,10 @@ script keeps costing what it did yesterday. `vervellum --help` prints what each
 level spends.
 
 The default level is `researchLevel` in `settings.json`, one of `"direct"`,
-`"research"` (the default), `"deep"` or `"agent"`. The panel's selector writes it.
+`"research"` (the default), `"deep"` or `"agent"` — the levels' stored names, which are
+older and shorter than the command words above. A hand-written `"one-pass"` or
+`"deep-rounds"` is not recognised: it falls back to the default silently rather than
+failing, so nothing tells you it did nothing. The panel's selector writes this key.
 
 > [!NOTE]
 > On GNOME Wayland the Linux build is an ordinary window, not an edge-docked

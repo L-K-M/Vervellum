@@ -115,6 +115,10 @@ struct LevelPickerView: View {
         // implementation detail — and this is the trait that tells VoiceOver which of
         // the four is live. The checkmark alone is a picture.
         .accessibilityAddTraits(level == selected ? .isSelected : [])
-        .accessibilityLabel("\(level.displayName). \(level.summary). \(level.cost(settings))")
+        // The command is in here because the row shows it, and because the footer sends
+        // the reader off to type one: a control whose stated job is discoverability
+        // cannot drop the keyboard path from the only surface a VoiceOver user has.
+        .accessibilityLabel("\(level.displayName). /\(level.command). "
+                            + "\(level.summary). \(level.cost(settings))")
     }
 }

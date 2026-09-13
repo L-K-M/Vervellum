@@ -65,6 +65,32 @@ final class ResearchLevelTests: XCTestCase {
         XCTAssertEqual(ResearchLevel.named("agent-research"), .agent)
     }
 
+    /// `standard` is an alias for whichever case is the default, not a fifth level.
+    ///
+    /// Pinned because the type deliberately gives each level three names — a display
+    /// name, a case, and a stored raw value — and `standard` is a fourth handle on one
+    /// of them. It exists so that "the level asked when nothing says otherwise" is
+    /// stated once rather than at each of the call sites that mean it (the preference
+    /// default, a turn's default, `--ask`), and so moving the default is one edit. This
+    /// is the line that says which case it currently points at.
+    func testTheStandardLevelIsOnePass() {
+        XCTAssertEqual(ResearchLevel.standard, .research)
+        XCTAssertTrue(ResearchLevel.ordered.contains(ResearchLevel.standard))
+    }
+
+    /// `ComposerCommand.parse` asks the level table *before* its own switch, so a level
+    /// command or alias equal to a built-in word would shadow that command permanently
+    /// and silently — `/new` becoming a question asked at some level rather than a fresh
+    /// thread. Nothing in either file makes that collision impossible; this does.
+    func testNoLevelWordShadowsABuiltInCommand() {
+        let reserved = ["model", "models", "new", "clear", "history", "threads",
+                        "settings", "prefs", "preferences", "copy", "help", "?"]
+        for word in reserved {
+            XCTAssertNil(ResearchLevel.named(word),
+                         "the level word \(word) would shadow the built-in /\(word)")
+        }
+    }
+
     /// The rules sit where the scale stops meaning "more of the same": above `research`,
     /// which is where gathering starts at all, and above `agent`, which spends `deep`'s
     /// budget rather than a larger one. See `ResearchLevel` for the argument.

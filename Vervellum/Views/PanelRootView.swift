@@ -688,22 +688,17 @@ struct PanelRootView: View {
         }
     }
 
-    /// Which provider answers the next question, changed where the question is typed.
+    /// The chip that says how hard the next question will look things up, and opens the
+    /// list that explains the four levels.
     ///
-    /// Shown only when there is more than one to choose between: with a single provider
-    /// the control offers no choice, and the model that answered is already recorded on
-    /// every turn. `/model` reaches the same setting from the keyboard.
-    /// The chip that says how hard the next question will look things up, and the
-    /// popover that explains the four levels.
-    ///
-    /// A popover rather than a `Menu` like `modelPicker` above, because the brief this
-    /// answers is "show some kind of explanation for the mode" and a menu cannot: an
+    /// A list of its own rather than a `Menu` like `modelPicker` below, because the brief
+    /// this answers is "show some kind of explanation for the mode" and a menu cannot: an
     /// `NSMenuItem` is one line of text, so the summary would have to go in a tooltip —
     /// unreachable from the keyboard, unread by VoiceOver until the pointer lands — or
-    /// be crushed onto the title line. Four two-line rows in a popover also give the
-    /// group rules somewhere to live, and those rules are half of what the control is
-    /// for: see `ResearchLevel` for why `No search` and `Agent loop` sit apart from the
-    /// two rungs in the middle.
+    /// be crushed onto the title line. Four two-line rows also give the group rules
+    /// somewhere to live, and those rules are half of what the control is for: see
+    /// `ResearchLevel` for why `No search` and `Agent loop` sit apart from the two rungs
+    /// in the middle.
     private var levelPicker: some View {
         Button { showsLevelPicker.toggle() } label: {
             HStack(spacing: PanelTheme.Space.tight) {
@@ -732,6 +727,11 @@ struct PanelRootView: View {
         .accessibilityAddTraits(showsLevelPicker ? .isSelected : [])
     }
 
+    /// Which provider answers the next question, changed where the question is typed.
+    ///
+    /// Shown only when there is more than one to choose between: with a single provider
+    /// the control offers no choice, and the model that answered is already recorded on
+    /// every turn. `/model` reaches the same setting from the keyboard.
     private var modelPicker: some View {
         Menu {
             ForEach(preferences.providerSettings.modelProfiles) { profile in
@@ -878,15 +878,19 @@ struct PanelRootView: View {
             return
         case .ask(let question, let level):
             notice = nil
-            // The composer is live while the history list is open, and a question
-            // asked from there must not run invisibly behind it.
+            // The composer is live while the history list and the level list are open,
+            // and a question asked from there must not run invisibly behind either. The
+            // level list is the more likely of the two to be left open, since the chip
+            // that opens it sits one click from the composer at all times.
             showsHistory = false
+            showsLevelPicker = false
             // A typed level is this question's alone and leaves the chip where it is;
             // nil means "whatever the chip says", which `ask` resolves. The reasoning is
             // on `ComposerCommand.ask`.
             handle(engine.ask(question, mode: level, attachments: attachments))
         case .newThread:
             draft = ""
+            showsLevelPicker = false
             newThread()
         case .openHistory:
             draft = ""

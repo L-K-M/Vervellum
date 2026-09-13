@@ -103,7 +103,10 @@ enum ResearchLevel: String, Codable, CaseIterable, Identifiable, Equatable {
     var aliases: [String] {
         switch self {
         case .direct: return ["direct"]
-        case .research: return []
+        // Never a command word, but it is the word this level prints as its `rawValue` —
+        // in the trace, in a bug report, and in `settings.json`. Someone who has read one
+        // of those and types `/research` has guessed the most reasonable wrong thing.
+        case .research: return ["research"]
         case .deep: return ["deep-research"]
         case .agent: return ["agent-research"]
         }

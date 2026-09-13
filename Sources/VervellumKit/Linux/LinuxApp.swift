@@ -114,7 +114,11 @@ public enum VervellumLinuxApp {
         // hanging indent under the flag. Built rather than typed because the summaries
         // come from `ResearchLevel` — the same words the panel and `/help` show — and
         // those are longer than a line.
-        let gutter = 17
+        // Derived, not chosen: `padding(toLength:)` *truncates* a string longer than the
+        // length it is given, so a level whose command word outgrew a hard-coded gutter
+        // would have its flag silently clipped in `--help` — the one output whose job is
+        // to tell someone what to type. Floored at the width the block was laid out to.
+        let gutter = max(17, (ResearchLevel.ordered.map { "  --\($0.command)".count }.max() ?? 0) + 2)
         let levels = ResearchLevel.ordered.map { level -> String in
             let flag = "  --\(level.command)".padding(toLength: gutter, withPad: " ",
                                                       startingAt: 0)

@@ -690,7 +690,7 @@ final class ResearchRunner: ResearchRunning {
             }
             throw ResearchError(
                 "The web search returned no usable sources for this question. Try rephrasing "
-                + "it, or ask at /\(ResearchLevel.direct.command) to answer without evidence.")
+                + "it, or use /\(ResearchLevel.direct.command) to answer without evidence.")
         }
         try Task.checkCancellation()
 
