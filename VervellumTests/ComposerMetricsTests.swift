@@ -99,6 +99,52 @@ final class ComposerMetricsTests: XCTestCase {
                        accuracy: 0.01)
     }
 
+    // MARK: A line break the user typed
+
+    /// Shift-Return has to produce a line you can see. The newline always went in; the
+    /// box measured for it did not grow, because `usedRect` counts only the fragments
+    /// that hold glyphs and the line a final break opens holds none. The field kept its
+    /// old height, the caret moved below it, and the scroll view followed the caret and
+    /// took the question out of sight, which reads as the key having eaten it.
+    func testATrailingNewlineOpensALineYouCanSee() {
+        let one = ComposerView.height(for: "a question", width: width)
+        let two = ComposerView.height(for: "a question\n", width: width)
+        XCTAssertGreaterThan(two, one)
+        // The same height as a line with something typed on it: an empty last line is
+        // still a line, and is what the caret is sitting on.
+        XCTAssertEqual(two, ComposerView.height(for: "a question\nb", width: width),
+                       accuracy: 0.5)
+    }
+
+    /// Two presses open two lines. One extra line fragment covers the last empty line
+    /// only, so a fix that added a fixed line to any newline-terminated text would be a
+    /// line short here.
+    func testEachTrailingNewlineOpensItsOwnLine() {
+        let two = ComposerView.height(for: "a question\n", width: width)
+        let three = ComposerView.height(for: "a question\n\n", width: width)
+        XCTAssertGreaterThan(three, two)
+        XCTAssertEqual(three, ComposerView.height(for: "a question\n\nb", width: width),
+                       accuracy: 0.5)
+    }
+
+    /// A pasted question carries whatever line ending the app it came from uses, and the
+    /// composer has to make the same room for each of them.
+    func testAPastedLineEndingCountsLikeATypedOne() {
+        let typed = ComposerView.height(for: "a question\n", width: width)
+        for ending in ["\r", "\r\n"] {
+            XCTAssertEqual(ComposerView.height(for: "a question" + ending, width: width),
+                           typed, accuracy: 0.5, "ending \(ending.debugDescription)")
+        }
+    }
+
+    /// The ceiling still wins. Holding Return must scroll inside the composer rather than
+    /// grow it over the thread it belongs to.
+    func testTheCeilingHoldsAgainstTrailingNewlines() {
+        let held = "a question" + String(repeating: "\n", count: 40)
+        XCTAssertEqual(ComposerView.height(for: held, width: width, scale: 1.0),
+                       ComposerView.maximumHeight(1.0), accuracy: 0.5)
+    }
+
     /// A question long enough to wrap is taller than one that is not, at every size —
     /// the growth behaviour the composer exists for must survive the scaling.
     func testItStillGrowsWithTheQuestion() {
