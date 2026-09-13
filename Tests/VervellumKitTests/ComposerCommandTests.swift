@@ -11,7 +11,7 @@ final class ComposerCommandTests: XCTestCase {
 
     func testPlainTextIsAQuestion() {
         XCTAssertEqual(ComposerCommand.parse("  Why is the sky blue?  "),
-                       .ask("Why is the sky blue?"))
+                       .ask("Why is the sky blue?", level: nil))
     }
 
     func testBlankInputIsNothing() {
@@ -26,55 +26,104 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertEqual(ComposerCommand.parse("/settings"), .openSettings)
         XCTAssertEqual(ComposerCommand.parse("/copy"), .copyLastAnswer)
         XCTAssertEqual(ComposerCommand.parse("/help"), .showHelp)
-        XCTAssertEqual(ComposerCommand.parse("/direct what is 2+2"), .direct("what is 2+2"))
+        XCTAssertEqual(ComposerCommand.parse("/no-search what is 2+2"),
+                       .ask("what is 2+2", level: .direct))
     }
 
     func testCommandsAreCaseInsensitive() {
         XCTAssertEqual(ComposerCommand.parse("/NEW"), .newThread)
-        XCTAssertEqual(ComposerCommand.parse("/Direct hi"), .direct("hi"))
+        XCTAssertEqual(ComposerCommand.parse("/No-Search hi"), .ask("hi", level: .direct))
     }
 
     /// The reason parsing is strict: a question that happens to start with a path
     /// must stay a question rather than becoming an unknown-command error.
     func testAnUnknownSlashWordIsPartOfTheQuestion() {
         XCTAssertEqual(ComposerCommand.parse("/etc/hosts is world readable, right?"),
-                       .ask("/etc/hosts is world readable, right?"))
-        XCTAssertEqual(ComposerCommand.parse("/usr/bin/env"), .ask("/usr/bin/env"))
+                       .ask("/etc/hosts is world readable, right?", level: nil))
+        XCTAssertEqual(ComposerCommand.parse("/usr/bin/env"), .ask("/usr/bin/env", level: nil))
     }
 
-    /// The same argument-wanting shape as `/direct`, and pinned separately because the
-    /// two answer to different words: a `parse` branch that fell through would send
-    /// "/deep-research …" to a model as prose, which is the failure the whole
-    /// half-typed-command guard exists to prevent.
-    func testDeepResearchCarriesItsQuestionAndDeclinesWithoutOne() {
-        XCTAssertEqual(ComposerCommand.parse("/deep-research who owns the cobalt"),
-                       .deepResearch("who owns the cobalt"))
-        // Bare: a mode with no question yet, so the composer keeps the text.
-        XCTAssertNil(ComposerCommand.parse("/deep-research"))
-        XCTAssertNil(ComposerCommand.parse("/deep-research   "))
-        // The hyphen is part of the word, not a separator: `commandWord` refuses a
-        // command word containing whitespace, and would have refused this one too if the
-        // name had been spelled with a space.
-        XCTAssertEqual(ComposerCommand.parse("/DEEP-RESEARCH why"), .deepResearch("why"))
+    /// Every level word carries its question and declines without one, so a `parse`
+    /// branch that fell through would send "/deep-rounds …" to a model as prose — the
+    /// failure the whole half-typed-command guard exists to prevent.
+    func testEveryLevelCarriesItsQuestionAndDeclinesWithoutOne() {
+        for level in ResearchLevel.ordered {
+            XCTAssertEqual(ComposerCommand.parse("/\(level.command) who owns the cobalt"),
+                           .ask("who owns the cobalt", level: level),
+                           "/\(level.command) must carry its question at its own level")
+            // Bare: a level with no question yet, so the composer keeps the text.
+            XCTAssertNil(ComposerCommand.parse("/\(level.command)"))
+            XCTAssertNil(ComposerCommand.parse("/\(level.command)   "))
+            // The hyphen is part of the word, not a separator: `commandWord` refuses a
+            // command word containing whitespace, and would have refused these too if
+            // the names had been spelled with spaces.
+            XCTAssertEqual(ComposerCommand.parse("/\(level.command.uppercased()) why"),
+                           .ask("why", level: level))
+        }
     }
 
-    /// It is offered in the list, so Return must be able to submit it — the invariant
-    /// `testEveryOfferedCommandCanBeSubmitted` pins for the catalogue as a whole, named
-    /// here for the entry this branch adds.
-    func testDeepResearchIsOfferedAndCompletes() {
-        // `XCTAssertNotNil` on the `contains` would have passed for any non-nil list,
-        // including one this entry is missing from — the assertion has to name the row.
+    /// The words these levels answered to before they had names still work, and are
+    /// deliberately *not* in the completion list: seven rows for four levels is the
+    /// confusion the levels exist to remove. A reader with `/deep-research` in muscle
+    /// memory or in a script must still land somewhere.
+    func testOlderCommandNamesStillSelectTheirLevel() {
+        XCTAssertEqual(ComposerCommand.parse("/direct hi"), .ask("hi", level: .direct))
+        XCTAssertEqual(ComposerCommand.parse("/deep-research hi"), .ask("hi", level: .deep))
+        XCTAssertEqual(ComposerCommand.parse("/agent-research hi"), .ask("hi", level: .agent))
+        let listed = Set(ComposerCommand.catalogue.map(\.name))
+        for level in ResearchLevel.ordered {
+            XCTAssertTrue(listed.contains(level.command),
+                          "every level needs exactly one row: \(level.command)")
+            for alias in level.aliases {
+                XCTAssertFalse(listed.contains(alias), "an alias must not take a row: \(alias)")
+            }
+        }
+    }
+
+    /// Each level is offered in the list, so Return must be able to submit it — the
+    /// invariant `testEveryOfferedCommandCanBeSubmitted` pins for the catalogue as a
+    /// whole, named here for the rows the levels add.
+    func testLevelsAreOfferedAndComplete() {
+        // `XCTAssertNotNil` on a `contains` would have passed for any non-nil list,
+        // including one the row is missing from — the assertion has to name the row.
         XCTAssertEqual(ComposerCommand.completions(for: "/deep")?.map(\.name),
-                       ["deep-research"])
-        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/deep-research"),
-                       "an exact command name must not withhold Return")
+                       ["deep-rounds"])
+        for level in ResearchLevel.ordered {
+            XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/\(level.command)"),
+                           "an exact command name must not withhold Return")
+        }
     }
 
-    /// "/direct" alone is a mode the user is about to type into, not an empty
+    /// A bare level word is a level the user is about to type into, not an empty
     /// question — submitting it must do nothing rather than ask a blank question.
-    func testBareDirectIsNotSubmittable() {
-        XCTAssertNil(ComposerCommand.parse("/direct"))
-        XCTAssertNil(ComposerCommand.parse("/direct   "))
+    func testBareLevelIsNotSubmittable() {
+        XCTAssertNil(ComposerCommand.parse("/no-search"))
+        XCTAssertNil(ComposerCommand.parse("/no-search   "))
+    }
+
+    /// The one-shot contract, from the parser's end: a question with no level word
+    /// carries **no** level, and the front ends read that nil as "whatever the selector
+    /// says". A parser that answered `.research` here would hard-code the old default
+    /// and silently ignore a reader who had moved the chip.
+    func testAQuestionWithNoCommandCarriesNoLevel() {
+        XCTAssertEqual(ComposerCommand.parse("who owns the cobalt"),
+                       .ask("who owns the cobalt", level: nil))
+        // An unknown slash word is a question too, and just as level-less.
+        XCTAssertEqual(ComposerCommand.parse("/etc/hosts?"), .ask("/etc/hosts?", level: nil))
+    }
+
+    /// `/help` explains the levels as a group rather than as four unrelated commands,
+    /// because the relationship between them is the thing no per-row summary can carry —
+    /// and it is what made four modes confusing before they were levels.
+    func testHelpTextExplainsTheLevelsTogether() {
+        let help = ComposerCommand.helpText
+        for level in ResearchLevel.ordered {
+            XCTAssertTrue(help.contains(level.displayName),
+                          "help text is missing the level \(level.displayName)")
+        }
+        XCTAssertTrue(help.contains("How hard to look"))
+        XCTAssertTrue(help.contains("without moving the selector"),
+                      "help must say a typed level is one question only")
     }
 
     func testCompletionsMatchAPartialCommand() {
@@ -126,7 +175,7 @@ final class ComposerCommandTests: XCTestCase {
 
     // MARK: /model
 
-    /// Unlike `/direct`, a bare `/model` is a complete request — "show me what there
+    /// Unlike a level word, a bare `/model` is a complete request — "show me what there
     /// is" — so it parses rather than waiting for an argument.
     func testABareModelCommandParsesAsAListing() {
         XCTAssertEqual(ComposerCommand.parse("/model"), .selectModel(""))

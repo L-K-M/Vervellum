@@ -104,6 +104,14 @@ final class Preferences: ObservableObject {
         set { core.submitOnReturn = newValue }
     }
 
+    /// How hard the next question looks things up, until it is changed again. See
+    /// `ResearchLevel`, and `ComposerCommand.ask` for why a typed command does not
+    /// change it.
+    var researchLevel: ResearchLevel {
+        get { core.researchLevel }
+        set { core.researchLevel = newValue }
+    }
+
     var redactSecrets: Bool {
         get { core.redactSecrets }
         set { core.redactSecrets = newValue }

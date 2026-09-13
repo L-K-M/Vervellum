@@ -195,17 +195,26 @@ final class ResearchEngine: ObservableObject {
     /// The composer stays live during a run precisely so a follow-up or a clarification
     /// can be typed while the answer is still arriving — which is when it occurs to you —
     /// and this is where that text goes.
+    /// - Parameter mode: the level to ask at, or nil for the one the selector is set to.
+    ///   Nil is the usual answer and is resolved **here**, once, rather than at each call
+    ///   site: a question typed with no command is asked at whatever the chip says, and a
+    ///   caller that defaulted to `.research` on its own would quietly ignore a reader who
+    ///   had set the chip to something else. Only a typed command and a retry name a level.
     @discardableResult
-    func ask(_ question: String, mode: Mode = .research,
+    func ask(_ question: String, mode: Mode? = nil,
              attachments: [PendingAttachment] = []) -> AskOutcome {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .ignored }
+        // Resolved before the queue, not after it. A question that waits is asked at the
+        // level in force when it was *typed*: moving the chip while three questions are
+        // queued must not silently re-price the two the reader has stopped thinking about.
+        let level = mode ?? preferences.researchLevel
         guard !isRunning else {
             guard queue.count < Self.maxQueued else { return .queueFull }
-            queue.append(QueuedQuestion(question: trimmed, mode: mode, attachments: attachments))
+            queue.append(QueuedQuestion(question: trimmed, mode: level, attachments: attachments))
             return .queued
         }
-        start(trimmed, mode: mode, attachments: attachments)
+        start(trimmed, mode: level, attachments: attachments)
         return .started
     }
 
@@ -223,6 +232,7 @@ final class ResearchEngine: ObservableObject {
         guard !trimmed.isEmpty else { return }
         var turn = ResearchTurn(question: trimmed)
         turn.model = preferences.providerSettings.modelName
+        turn.level = mode
         // Through `addNotice` like every other notice on this turn, rather than an
         // assignment that happens to be first. `addNotice` appends *and* refuses a
         // duplicate, so it is safe to call more than once for one notice; an assignment
@@ -319,9 +329,12 @@ final class ResearchEngine: ObservableObject {
     func retry(_ id: UUID) {
         guard !isRunning, let turn = thread.turns.first(where: { $0.id == id }) else { return }
         let question = turn.question
-        // Re-ask the way the user asked. A turn the *planner* decided needed no search
-        // also carries the no-evidence notice, but should be researched again in full.
-        let mode: Mode = turn.wasAskedDirectly ? .direct : .research
+        // Re-ask the way the user asked — at the level it was asked at, which the turn
+        // now records. It used to be re-derived from the no-evidence notice, which could
+        // only tell a direct turn from everything else: a deep or agent turn was retried
+        // as a single pass, spending a fraction of the budget the question was asked
+        // with and quietly answering a different question from the one being retried.
+        let mode = turn.level
         // Asked again means asked with what it was asked with. The bytes are still in
         // the store — the turn being retried is what keeps them reachable — so they are
         // read back, and `start` writes them again under the same ids: a write of

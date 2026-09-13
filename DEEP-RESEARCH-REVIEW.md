@@ -1,6 +1,7 @@
 # Deep Research Review
 
-A review of `/deep-research` against OpenAI Deep Research, Gemini Deep Research,
+A review of **Deep rounds** (`/deep-rounds`, formerly `/deep-research`) against
+OpenAI Deep Research, Gemini Deep Research,
 Anthropic's Research system, GPT-Researcher, and Stanford STORM, and the changes
 made as a result. Written 2026-09-10; the "Implemented changes" section is kept in
 step with the code as follow-up PRs land.
@@ -130,9 +131,9 @@ reacting to actual results beats planning against a digest. Vervellum's staged
 design buys predictable cost, a fully auditable process trail, and a known stage for
 every degradation. Both positions are implemented:
 
-- The staged pipeline (`/deep-research`) keeps its contract and absorbs the
+- The staged pipeline (**Deep rounds**, `/deep-rounds`) keeps its contract and absorbs the
   gathering improvements above — all landed, #98 through #103.
-- A bounded tool loop runs as `/agent-research`, documented in
+- A bounded tool loop runs as **Agent loop** (`/agent-loop`), documented in
   [`AGENT-RESEARCH.md`](AGENT-RESEARCH.md) — landed as #104.
 
 ## Implemented changes
@@ -153,7 +154,7 @@ yet started), `in review`, `landed`, and `declined` (deliberately not implemente
 | G9 | Human plan checkpoint | declined — the system must work without intervention |
 | G10 | Answer-quality eval harness (question bank + LLM judge) | landed in #97 |
 
-The architectural fork's second half — the bounded agent loop as `/agent-research` —
+The architectural fork's second half — the bounded agent loop as **Agent loop** —
 is landed as #104 and documented in [`AGENT-RESEARCH.md`](AGENT-RESEARCH.md).
-`PLAN.md` §3 describes the resulting pipeline: three gathering depths over one
+`PLAN.md` §3 describes the resulting pipeline: four levels over one
 shared tail.

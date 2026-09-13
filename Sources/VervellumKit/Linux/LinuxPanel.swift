@@ -33,6 +33,17 @@ final class LinuxPanel {
     /// One row per attached file, above the composer. Rebuilt rather than diffed, like
     /// the thread: there are at most four of them.
     private let attachmentBox: GTK.Widget
+    /// The row the four level buttons live in.
+    private let levelBox: GTK.Widget
+    /// The buttons themselves, in ladder order, built once and then retitled in place.
+    /// See `markSelectedLevel` for why they are not rebuilt.
+    private var levelButtons: [(level: ResearchLevel, button: GTK.Widget)] = []
+    /// What the selected level does and what it may spend, under the buttons.
+    ///
+    /// Always on screen rather than in a tooltip: the GTK panel has no completion list
+    /// and no Settings window, so a tooltip would put the only explanation of the only
+    /// research control behind a hover a keyboard never performs.
+    private let levelSummary: GTK.Widget
 
     private var thread = ResearchThread()
     /// What is attached to the question being typed, bytes and all.
@@ -68,6 +79,8 @@ final class LinuxPanel {
         composer = GTK.textView()
         statusLabel = GTK.markupLabel("")
         attachmentBox = GTK.verticalBox(spacing: 4)
+        levelBox = GTK.horizontalBox(spacing: 4)
+        levelSummary = GTK.markupLabel("")
         // Created without a handler: `wireComposer` attaches the real one once `self`
         // is fully initialised. Connecting a placeholder here and another later would
         // leave *both* attached, and the placeholder would still fire.
@@ -87,6 +100,7 @@ final class LinuxPanel {
         // Draws the (empty) attachment row once, which is what hides it: GTK4 shows a
         // widget by default, and an empty box still takes its spacing.
         renderAttachments()
+        buildLevelSelector()
         render()
     }
 
@@ -138,6 +152,9 @@ final class LinuxPanel {
         GTK.addStyle(statusLabel, "status")
         GTK.append(footer, statusLabel)
         GTK.append(footer, attachmentBox)
+        GTK.append(footer, levelBox)
+        GTK.addStyle(levelSummary, "status")
+        GTK.append(footer, levelSummary)
 
         let row = GTK.horizontalBox(spacing: 8)
         // The composer grows with its content and then scrolls. Those two scrolled-window
@@ -150,6 +167,60 @@ final class LinuxPanel {
         GTK.append(row, sendButton)
         GTK.append(footer, row)
         return footer
+    }
+
+    /// Builds the row of level buttons, once.
+    ///
+    /// The separators are where `ResearchLevel.beginsGroup` says the scale stops — see
+    /// that type for why those two places and not others.
+    private func buildLevelSelector() {
+        for level in ResearchLevel.ordered {
+            if level.beginsGroup { GTK.append(levelBox, GTK.verticalSeparator()) }
+            let button = GTK.button(level.displayName) { [weak self] in
+                guard let self else { return }
+                self.environment.preferences.researchLevel = level
+                self.markSelectedLevel()
+            }
+            GTK.addStyle(button, "level")
+            GTK.append(levelBox, button)
+            levelButtons.append((level, button))
+        }
+        markSelectedLevel()
+    }
+
+    /// Marks which level the next question will be asked at, and says what it spends.
+    ///
+    /// The buttons are retitled and restyled where they stand rather than the row being
+    /// torn down and rebuilt, which is what the attachment row above does. Two reasons,
+    /// and the first is a bug rather than a preference:
+    ///
+    /// * **This row is a selection, and it is redrawn from inside one of its own
+    ///   buttons' click handlers.** Rebuilding would destroy the widget the keyboard is
+    ///   focused on at the moment it is being activated, so a reader who tabbed to
+    ///   `Deep rounds` and pressed Space would have the focus come out somewhere else —
+    ///   and it would also be destroying a widget during its own signal emission, which
+    ///   GObject survives only because emission holds a reference to the closure. The
+    ///   attachment row has neither problem: nothing in it is focusable and it is
+    ///   redrawn from outside itself.
+    /// * A rebuild of four buttons for a one-character change is visible as a flicker.
+    ///
+    /// The selection is carried in the *label* as well as in a CSS class, because a
+    /// theme decides what a class looks like and some decide nothing at all. The bullet
+    /// is not decoration: it is the answer to "which one am I asking at", and it is what
+    /// a screen reader reads.
+    private func markSelectedLevel() {
+        let selected = environment.preferences.researchLevel
+        for (level, button) in levelButtons {
+            let isSelected = level == selected
+            GTK.setButtonTitle(button, isSelected ? "• " + level.displayName : level.displayName)
+            if isSelected {
+                GTK.addStyle(button, "level-selected")
+            } else {
+                GTK.removeStyle(button, "level-selected")
+            }
+        }
+        let settings = environment.preferences.providerSettings
+        GTK.setMarkup(levelSummary, GTK.escape(selected.summary + " " + selected.cost(settings)))
     }
 
     private func wireComposer() {
@@ -290,18 +361,12 @@ final class LinuxPanel {
         case .selectModel(let name):
             GTK.setText(composer, "")
             selectModel(named: name)
-        case .ask(let question):
+        case .ask(let question, let level):
             GTK.setText(composer, "")
-            ask(question, mode: .research, attaching: takePendingAttachments())
-        case .direct(let question):
-            GTK.setText(composer, "")
-            ask(question, mode: .direct, attaching: takePendingAttachments())
-        case .deepResearch(let question):
-            GTK.setText(composer, "")
-            ask(question, mode: .deep, attaching: takePendingAttachments())
-        case .agentResearch(let question):
-            GTK.setText(composer, "")
-            ask(question, mode: .agent, attaching: takePendingAttachments())
+            // A typed level is this question's alone; the selector keeps whatever it was
+            // set to, and nil means "whatever it says". See `ComposerCommand.ask`.
+            ask(question, mode: level ?? environment.preferences.researchLevel,
+                attaching: takePendingAttachments())
         }
     }
 
@@ -337,6 +402,7 @@ final class LinuxPanel {
                      lostAttachments: Bool = false) {
         var draft = ResearchTurn(question: question)
         draft.model = environment.preferences.providerSettings.modelName
+        draft.level = mode
         if mode == .direct { draft.notices = [.noEvidence] }
         if lostAttachments { draft.addNotice(.attachmentMissing) }
         draft.attachments = attached.map { $0.attachment }
@@ -428,7 +494,9 @@ final class LinuxPanel {
     /// belongs — the same rule the macOS engine follows.
     private func retry(_ turn: ResearchTurn) {
         guard !isRunning else { return }
-        let mode: ResearchRunner.Mode = turn.wasAskedDirectly ? .direct : .research
+        // The level the turn was asked at, which it now records — so a deep or agent
+        // turn is retried as one, rather than quietly re-asked as a single pass.
+        let mode = turn.level
         // Asked again means asked with what it was asked with. The bytes are still in
         // the store — the turn being retried is what keeps them reachable — and one
         // whose bytes have gone is dropped rather than listed on a turn that could not
@@ -682,6 +750,8 @@ final class LinuxPanel {
             .question { font-size: 1.05em; }
             .composer { border: 1px solid alpha(currentColor, 0.2); border-radius: 8px; }
             .status { opacity: 0.7; }
+            .level { padding: 2px 8px; font-size: 0.9em; }
+            .level-selected { font-weight: bold; }
             """
     }
 }

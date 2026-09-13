@@ -73,6 +73,13 @@ final class CorePreferences {
         /// credential to a third party.
         static let redactSecrets = true
         static let textScale = 1.0
+        /// Questions are researched in one pass unless the reader says otherwise.
+        ///
+        /// `.research` rather than anything cheaper: the app's whole claim is that it
+        /// answers from sources it retrieved and then grades itself against them, and
+        /// `.direct` does none of that. A default that skipped searching would make the
+        /// first answer a new user ever sees the one kind this tool exists not to give.
+        static let researchLevel = ResearchLevel.standard
     }
 
     enum Key {
@@ -107,6 +114,8 @@ final class CorePreferences {
         static let submitOnReturn = "submitOnReturn"
         static let redactSecrets = "redactSecrets"
         static let textScale = "textScale"
+        /// How hard the next question looks things up. See `ResearchLevel`.
+        static let researchLevel = "researchLevel"
     }
 
     /// Body-text scale for the thread. The panel is narrow and often sits on a display
@@ -211,6 +220,25 @@ final class CorePreferences {
     var submitOnReturn: Bool {
         get { store.bool(for: Key.submitOnReturn) ?? Default.submitOnReturn }
         set { store.setBool(newValue, for: Key.submitOnReturn); onChange?() }
+    }
+
+    /// How hard the next question looks things up, until it is changed again.
+    ///
+    /// Sticky, like the selected model and unlike a typed `/no-search`, because it is a
+    /// setting rather than a property of one question — a reader who wants deep rounds
+    /// wants them for the thread, not for one turn. What the *commands* do instead is
+    /// documented on `ComposerCommand.ask`.
+    ///
+    /// An unreadable or unknown value falls back to the default rather than failing,
+    /// the way every other bounded value here does: a settings file holding
+    /// `"researchLevel": "exhaustive"` — a hand edit, or a level a later build had and
+    /// this one does not — must not be able to produce a panel that cannot ask anything.
+    var researchLevel: ResearchLevel {
+        get {
+            store.string(for: Key.researchLevel).flatMap(ResearchLevel.init(rawValue:))
+                ?? Default.researchLevel
+        }
+        set { store.setString(newValue.rawValue, for: Key.researchLevel); onChange?() }
     }
 
     /// Whether text captured from another application is scanned for credentials before

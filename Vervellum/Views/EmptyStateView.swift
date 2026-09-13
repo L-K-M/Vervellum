@@ -37,7 +37,7 @@ struct EmptyStateView: View {
 
             VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
                 hint("Return", "ask · Shift-Return for a new line")
-                hint("/", "commands, including /direct for no search")
+                hint("/", "commands — and the four research levels by name")
                 hint("Esc", "clear the draft, then close")
                 hint(summonShortcut, "summon or dismiss from anywhere")
             }

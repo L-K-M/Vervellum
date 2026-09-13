@@ -11,8 +11,8 @@ Vervellum server: the app talks only to the endpoints you configure and to GitHu
 Vervellum makes network requests in exactly five cases, each with a fixed purpose.
 
 - **Research.** Requested research sends your question, earlier thread context, and
-  retrieved evidence to the model provider selected when you asked. `/direct` uses that
-  same provider without searching. Provider handling is governed by its own policy;
+  retrieved evidence to the model provider selected when you asked. The **No search**
+  level (`/no-search`, formerly `/direct`) uses that same provider without searching. Provider handling is governed by its own policy;
   Vervellum cannot recall what was sent.
 
   If that provider fails — no response, a rejected key, an error — the same material is

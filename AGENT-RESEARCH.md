@@ -1,11 +1,17 @@
 # Agent research
 
-`/agent-research` (CLI: `vervellum --agent "…"`) is the second gathering
+**Agent loop** — `/agent-loop` (CLI: `vervellum --agent-loop "…"`; the older
+`/agent-research` and `--agent` still work) — is the second gathering
 architecture in Vervellum: a **bounded tool loop** where the model chooses one
 action at a time — run a search, read a page, or stop — and sees what each
-action produced before choosing the next. The staged pipeline (`/` and
-`/deep-research`) plans up front and follows up in rounds; the loop reacts
+action produced before choosing the next. The staged pipeline (**One pass** and
+**Deep rounds**) plans up front and follows up in rounds; the loop reacts
 continuously.
+
+It sits at the top of the level selector, with a rule drawn above it: it spends
+Deep rounds' page and evidence allowance to the character, so it is not "more
+depth" — it is the same depth, chosen a step at a time. What puts it last is that
+every step is its own model call.
 
 This document is the design record: why the loop exists, what it keeps from the
 staged design, where it deliberately differs, and what bounds it.
@@ -20,7 +26,7 @@ performance variance on BrowseComp, and parallel tool calling cut research time
 by up to 90%. Reacting to actual results beats planning against a digest,
 because the gap does not exist until something has been looked up.
 
-The staged pipeline answers that partially — `/deep-research`'s rounds read what
+The staged pipeline answers that partially — Deep rounds' rounds read what
 the last round found — but a round is a coarse step: up to four queries decided
 at once, between two model calls. The loop is the fine-grained version: one
 decision at a time, each made with the previous action's results in view.

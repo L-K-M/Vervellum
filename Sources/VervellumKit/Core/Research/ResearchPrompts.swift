@@ -536,7 +536,7 @@ enum ResearchPrompts {
 
     // MARK: Direct mode
 
-    /// Used by `/direct`, which deliberately skips search. The badge in the UI says
+    /// Used by the no-search level, which deliberately skips search. The badge says
     /// the answer is unsourced; this prompt makes the model say so too, because a
     /// user who scrolled past the badge should still not be misled.
     static let direct = """

@@ -320,6 +320,25 @@ enum GTK {
         gtk_widget_add_css_class(widget, name)
     }
 
+    static func removeStyle(_ widget: Widget, _ name: String) {
+        gtk_widget_remove_css_class(widget, name)
+    }
+
+    /// A thin vertical rule, for separating groups inside a horizontal box.
+    static func verticalSeparator() -> Widget {
+        gtk_separator_new(GTK_ORIENTATION_VERTICAL)
+    }
+
+    /// Retitles an existing button.
+    ///
+    /// The alternative to rebuilding a row of them whenever one of them changes — which
+    /// matters for a row that is a *selection*: rebuilding destroys the very button the
+    /// keyboard is focused on, and a reader who reached it with Tab and pressed Space
+    /// would have the focus come out somewhere else.
+    static func setButtonTitle(_ button: Widget, _ title: String) {
+        gtk_button_set_label(vv_button(button), title)
+    }
+
     // MARK: Text
 
     /// A wrapping, selectable label carrying Pango markup.
