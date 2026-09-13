@@ -67,6 +67,11 @@ public enum VervellumLinuxApp {
     ///
     /// Both the canonical `--deep-rounds` and the older `--deep` shapes, because a flag
     /// is the half of this app most likely to be sitting in somebody's shell script.
+    ///
+    /// Case-insensitive throughout, though only one of the two lines below says so:
+    /// `ResearchLevel.named` lowercases what it is given, so `--DEEP-ROUNDS` resolves
+    /// exactly as `--deep` does. Said here because the call site cannot show it, and a
+    /// reader who assumes otherwise concludes the two spellings disagree.
     private static func level(for flag: String) -> ResearchLevel? {
         guard flag.hasPrefix("--") else { return nil }
         let word = String(flag.dropFirst(2))

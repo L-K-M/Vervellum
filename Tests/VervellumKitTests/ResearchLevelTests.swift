@@ -95,11 +95,33 @@ final class ResearchLevelTests: XCTestCase {
     func testEveryReservedWordIsStillACommand() {
         for word in ComposerCommand.reservedWords {
             guard let parsed = ComposerCommand.parse("/\(word)") else {
-                return XCTFail("/\(word) parses to nothing")
+                // Reported and carried on, like the check below it: a sweep over a set
+                // should name every word that broke, not the first one and then stop.
+                XCTFail("/\(word) parses to nothing")
+                continue
             }
             if case .ask = parsed {
                 XCTFail("/\(word) is listed as reserved but parses as a question")
             }
+        }
+    }
+
+    /// The other direction, as far as it can be checked: every word the completion list
+    /// offers must be either reserved or a level word.
+    ///
+    /// `testEveryReservedWordIsStillACommand` proves each entry in the set is still a
+    /// command; this catches a command *added* to `parse` without being added to the set,
+    /// which is the half the set's own comment admits it cannot see. Not all of it — a
+    /// command that is parsed but never offered (`/clear`, `/models`, `/threads`,
+    /// `/prefs`, `/?`) is still invisible here, because nothing enumerates those. It
+    /// closes the likely half: a new command a reader can find is a new row in the list.
+    func testEveryOfferedWordIsReservedOrALevel() throws {
+        let offered = try XCTUnwrap(ComposerCommand.completions(for: "/"))
+        XCTAssertFalse(offered.isEmpty)
+        for entry in offered {
+            XCTAssertTrue(ComposerCommand.reservedWords.contains(entry.name)
+                          || ResearchLevel.named(entry.name) != nil,
+                          "/\(entry.name) is offered but is neither reserved nor a level")
         }
     }
 

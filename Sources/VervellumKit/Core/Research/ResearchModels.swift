@@ -546,8 +546,11 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
 
     /// Whether this turn was asked at the no-search level.
     ///
-    /// Not "whether it searched", which is a different question with a different answer:
-    /// the body below is about the turn that runs no searches and is still not this.
+    /// Not "whether it searched". Those are two predicates, and they disagree on a real
+    /// turn: one asked at `.research` whose planner returned an empty plan runs no
+    /// searches at all, carries the same `.noEvidence` notice, and is still false here —
+    /// because the reader did not ask for that, the planner decided it. Retrying it must
+    /// research it again in full, which is the whole reason the two are kept apart.
     ///
     /// Now a reading of the stored `level`, and kept as a name because the *question* it
     /// answers is asked in several places and is not the same as "is `level` `.direct`"
