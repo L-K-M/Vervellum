@@ -167,8 +167,36 @@ struct ComposerView: NSViewRepresentable {
         layout.addTextContainer(container)
         storage.addLayoutManager(layout)
         layout.ensureLayout(for: container)
-        let used = layout.usedRect(for: container).height + 12
+        let used = contentHeight(of: layout, in: container) + 12
         return min(max(used, minimumHeight(scale)), maximumHeight(scale))
+    }
+
+    /// How far down the container the laid-out text reaches, counting the empty line a
+    /// trailing line break opens.
+    ///
+    /// `usedRect(for:)` measures line fragments that hold *glyphs*, and the line a final
+    /// Shift-Return opens holds none: the text system puts it in the extra line fragment
+    /// instead, which that rect excludes. Measuring the glyphs alone is why Shift-Return
+    /// at the end of a question appeared to swallow it. The field kept its old height
+    /// while the caret moved onto a line below the visible box, so the scroll view
+    /// scrolled to follow the caret and took the question the user had just typed out of
+    /// sight. The newline was there; the room for it was not.
+    ///
+    /// Both rects are measured from the top of the same container, so the lower edge of
+    /// whichever reaches further is the height the field needs. The extra fragment is
+    /// claimed by container rather than read unconditionally: the layout manager owns one
+    /// at a time and hands it to whichever container the empty line falls in, so the
+    /// container is the part of it that says such a line exists at all.
+    ///
+    /// Asking the layout manager rather than testing the string for a trailing "\n" is
+    /// what keeps this right for text that arrived from somewhere else. A question pasted
+    /// from another app can end in CR or CRLF, and the line the text system opens for
+    /// those is the same one it opens for the Return the user pressed.
+    private static func contentHeight(of layout: NSLayoutManager,
+                                      in container: NSTextContainer) -> CGFloat {
+        let glyphs = layout.usedRect(for: container).maxY
+        guard layout.extraLineFragmentTextContainer === container else { return glyphs }
+        return max(glyphs, layout.extraLineFragmentUsedRect.maxY)
     }
 
     // MARK: Coordinator

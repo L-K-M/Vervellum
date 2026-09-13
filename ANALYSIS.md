@@ -1216,9 +1216,6 @@ Each verified against the code; each a few lines.
 - The empty-state hint and `/help` ignore `submitOnReturn` (B28).
 - Opening a thread from history while research is running cancels the run silently
   (B73): guard row activation or ask; check #25 first.
-- The composer's height ignores the trailing empty line, so Shift-Return at the end
-  scrolls the first line away (B74): add `extraLineFragmentUsedRect` when the text ends
-  in a newline; check #50 first.
 - `Preferences.launchAtLogin` calls `SMAppService.mainApp.status` (an XPC round trip)
   on every render of the General pane (B31): sample once on appear.
 - `HotkeyRecorder` compares `keyCode == 53` instead of a named constant (B32).
