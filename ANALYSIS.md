@@ -1214,6 +1214,10 @@ Each verified against the code; each a few lines.
   `stage.label`) whenever `!stage.isTerminal`, and let the preference govern only the
   detail and the post-run summary. (#66 does this on Linux.)
 - The empty-state hint and `/help` ignore `submitOnReturn` (B28).
+- `ComposerView.Coordinator.textView(_:doCommandBy:)` submits on `insertNewline:` with
+  no `hasMarkedText()` guard. An input method usually eats the Return that confirms a
+  composition, but a Return it passes through would send a half-converted draft: check
+  the routing with a CJK input method and guard the submit selectors if it reaches them.
 - Opening a thread from history while research is running cancels the run silently
   (B73): guard row activation or ask; check #25 first.
 - `Preferences.launchAtLogin` calls `SMAppService.mainApp.status` (an XPC round trip)

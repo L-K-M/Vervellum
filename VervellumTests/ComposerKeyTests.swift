@@ -93,12 +93,13 @@ final class ComposerKeyTests: XCTestCase {
         XCTAssertEqual(sent, 1)
     }
 
-    /// With the preference inverted the two keys trade places, and nothing else moves:
-    /// each mode still has exactly one key that opens a line and one that asks.
+    /// With the preference inverted, plain Return and a modified Return trade places: the
+    /// key that opened a line now asks, and the key that asked now opens a line.
     ///
-    /// Plain Return is *declined* rather than handled, which is the newline in that mode:
-    /// answering false hands the key back to the text view, whose `insertNewline:` is a
-    /// real newline already.
+    /// Plain Return is *declined* rather than handled, and the decline is the newline in
+    /// that mode. So the handed-back key is pressed rather than left to the comment: the
+    /// claim worth pinning is not that the composer stepped aside, it is that what lands
+    /// when it does is a newline, which is the whole of what this mode offers.
     func testTheInvertedPreferenceTradesTheTwoKeys() {
         let draft = Draft("a question")
         var sent = 0
@@ -107,12 +108,35 @@ final class ComposerKeyTests: XCTestCase {
 
         XCTAssertFalse(composer.textView(textView,
                                          doCommandBy: #selector(NSResponder.insertNewline(_:))),
-                       "the text view inserts this newline itself")
+                       "declined, so the text view is left to insert this one itself")
+        textView.insertNewline(textView)
+        XCTAssertEqual(textView.string, "a question\n", "and what it inserts is a newline")
         XCTAssertEqual(sent, 0)
 
         XCTAssertTrue(composer.textView(textView,
                                         doCommandBy: #selector(NSResponder.insertLineBreak(_:))))
         XCTAssertEqual(sent, 1, "Shift-Return is what asks under this preference")
-        XCTAssertEqual(textView.string, "a question", "and asking inserts nothing")
+        XCTAssertEqual(textView.string, "a question\n", "and asking adds nothing of its own")
+    }
+
+    /// The two modified-Return selectors are one gesture rather than two, in either mode.
+    ///
+    /// Which of them a press arrives as is AppKit's business and can differ by keyboard
+    /// layout and by macOS version, so the composer treats them identically and the
+    /// preference is the only thing that decides what they do. The submit-on-Return side
+    /// of that is pinned a test above; this is the side that would otherwise be left to
+    /// inference, and inference is what the pair exists to remove.
+    func testBothModifiedReturnsAskUnderTheInvertedPreference() {
+        for selector in [#selector(NSResponder.insertLineBreak(_:)),
+                         #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:))] {
+            let draft = Draft("a question")
+            var sent = 0
+            let composer = coordinator(submitOnReturn: false, draft: draft) { sent += 1 }
+            let textView = field(holding: draft.text)
+
+            XCTAssertTrue(composer.textView(textView, doCommandBy: selector), "\(selector)")
+            XCTAssertEqual(sent, 1, "\(selector)")
+            XCTAssertEqual(textView.string, "a question", "\(selector) inserts nothing")
+        }
     }
 }
