@@ -544,7 +544,10 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         level = stored ?? (notices.contains(.noEvidence) && reading.isEmpty ? .direct : .standard)
     }
 
-    /// Whether this turn was asked without searching.
+    /// Whether this turn was asked at the no-search level.
+    ///
+    /// Not "whether it searched", which is a different question with a different answer:
+    /// the body below is about the turn that runs no searches and is still not this.
     ///
     /// Now a reading of the stored `level`, and kept as a name because the *question* it
     /// answers is asked in several places and is not the same as "is `level` `.direct`"

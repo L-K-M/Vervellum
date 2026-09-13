@@ -71,6 +71,20 @@ enum ComposerCommand: Equatable {
         Entry(name: "help", summary: "List the commands"),
     ]
 
+    /// The words `parse`'s switch below answers to, and which therefore cannot also name
+    /// a research level: the level table is consulted first, so a level word equal to one
+    /// of these would take it permanently and silently.
+    ///
+    /// Here rather than in the test that enforces it, so the list a reader must keep in
+    /// step sits directly above the switch it mirrors. `testEveryReservedWordIsStillA`
+    /// `Command` catches a word that leaves the switch but stays here; a word added to
+    /// the switch and not added here is the half no test can see, which is what the
+    /// adjacency is for.
+    static let reservedWords: Set<String> = [
+        "model", "models", "new", "clear", "history", "threads",
+        "settings", "prefs", "preferences", "copy", "help", "?",
+    ]
+
     /// Parses composer text. Returns nil for input that is only whitespace.
     static func parse(_ input: String) -> ComposerCommand? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)

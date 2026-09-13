@@ -103,10 +103,19 @@ enum ResearchLevel: String, Codable, CaseIterable, Identifiable, Equatable {
     var aliases: [String] {
         switch self {
         case .direct: return ["direct"]
-        // Never a command word, but it is the word this level prints as its `rawValue` —
-        // in the trace, in a bug report, and in `settings.json`. Someone who has read one
-        // of those and types `/research` has guessed the most reasonable wrong thing.
+        // `research` is here for a reason the other three do not share, rather than
+        // because a level's `rawValue` is generally an alias — it is not. This level
+        // never had a command word at all: it was what you got by typing nothing. So the
+        // only name a reader can have seen for it is the stored one, out of the trace, a
+        // bug report or `settings.json`, and `/research` is the reasonable thing to try.
         case .research: return ["research"]
+        // `deep` and `agent` are deliberately *not* aliases, though they are these
+        // levels' stored names. Both are live prefixes in the completion list, and a
+        // prefix that becomes a complete word stops being one: `parse` would answer nil
+        // for a bare `/deep` (a level wanting a question), `isHalfTypedCommand` would
+        // then answer false, and the list would stop offering its first row — so Return
+        // on `/deep`, which finishes the word today, would become a key that does
+        // nothing. `testABareDeepStillCompletesRatherThanParsing` holds that line.
         case .deep: return ["deep-research"]
         case .agent: return ["agent-research"]
         }

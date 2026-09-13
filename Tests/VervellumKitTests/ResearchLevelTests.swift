@@ -83,11 +83,44 @@ final class ResearchLevelTests: XCTestCase {
     /// and silently — `/new` becoming a question asked at some level rather than a fresh
     /// thread. Nothing in either file makes that collision impossible; this does.
     func testNoLevelWordShadowsABuiltInCommand() {
-        let reserved = ["model", "models", "new", "clear", "history", "threads",
-                        "settings", "prefs", "preferences", "copy", "help", "?"]
-        for word in reserved {
+        for word in ComposerCommand.reservedWords {
             XCTAssertNil(ResearchLevel.named(word),
                          "the level word \(word) would shadow the built-in /\(word)")
+        }
+    }
+
+    /// And the reserved list is held against `parse` itself, so it cannot quietly become
+    /// a list of words that are no longer commands — which would leave the test above
+    /// guarding nothing while still passing.
+    func testEveryReservedWordIsStillACommand() {
+        for word in ComposerCommand.reservedWords {
+            guard let parsed = ComposerCommand.parse("/\(word)") else {
+                return XCTFail("/\(word) parses to nothing")
+            }
+            if case .ask = parsed {
+                XCTFail("/\(word) is listed as reserved but parses as a question")
+            }
+        }
+    }
+
+    /// `deep` and `agent` are their levels' stored names and are deliberately not
+    /// aliases, because both are live prefixes in the completion list. Making one a
+    /// complete word would stop `isHalfTypedCommand` answering true for it, the list
+    /// would stop offering its first row, and Return on `/deep` — which finishes the
+    /// word today — would become a key that does nothing.
+    ///
+    /// Pinned rather than left to the comment in `ResearchLevel.aliases`, because the
+    /// change it warns against is a one-line edit that looks like tidying up.
+    func testABareDeepStillCompletesRatherThanParsing() {
+        XCTAssertNil(ResearchLevel.named("deep"))
+        XCTAssertNil(ResearchLevel.named("agent"))
+        for word in ["/deep", "/agent"] {
+            XCTAssertTrue(ComposerCommand.isHalfTypedCommand(word),
+                          "\(word) must stay a word being typed, not a command")
+            XCTAssertEqual(ComposerCommand.offeredRowIndex(
+                explicit: nil, isDismissed: false, draft: word,
+                completions: ComposerCommand.completions(for: word)), 0,
+                           "\(word) must still offer a row for Return to take")
         }
     }
 

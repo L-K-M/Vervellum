@@ -442,8 +442,8 @@ incomplete turns are labelled so an exported answer cannot imply a finished chec
 
 Everything reachable from the header is also reachable by typing: the four levels
 (`/no-search`, `/one-pass`, `/deep-rounds`, `/agent-loop`, plus the older `/direct`,
-`/deep-research` and `/agent-research`), `/new`, `/history`, `/settings`, `/copy`,
-`/help`. Slash parsing is deliberately strict — a
+`/deep-research` and `/agent-research`, and `/research` — the default level's stored
+name, which is all it ever had), `/new`, `/history`, `/settings`, `/copy`, `/help`. Slash parsing is deliberately strict — a
 leading slash is only a command when the word after it is one Vervellum knows, so
 "/etc/hosts is world readable, right?" stays a question.
 
