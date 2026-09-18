@@ -73,6 +73,10 @@ extension PanelTheme {
             NSFont.monospacedSystemFont(ofSize: PanelTheme.Metrics.citation * scale,
                                         weight: .medium)
         }
+        static func caption(_ scale: Double) -> NSFont { at(PanelTheme.Metrics.caption, scale) }
+        static func question(_ scale: Double) -> NSFont {
+            at(PanelTheme.Metrics.question, scale, weight: .medium)
+        }
 
         /// The same font with a symbolic trait added, or the original when the family has
         /// no such face.
@@ -102,6 +106,12 @@ extension PanelTheme {
         static var primaryText: NSColor { theme.primaryText.map { NSColor($0) } ?? .labelColor }
         static var secondaryText: NSColor {
             theme.secondaryText.map { NSColor($0) } ?? .secondaryLabelColor
+        }
+        /// The same 0.62 of the secondary colour `Palette.tertiaryText` takes, so the
+        /// tier a reader sees does not depend on which of the two drew it.
+        static var tertiaryText: NSColor {
+            theme.secondaryText.map { NSColor($0.withAlpha($0.alpha * 0.62)) }
+                ?? NSColor.secondaryLabelColor.withAlphaComponent(0.62)
         }
     }
 }
