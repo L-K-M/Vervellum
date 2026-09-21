@@ -412,7 +412,8 @@ enum ComposerCommand: Equatable {
 
             ## Keys
 
-            - `Return` — ask (`Shift-Return` for a new line; swap them in Settings)
+            - `Return` — ask, or a new line if Settings says so
+            - `Shift-Return` / `⌥Return` — a new line, whichever way Return is configured
             - `⌘Return` — ask, whichever way Return is configured
             - `Esc` — clear the draft, then close the panel
             - `↑` / `↓` — earlier questions in this thread

@@ -102,6 +102,8 @@ static inline guint vv_key_iso_enter(void) { return GDK_KEY_ISO_Enter; }
 static inline guint vv_key_escape(void)    { return GDK_KEY_Escape; }
 static inline guint vv_mask_shift(void)    { return GDK_SHIFT_MASK; }
 static inline guint vv_mask_control(void)  { return GDK_CONTROL_MASK; }
+/* GDK_ALT_MASK in GTK4 — the MOD1 name is GTK3's and no longer exists. */
+static inline guint vv_mask_alt(void)      { return GDK_ALT_MASK; }
 
 /* G_APPLICATION_DEFAULT_FLAGS is 4.6+; G_APPLICATION_FLAGS_NONE before that. */
 static inline GApplicationFlags vv_app_default_flags(void) {

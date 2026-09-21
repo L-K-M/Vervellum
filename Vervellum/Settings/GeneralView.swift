@@ -107,7 +107,7 @@ struct GeneralView: View {
                 Toggle("Show what each search did", isOn: Binding(
                     get: { preferences.showProcessTrail },
                     set: { preferences.showProcessTrail = $0 }))
-                Toggle("Return sends the question (Shift-Return for a new line)", isOn: Binding(
+                Toggle("Return sends the question (⌘Return always sends)", isOn: Binding(
                     get: { preferences.submitOnReturn },
                     set: { preferences.submitOnReturn = $0 }))
                 Toggle("Launch Vervellum at login", isOn: Binding(

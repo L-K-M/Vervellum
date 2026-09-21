@@ -420,7 +420,8 @@ status, and losing a 40-second answer to any of them would be indefensible.
 |---|---|
 | `⌃⌥⌘Space` | summon / dismiss (configurable) |
 | `⌃⌥⌘J` | summon with the selection (off by default) |
-| `Return` | ask — `Shift-Return` for a newline, swappable in Settings |
+| `Return` | ask — or a newline, if Settings says so |
+| `Shift-Return` / `⌥Return` | a newline, whichever way `Return` is configured |
 | `⌘Return` | ask, whichever way `Return` is configured |
 | `Esc` | clear the draft; a second press closes |
 | `↑` / `↓` | walk back through this thread's earlier questions |
