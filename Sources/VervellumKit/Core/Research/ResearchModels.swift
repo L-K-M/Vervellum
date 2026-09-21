@@ -562,6 +562,15 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// decoder, which is the one place a turn without a stored level can still arrive.
     var wasAskedDirectly: Bool { level == .direct }
 
+    /// Whether retry has a question to re-ask — the single check shared by
+    /// `ResearchSession.retry`'s guard and every "Try again" button. A question
+    /// that is only whitespace (a `/help` turn has none at all) would make the
+    /// button dead and, worse, let the retry eat the turn: the guard used to
+    /// remove it first and only then discover there was nothing to ask.
+    var isRetryable: Bool {
+        !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// The stage label for a running turn, with live progress where there is any:
     /// "Searching the web · 2 of 3" rather than a static label for the whole stage.
     /// Terminal stages fall through to `stage.label`, which is also what logs use.
