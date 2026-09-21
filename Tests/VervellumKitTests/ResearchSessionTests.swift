@@ -203,9 +203,11 @@ final class ResearchSessionTests: XCTestCase {
         session.discard()
         // `Gate.wait` is not cancellation-aware: the cancelled task stays parked on
         // the gate unless it is released, which is also what proves a discarded
-        // session ignores the finish that finally lands.
-        gate.release()
+        // session ignores the finish that finally lands. The expectation is armed
+        // first — a semaphore counts arrivals either way, but a reader should not
+        // have to know that.
         hops.expect(2)   // the snapshot and the finish, both dropped by the seal
+        gate.release()
         hops.drain()
     }
 
@@ -222,8 +224,8 @@ final class ResearchSessionTests: XCTestCase {
         XCTAssertEqual(session.ask("one too many"), .queueFull)
         XCTAssertEqual(session.queue.count, ResearchSession.maxQueued)
         session.discard()
-        gate.release()   // let the cancelled run finish rather than leak a parked task
         hops.expect(2)
+        gate.release()   // let the cancelled run finish rather than leak a parked task
         hops.drain()
     }
 

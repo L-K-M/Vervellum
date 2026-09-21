@@ -367,9 +367,14 @@ final class LinuxPanel {
             // A typed level is this question's alone; the selector keeps whatever it was
             // set to, and nil means "whatever it says" — resolved inside `ask`. See
             // `ComposerCommand.ask`.
+            //
+            // The flag goes up *before* the call, like the retry button's: `ask`
+            // appends the turn and publishes synchronously, so the render that runs
+            // inside it must already know to follow. Reset if nothing started.
+            scrollToNewest = true
             let outcome = active.ask(question, mode: level,
                                      attachments: takePendingAttachments())
-            if outcome == .started { scrollToNewest = true }
+            if outcome != .started { scrollToNewest = false }
         }
     }
 
@@ -594,10 +599,14 @@ final class LinuxPanel {
         // a turn it would refuse never shows the button that asks for it.
         if turn.failure != nil || turn.stage == .cancelled, turn.isRetryable {
             let retry = GTK.button("Try again") { [weak self] in
+                // Refused while a run is in flight — `retry` would no-op, but the
+                // scroll flag would already be set, and the next render would jump
+                // for a question that was never re-asked.
+                guard let self, !self.active.isRunning else { return }
                 // Set before the call: retrying appends and publishes synchronously,
                 // so the render that runs inside it must already know to follow.
-                self?.scrollToNewest = true
-                self?.active.retry(turn.id)
+                self.scrollToNewest = true
+                self.active.retry(turn.id)
             }
             gtk_widget_set_halign(retry, GTK_ALIGN_START)
             GTK.append(box, retry)
