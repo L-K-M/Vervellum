@@ -370,11 +370,13 @@ final class LinuxPanel {
             //
             // The flag goes up *before* the call, like the retry button's: `ask`
             // appends the turn and publishes synchronously, so the render that runs
-            // inside it must already know to follow. Reset if nothing started.
+            // inside it must already know to follow. If nothing started, restore the
+            // prior value — a queued ask must not switch off the run it queued behind.
+            let followWasOn = scrollToNewest
             scrollToNewest = true
             let outcome = active.ask(question, mode: level,
                                      attachments: takePendingAttachments())
-            if outcome != .started { scrollToNewest = false }
+            if outcome != .started { scrollToNewest = followWasOn }
         }
     }
 
