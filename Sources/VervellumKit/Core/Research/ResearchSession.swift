@@ -188,13 +188,14 @@ final class ResearchSession {
     /// fifth. Only a turn that is still last is replaced in place; retrying an older one
     /// asks the question again at the end, where the answer belongs.
     func retry(_ id: UUID) {
-        // The question is validated before the turn comes out, not after: a turn
+        // `isRetryable` is checked before the turn comes out, not after: a turn
         // whose question is only whitespace would otherwise be deleted and then
         // refused by `start`'s own empty check — the retry having eaten the turn
-        // it failed to re-ask.
+        // it failed to re-ask. The same property decides whether a "Try again"
+        // button shows at all.
         guard !isRunning, !isDiscarded,
               let turn = thread.turns.first(where: { $0.id == id }),
-              !turn.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+              turn.isRetryable else { return }
         let question = turn.question
         // Re-ask the way the user asked — at the level it was asked at, which the turn
         // now records. It used to be re-derived from the no-evidence notice, which could
