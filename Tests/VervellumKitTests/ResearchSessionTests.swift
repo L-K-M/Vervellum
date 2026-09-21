@@ -143,9 +143,13 @@ final class ResearchSessionTests: XCTestCase {
         work()
     }
 
+    /// `deliver` has no default: the synchronous shortcut (`{ $0() }`) runs the
+    /// runner's callbacks on the task's own thread, and the session relies on the
+    /// hop for confinement. A test that took the shortcut would be the suite's one
+    /// unsynchronized mutation path — so there isn't one.
     private func makeSession(
         runner: StubRunner,
-        deliver: @escaping (@escaping () -> Void) -> Void = { $0() }
+        deliver: @escaping (@escaping () -> Void) -> Void
     ) -> ResearchSession {
         ResearchSession(
             thread: ResearchThread(),
@@ -183,9 +187,14 @@ final class ResearchSessionTests: XCTestCase {
     }
 
     func testAskWhileRunningQueues() {
+        // `deliver` is the session's confinement — the production hops land every
+        // callback on one serial loop — so the synchronous default would let the
+        // runner's callbacks mutate state on a pool thread while the test thread
+        // calls `discard`. Every test routes through the queue for that reason.
+        let hops = HopQueue()
         let gate = Gate()
         let runner = StubRunner(gate: gate)
-        let session = makeSession(runner: runner)
+        let session = makeSession(runner: runner, deliver: hops.deliver)
 
         XCTAssertEqual(session.ask("first"), .started)
         XCTAssertEqual(session.ask("second"), .queued)
@@ -196,11 +205,16 @@ final class ResearchSessionTests: XCTestCase {
         // the gate unless it is released, which is also what proves a discarded
         // session ignores the finish that finally lands.
         gate.release()
+        hops.expect(2)   // the snapshot and the finish, both dropped by the seal
+        hops.drain()
     }
 
     func testTheFourthQuestionIsRefused() {
+        // See `testAskWhileRunningQueues` for why `deliver` is never the
+        // synchronous default: callbacks must not run on the runner's thread.
+        let hops = HopQueue()
         let gate = Gate()
-        let session = makeSession(runner: StubRunner(gate: gate))
+        let session = makeSession(runner: StubRunner(gate: gate), deliver: hops.deliver)
         session.ask("first")
         for i in 1...ResearchSession.maxQueued {
             XCTAssertEqual(session.ask("queued \(i)"), .queued)
@@ -209,6 +223,8 @@ final class ResearchSessionTests: XCTestCase {
         XCTAssertEqual(session.queue.count, ResearchSession.maxQueued)
         session.discard()
         gate.release()   // let the cancelled run finish rather than leak a parked task
+        hops.expect(2)
+        hops.drain()
     }
 
     func testACompletedRunStartsTheNextQueuedQuestion() {
