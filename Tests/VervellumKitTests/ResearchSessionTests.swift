@@ -202,12 +202,12 @@ final class ResearchSessionTests: XCTestCase {
         XCTAssertEqual(session.queue.first?.question, "second")
         session.discard()
         // `Gate.wait` is not cancellation-aware: the cancelled task stays parked on
-        // the gate unless it is released, which is also what proves a discarded
-        // session ignores the finish that finally lands. The expectation is armed
-        // first — a semaphore counts arrivals either way, but a reader should not
-        // have to know that.
-        hops.expect(2)   // the snapshot and the finish, both dropped by the seal
+        // the gate unless it is released. The release has to come first — the
+        // callbacks `expect` waits on are produced only once the gate opens, so
+        // waiting first would deadlock. HopQueue's semaphore counts arrivals
+        // whenever they land, so an early delivery is never missed.
         gate.release()
+        hops.expect(2)   // the snapshot and the finish, both dropped by the seal
         hops.drain()
     }
 
@@ -224,8 +224,10 @@ final class ResearchSessionTests: XCTestCase {
         XCTAssertEqual(session.ask("one too many"), .queueFull)
         XCTAssertEqual(session.queue.count, ResearchSession.maxQueued)
         session.discard()
-        hops.expect(2)
+        // Release before waiting, as above — the runner's callbacks arrive only
+        // after the gate opens.
         gate.release()   // let the cancelled run finish rather than leak a parked task
+        hops.expect(2)
         hops.drain()
     }
 
