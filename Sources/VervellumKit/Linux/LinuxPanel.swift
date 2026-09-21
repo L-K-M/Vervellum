@@ -438,6 +438,10 @@ final class LinuxPanel {
     private func activate(_ session: ResearchSession) {
         sessions[session.id] = session
         active = session
+        // A settled session can never be shown again (there is no /history here yet)
+        // and its final thread was already saved and flushed by `onRunningChange`,
+        // so drop it rather than letting the map grow for the life of the window.
+        sessions = sessions.filter { $0.value === session || $0.value.isRunning }
         render()
     }
 
@@ -587,7 +591,12 @@ final class LinuxPanel {
         // One click re-asks, as on macOS. Retyping the question was the only recourse
         // before, and the composer had been cleared on submit.
         if turn.failure != nil || turn.stage == .cancelled, !turn.question.isEmpty {
-            let retry = GTK.button("Try again") { [weak self] in self?.active.retry(turn.id) }
+            let retry = GTK.button("Try again") { [weak self] in
+                // Set before the call: retrying appends and publishes synchronously,
+                // so the render that runs inside it must already know to follow.
+                self?.scrollToNewest = true
+                self?.active.retry(turn.id)
+            }
             gtk_widget_set_halign(retry, GTK_ALIGN_START)
             GTK.append(box, retry)
         }

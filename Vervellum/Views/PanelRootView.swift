@@ -1151,7 +1151,15 @@ struct PanelRootView: View {
         // thread being removed, so "was this the open one" can only be asked now.
         let wasOpen = engine.thread.id == thread.id
         store.delete(id: thread.id)
-        if wasOpen { recallIndex = nil }
+        if wasOpen {
+            // Safety net: if `ThreadStore.onRemove` was never wired (a preview, or a
+            // test without the AppDelegate), the engine still shows the deleted
+            // thread and its session is still in the map. `discardSession` covers
+            // both — and when the discard path already ran, `engine.thread` is a
+            // fresh id, so this is a no-op.
+            if engine.thread.id == thread.id { engine.discardSession(for: thread.id) }
+            recallIndex = nil
+        }
     }
 
     private func openThread(_ thread: ResearchThread) {

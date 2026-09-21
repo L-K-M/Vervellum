@@ -107,6 +107,11 @@ final class ResearchEngine: ObservableObject {
     /// the thread up mid-answer, with its queue and its snapshots intact.
     func replaceThread(with thread: ResearchThread) {
         if let live = sessions[thread.id] {
+            // The session's in-memory copy is treated as authoritative: every write
+            // to a thread goes through its session, so a caller's copy can only be
+            // stale, never fresher. If a second write path ever appears (rename,
+            // import, sync), reconcile against the caller's copy here instead of
+            // ignoring it.
             activate(live)
             return
         }
