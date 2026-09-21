@@ -66,8 +66,11 @@ final class CorePreferences {
         static let keptThreads = ThreadLibrary.defaultKeptThreads
         /// The search-plan and sources trail above each answer.
         static let showProcessTrail = true
-        /// Return submits; Shift-Return inserts a newline. The inverse suits people who
-        /// write long multi-paragraph questions.
+        /// Whether a bare Return submits or inserts a newline. Shift- and
+        /// Option-Return break a line either way — the toggle governs Return alone,
+        /// and ⌘Return (Ctrl on Linux) always submits, so "newline" mode keeps a
+        /// keyboard way to ask. The inverse suits people who write long
+        /// multi-paragraph questions.
         static let submitOnReturn = true
         /// On. A false positive costs a re-typed word; a false negative sends a live
         /// credential to a third party.

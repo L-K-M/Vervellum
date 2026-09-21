@@ -248,11 +248,12 @@ struct ComposerView: NSViewRepresentable {
                 parent.onSubmit()
                 return true
 
-            // A Return that carries a modifier. With submit-on-Return these add a
-            // newline; with the inverse preference they submit — and nothing is lost by
-            // that, because under the inverse preference *plain* Return is the line
-            // break. Each mode has one key that breaks a line and one that sends; which
-            // key plays which part is the whole of what the preference switches.
+            // A Return that carries Shift or Option always breaks a line, whatever
+            // `submitOnReturn` says. The preference used to invert both keys, which
+            // left "Return inserts a newline" mode with no way to break a line at
+            // all — plain Return was the only newline it had, and it was already
+            // spoken for. The always-send chord is ⌘⏎, handled at the panel level,
+            // so nothing is lost by keeping these two on the text side.
             //
             // Both selectors, because AppKit's standard key bindings send *different*
             // ones for the two keys: Option-Return is
@@ -266,11 +267,7 @@ struct ComposerView: NSViewRepresentable {
             // composer does the same thing.
             case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)),
                  #selector(NSResponder.insertLineBreak(_:)):
-                if parent.submitOnReturn {
-                    textView.insertText("\n", replacementRange: textView.selectedRange())
-                } else {
-                    parent.onSubmit()
-                }
+                textView.insertText("\n", replacementRange: textView.selectedRange())
                 return true
 
             case #selector(NSResponder.moveUp(_:)):

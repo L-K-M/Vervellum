@@ -290,13 +290,16 @@ final class LinuxPanel {
                 }
             }
             guard GTK.isReturn(keyval) else { return false }
-            // With submit-on-Return, a bare Return sends and Shift-Return adds a line;
-            // with the preference inverted, so are they. Control-Return always sends,
-            // the way Command-Return does on macOS, so there is one key that asks
-            // whichever way Return is configured.
-            let submitOnReturn = self.environment.preferences.submitOnReturn
+            // Shift- and Alt-Return always break a line, whichever way the
+            // preference points — it governs a bare Return only. The toggle used to
+            // invert both keys, which left "Return inserts a newline" mode with no
+            // way to break a line at all. Control-Return always sends, the way
+            // Command-Return does on macOS, so that mode still has a key that asks.
+            // Checked in this order so Ctrl-Shift-Return breaks a line too, matching
+            // Cmd-Shift-Return on the macOS side.
+            if GTK.hasShift(modifiers) || GTK.hasAlt(modifiers) { return false }
             let submitting = GTK.hasControl(modifiers)
-                || (GTK.hasShift(modifiers) ? !submitOnReturn : submitOnReturn)
+                || self.environment.preferences.submitOnReturn
             guard submitting else { return false }   // let the text view insert a newline
             // Return never stops a run. A user who types a follow-up while the answer
             // streams and presses Return out of habit must not lose the answer; the
@@ -639,10 +642,11 @@ final class LinuxPanel {
                              + environment.secrets.backendDescription + ".")
         }
         // The hint follows the preference; a hint that says the opposite of what Return
-        // does reads as the app being broken.
+        // does reads as the app being broken. Shift- and Alt-Return add a line either
+        // way, so the off-variant points at Ctrl-Return as the asking key instead.
         let keys = environment.preferences.submitOnReturn
             ? "Return asks · Shift-Return adds a line"
-            : "Return adds a line · Shift-Return asks"
+            : "Return adds a line · Ctrl-Return asks"
         return "<span weight=\"bold\">Ask a question.</span>\n\n"
             + GTK.escape("Vervellum plans web searches, runs them, then writes an answer that "
                          + "cites only what it found — and grades its own claims against that "
