@@ -302,13 +302,19 @@ enum GTK {
         let box = Unmanaged.passRetained(Box(work)).toOpaque()
         let trampoline: @convention(c) (UnsafeMutableRawPointer?) -> gboolean = { data in
             guard let data else { return 0 }
-            let unmanaged = Unmanaged<Box>.fromOpaque(data)
-            unmanaged.takeUnretainedValue().call()
-            unmanaged.release()
-            return 0   // G_SOURCE_REMOVE — one-shot
+            Unmanaged<Box>.fromOpaque(data).takeUnretainedValue().call()
+            return 0   // G_SOURCE_REMOVE — the destroy notify releases the box
         }
-        g_timeout_add(guint(interval * 1000),
-                      unsafeBitCast(trampoline, to: GSourceFunc.self), box)
+        let release: @convention(c) (UnsafeMutableRawPointer?) -> Void = { data in
+            guard let data else { return }
+            Unmanaged<Box>.fromOpaque(data).release()
+        }
+        // `_full` rather than `g_timeout_add` for the destroy notify: GLib runs it
+        // exactly once — after the one-shot fires, or when the source is removed
+        // without firing — so the box cannot leak on a main loop torn down early.
+        g_timeout_add_full(0, guint(interval * 1000),
+                           unsafeBitCast(trampoline, to: GSourceFunc.self), box,
+                           unsafeBitCast(release, to: GDestroyNotify.self))
     }
 
     // MARK: Layout

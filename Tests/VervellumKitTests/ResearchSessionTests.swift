@@ -192,6 +192,10 @@ final class ResearchSessionTests: XCTestCase {
         XCTAssertEqual(session.queue.count, 1)
         XCTAssertEqual(session.queue.first?.question, "second")
         session.discard()
+        // `Gate.wait` is not cancellation-aware: the cancelled task stays parked on
+        // the gate unless it is released, which is also what proves a discarded
+        // session ignores the finish that finally lands.
+        gate.release()
     }
 
     func testTheFourthQuestionIsRefused() {
@@ -204,6 +208,7 @@ final class ResearchSessionTests: XCTestCase {
         XCTAssertEqual(session.ask("one too many"), .queueFull)
         XCTAssertEqual(session.queue.count, ResearchSession.maxQueued)
         session.discard()
+        gate.release()   // let the cancelled run finish rather than leak a parked task
     }
 
     func testACompletedRunStartsTheNextQueuedQuestion() {
