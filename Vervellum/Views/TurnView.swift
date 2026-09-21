@@ -13,7 +13,10 @@ import AppKit
 /// engine ten times a second, *every* turn in the thread re-laid itself out ten times a
 /// second, whether or not anything in it had changed. Each of those turns re-created
 /// the AppKit text views behind `.textSelection(.enabled)` on every one of its
-/// paragraphs, which is where a process sample of the frozen app spent its time.
+/// paragraphs, which is where a process sample of the frozen app spent its time. (Those
+/// views are now `SelectableText`, for the second half of the same story: skipping a
+/// body was never going to be enough while the ones that *were* built cost a layout pass
+/// each to measure.)
 ///
 /// Comparing the two values the render actually depends on collapses that to the one
 /// turn that changed. The callbacks are deliberately left out of the comparison: they
@@ -116,10 +119,13 @@ struct TurnView: View, Equatable {
                 .fill(PanelTheme.Palette.accent)
                 .frame(width: 2)
             VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
-                Text(turn.question)
-                    .font(PanelTheme.Font.question(textScale))
-                    .foregroundStyle(PanelTheme.Palette.primaryText)
-                    .textSelection(.enabled)
+                // `SelectableText` rather than a `Text` with `.textSelection(.enabled)`,
+                // and this is the row that made the difference: there is one of these per
+                // turn, so the measuring cost of SwiftUI's own selectable text was paid
+                // once per turn on every layout pass of the thread. See `SelectableText`.
+                SelectableText(text: turn.question,
+                               font: PanelTheme.NativeFont.question(textScale),
+                               color: PanelTheme.NativePalette.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
                 // What was asked *with*, kept beside what was asked. A transcript that
                 // showed the words alone would leave a reader wondering what the answer
@@ -129,29 +135,49 @@ struct TurnView: View, Equatable {
                 // bytes back for every turn in the thread on every frame.
                 if !turn.attachments.isEmpty {
                     ForEach(turn.attachments) { attachment in
-                        Label(attachment.name,
-                              systemImage: attachment.kind == .image ? "photo" : "doc.text")
-                            .font(PanelTheme.Font.caption(textScale))
-                            .foregroundStyle(PanelTheme.Palette.tertiaryText)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            // The name is the whole record of what the answer was
-                            // looking at, and middle truncation eats the part that
-                            // distinguishes one screenshot from the next. Hover has it.
-                            .help(attachment.name)
+                        // Spelled out rather than left as a `Label`, because the name has
+                        // to be selectable and a `Label`'s text cannot be without pulling
+                        // SwiftUI's `SelectionOverlay` into every attached row. The symbol
+                        // and the middle truncation are what the `Label` was giving; the
+                        // selection is why this is worth the three extra lines.
+                        HStack(spacing: PanelTheme.Space.tight) {
+                            Image(systemName: attachment.kind == .image ? "photo" : "doc.text")
+                                .font(PanelTheme.Font.caption(textScale))
+                                .foregroundStyle(PanelTheme.Palette.tertiaryText)
                             // And selectable, like the question above it. Hover shows
                             // the truncated part; only selection gets it into a search
                             // box or a follow-up question.
-                            .textSelection(.enabled)
-                            // Named as an attachment, not merely named. The symbol is
-                            // decorative to VoiceOver, so this row read out as a bare
-                            // file name in the middle of a transcript — which is the
-                            // non-sequitur the paragraph above keeps out of the reading
-                            // for anyone who can see the icon. The label is read whole,
-                            // so the middle truncation does not reach it either.
-                            .accessibilityLabel("Attached "
-                                + (attachment.kind == .image ? "image" : "file")
-                                + ": " + attachment.name)
+                            SelectableText(text: attachment.name,
+                                           font: PanelTheme.NativeFont.caption(textScale),
+                                           color: PanelTheme.NativePalette.tertiaryText,
+                                           // The name is the whole record of what the
+                                           // answer was looking at, and middle truncation
+                                           // eats the timestamp that tells one screenshot
+                                           // from the next. Kept anyway — both ends carry
+                                           // meaning too, and hover and selection below
+                                           // are what recover the part it hides.
+                                           layout: .singleLine(.byTruncatingMiddle))
+                            Spacer(minLength: 0)
+                        }
+                        // Named as an attachment, not merely named. The symbol is
+                        // decorative to VoiceOver, so this row read out as a bare
+                        // file name in the middle of a transcript — which is the
+                        // non-sequitur the paragraph above keeps out of the reading
+                        // for anyone who can see the icon. The label is read whole,
+                        // so the middle truncation does not reach it either.
+                        //
+                        // `.ignore` because the row is now two views rather than one:
+                        // without it the symbol and the text would be read as separate
+                        // elements and the label below would name neither.
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Attached "
+                            + (attachment.kind == .image ? "image" : "file")
+                            + ": " + attachment.name)
+                        // Hover has the whole of it, truncation or not. Applied after the
+                        // accessibility modifiers rather than before: `.help` sets a help
+                        // trait as well as a tooltip, and the element it would have landed
+                        // on above is the one `.ignore` discards.
+                        .help(attachment.name)
                     }
                 }
             }
@@ -254,11 +280,10 @@ struct LimitationsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
             SectionLabel(text: "Limitations")
-            Text(text)
-                .font(PanelTheme.Font.caption(textScale))
-                .foregroundStyle(PanelTheme.Palette.secondaryText)
+            SelectableText(text: text,
+                           font: PanelTheme.NativeFont.caption(textScale),
+                           color: PanelTheme.NativePalette.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
         }
     }
 }

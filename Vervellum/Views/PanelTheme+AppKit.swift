@@ -73,6 +73,10 @@ extension PanelTheme {
             NSFont.monospacedSystemFont(ofSize: PanelTheme.Metrics.citation * scale,
                                         weight: .medium)
         }
+        static func caption(_ scale: Double) -> NSFont { at(PanelTheme.Metrics.caption, scale) }
+        static func question(_ scale: Double) -> NSFont {
+            at(PanelTheme.Metrics.question, scale, weight: .medium)
+        }
 
         /// The same font with a symbolic trait added, or the original when the family has
         /// no such face.
@@ -102,6 +106,46 @@ extension PanelTheme {
         static var primaryText: NSColor { theme.primaryText.map { NSColor($0) } ?? .labelColor }
         static var secondaryText: NSColor {
             theme.secondaryText.map { NSColor($0) } ?? .secondaryLabelColor
+        }
+        /// The same fraction of the secondary colour `Palette.tertiaryText` takes, from
+        /// the same constant, so the tier a reader sees does not depend on which of the
+        /// two drew it. An attachment row has one of each side by side.
+        ///
+        /// The unthemed fallback goes through a dynamic provider rather than taking the
+        /// alpha off `secondaryLabelColor` directly. `withAlphaComponent` resolves a
+        /// catalog colour against whatever appearance was current when it was called, and
+        /// this one is baked into an `NSAttributedString` that `SelectableText` replaces
+        /// only when the *string* differs — so a tint frozen at launch would survive a
+        /// switch to Dark Mode with nothing left to invalidate it. A provider is asked
+        /// again for each appearance instead. The themed branch needs none of this: its
+        /// components came from a hex string and are the same in either appearance.
+        static var tertiaryText: NSColor {
+            guard let secondary = theme.secondaryText else { return unthemedTertiaryText }
+            return NSColor(secondary.withAlpha(secondary.alpha * PanelTheme.Palette.tertiaryAlpha))
+        }
+
+        /// One instance, held rather than built per access — the tier above it gets this
+        /// for free by falling back to the shared `secondaryLabelColor`.
+        ///
+        /// A provider-backed colour is a fresh object every time it is constructed, and
+        /// two of them do not compare equal: there is no catalog name to match on and a
+        /// provider is a block, which has no equality beyond its pointer. That matters
+        /// because this colour is an attribute of the string `SelectableText` hands to its
+        /// text view, and the guard there skips the work when the new string
+        /// `isEqual(to:)` the old one. A new colour per access fails that comparison every
+        /// time, so every unthemed attachment row would rewrite and re-lay-out its storage
+        /// on each of the ten publishes a second a streaming answer makes — the exact cost
+        /// this whole change exists to remove, reintroduced by the fix for the tint.
+        ///
+        /// Held once, it compares equal to itself, and the provider is still asked per
+        /// appearance when the row is drawn. Nothing about Dark Mode is given up.
+        private static let unthemedTertiaryText = NSColor(name: nil) { appearance in
+            var resolved = NSColor.secondaryLabelColor
+            appearance.performAsCurrentDrawingAppearance {
+                resolved = NSColor.secondaryLabelColor
+                    .withAlphaComponent(CGFloat(PanelTheme.Palette.tertiaryAlpha))
+            }
+            return resolved
         }
     }
 }

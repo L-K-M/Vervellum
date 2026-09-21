@@ -410,9 +410,16 @@ struct CodeBlock: View {
                     .padding(.top, PanelTheme.Space.small)
             }
             ScrollView(.horizontal, showsIndicators: false) {
-                Text(code)
-                    .font(PanelTheme.Font.code(scale))
-                    .textSelection(.enabled)
+                // `.unwrapped`, which is what the horizontal scroll view is for: a wrap
+                // in a code block changes what the code says. Selectable through
+                // `SelectableText` rather than `.textSelection(.enabled)` for the reason
+                // that view documents — a code block is rare, but it sits inside the
+                // transcript and pays the same per-pass measuring cost as everything
+                // else there.
+                SelectableText(text: code,
+                               font: PanelTheme.NativeFont.code(scale),
+                               color: PanelTheme.NativePalette.primaryText,
+                               layout: .unwrapped)
                     .padding(PanelTheme.Space.medium)
             }
         }
