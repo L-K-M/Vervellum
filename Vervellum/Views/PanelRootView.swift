@@ -136,6 +136,7 @@ struct PanelRootView: View {
 
             if showsHistory {
                 HistoryView(store: store,
+                            runningIDs: engine.runningThreadIDs,
                             onOpen: openThread,
                             onDelete: deleteThread,
                             onClose: { showsHistory = false })
@@ -1130,8 +1131,9 @@ struct PanelRootView: View {
         showsHistory = false
         queueFullNote = false
         attachments = []
-        // The engine first: `startNewThread` drops any waiting questions, and doing it
-        // after clearing the draft keeps the two from racing over the composer.
+        // The engine first: `startNewThread` detaches the current session — its run
+        // and its queue keep going on the old thread — and doing it after clearing the
+        // draft keeps the two from racing over the composer.
         engine.startNewThread()
         draft = ""
         recallIndex = nil
@@ -1142,11 +1144,14 @@ struct PanelRootView: View {
     /// The history list stays open and the draft is kept: the user is tidying, not
     /// starting over.
     private func deleteThread(_ thread: ResearchThread) {
+        // Sampled before the delete: `store.delete` reaches the engine through
+        // `ThreadStore.onRemove`, which discards the thread's session — stopping its
+        // run, sealing its callbacks — and, if it was on screen, activates a fresh
+        // thread. By the time `delete` returns, `engine.thread` is no longer the
+        // thread being removed, so "was this the open one" can only be asked now.
+        let wasOpen = engine.thread.id == thread.id
         store.delete(id: thread.id)
-        if engine.thread.id == thread.id {
-            engine.startNewThread()
-            recallIndex = nil
-        }
+        if wasOpen { recallIndex = nil }
     }
 
     private func openThread(_ thread: ResearchThread) {

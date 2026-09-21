@@ -292,6 +292,25 @@ enum GTK {
         g_idle_add(unsafeBitCast(trampoline, to: GSourceFunc.self), box)
     }
 
+    /// Runs `work` on the GTK main loop after `interval` seconds.
+    ///
+    /// The delayed counterpart to `onMainLoop` — the `SnapshotCoalescer`'s flush timer
+    /// is scheduled through here so it fires on the same GLib thread every other
+    /// session callback does. `DispatchQueue.main.asyncAfter` would schedule onto a
+    /// queue nothing drains; see `onMainLoop` for why that fails silently.
+    static func after(_ interval: TimeInterval, _ work: @escaping () -> Void) {
+        let box = Unmanaged.passRetained(Box(work)).toOpaque()
+        let trampoline: @convention(c) (UnsafeMutableRawPointer?) -> gboolean = { data in
+            guard let data else { return 0 }
+            let unmanaged = Unmanaged<Box>.fromOpaque(data)
+            unmanaged.takeUnretainedValue().call()
+            unmanaged.release()
+            return 0   // G_SOURCE_REMOVE — one-shot
+        }
+        g_timeout_add(guint(interval * 1000),
+                      unsafeBitCast(trampoline, to: GSourceFunc.self), box)
+    }
+
     // MARK: Layout
 
     /// Keep borrowed widget pointers valid when the window manager closes the panel.

@@ -11,6 +11,9 @@ struct HistoryView: View {
     @Environment(\.panelTextScale) private var textScale
 
     @ObservedObject var store: ThreadStore
+    /// Threads with a run still in flight — a session detached by `/new` keeps
+    /// working, and the badge is how the reader knows the row is still changing.
+    var runningIDs: Set<UUID> = []
     var onOpen: (ResearchThread) -> Void
     /// Deletion is the root view's, not the store's alone: the thread may be the one
     /// the engine is showing, and only the root view can take it out of both.
@@ -75,6 +78,7 @@ struct HistoryView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(results) { thread in
                     HistoryRow(thread: thread,
+                               isRunning: runningIDs.contains(thread.id),
                                onOpen: { onOpen(thread) },
                                onDelete: { onDelete(thread) })
                 }
@@ -95,6 +99,7 @@ private struct HistoryRow: View {
     @Environment(\.panelTextScale) private var textScale
 
     let thread: ResearchThread
+    var isRunning = false
     var onOpen: () -> Void
     var onDelete: () -> Void
 
@@ -113,6 +118,14 @@ private struct HistoryRow: View {
                         .foregroundStyle(PanelTheme.Palette.tertiaryText)
                 }
                 Spacer(minLength: 0)
+                if isRunning {
+                    // The row is live: this thread's session is still answering.
+                    // Always visible rather than hover-gated like the delete button —
+                    // it is the *reason* the row's contents may change underfoot.
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("Still researching")
+                }
                 if isHovering {
                     Button(action: onDelete) {
                         Image(systemName: "trash")

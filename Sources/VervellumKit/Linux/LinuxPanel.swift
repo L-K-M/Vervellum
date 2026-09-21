@@ -45,22 +45,23 @@ final class LinuxPanel {
     /// research control behind a hover a keyboard never performs.
     private let levelSummary: GTK.Widget
 
-    private var thread = ResearchThread()
+    /// Every open thread's session, keyed by thread id. `/new` detaches the current
+    /// one rather than cancelling its run: the session keeps working in the map —
+    /// and keeps persisting its thread — while the new one is on screen. The macOS
+    /// `ResearchEngine` holds the same map; there is no `/history` here yet, so a
+    /// detached session can only be revisited through a restart, but its run still
+    /// completes and is stored.
+    private var sessions: [UUID: ResearchSession] = [:]
+    /// The thread on screen. A `lazy var` because building the first session needs
+    /// `environment`, which `init` itself is what sets — the property is forced at the
+    /// end of `init`, once everything it reads exists.
+    private lazy var active: ResearchSession = makeSession(thread: ResearchThread())
     /// What is attached to the question being typed, bytes and all.
     ///
     /// Held here rather than written as it arrives: a question still being typed has no
     /// turn to refer to it, and the store is swept by reachability — see
     /// `PendingAttachment`. `ask` writes them at the moment a turn exists.
     private var pendingAttachments: [PendingAttachment] = []
-    private var runningTask: Task<Void, Never>?
-    private var isRunning = false
-    /// Which turn the running task belongs to. A run cancelled by "New" still reports
-    /// back, after the thread has been replaced; without this it would reset the state
-    /// of whatever run the user had started since.
-    private var runningTurnID: UUID?
-    /// When the thread was last drawn. A streamed answer produces a snapshot per token,
-    /// and rebuilding the widget tree that often is visibly slow on a long thread.
-    private var lastRender = Date.distantPast
     /// Set when a turn is appended, so the next render scrolls to it even if the reader
     /// had scrolled up: a question just asked is always the thing to look at.
     private var scrollToNewest = false
@@ -101,6 +102,10 @@ final class LinuxPanel {
         // widget by default, and an empty box still takes its spacing.
         renderAttachments()
         buildLevelSelector()
+        // Forced here, once `init` is done and `environment` exists — see the
+        // property for why it is lazy. Registering is what retains a session after
+        // it is detached: the map is the only strong owner of one nobody can see.
+        sessions[active.id] = active
         render()
     }
 
@@ -297,7 +302,7 @@ final class LinuxPanel {
             // streams and presses Return out of habit must not lose the answer; the
             // draft stays and the key is swallowed, exactly as on macOS. Only the Stop
             // button cancels.
-            guard !self.isRunning else { return true }
+            guard !self.active.isRunning else { return true }
             self.submit()
             return true
         }
@@ -306,32 +311,25 @@ final class LinuxPanel {
     // MARK: Actions
 
     private func newThread() {
-        runningTask?.cancel()
-        // Cleared now rather than when the cancelled run reports back. Until `finish`
-        // arrives — which takes as long as the in-flight request takes to notice the
-        // cancellation — a press of Ask would otherwise be read as Stop and swallowed,
-        // which looks exactly like the button ignoring the user.
-        runningTask = nil
-        runningTurnID = nil
-        isRunning = false
-        thread = ResearchThread()
+        // Detached, not cancelled: a run in flight on the old session keeps going —
+        // the map holds it, and its finished thread is still saved to the archive.
+        activate(makeSession(thread: ResearchThread()))
         GTK.setText(composer, "")
         pendingAttachments = []
         renderAttachments()
-        render()
     }
 
     /// The button: Ask while idle, Stop while a run is in flight.
     private func submitOrStop() {
-        if isRunning {
-            runningTask?.cancel()
+        if active.isRunning {
+            active.cancel()
             return
         }
         submit()
     }
 
     private func submit() {
-        guard !isRunning else { return }
+        guard !active.isRunning else { return }
         let text = GTK.text(of: composer).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             // A dropped file with nothing asked about it was a Return that did nothing
@@ -364,9 +362,11 @@ final class LinuxPanel {
         case .ask(let question, let level):
             GTK.setText(composer, "")
             // A typed level is this question's alone; the selector keeps whatever it was
-            // set to, and nil means "whatever it says". See `ComposerCommand.ask`.
-            ask(question, mode: level ?? environment.preferences.researchLevel,
-                attaching: takePendingAttachments())
+            // set to, and nil means "whatever it says" — resolved inside `ask`. See
+            // `ComposerCommand.ask`.
+            let outcome = active.ask(question, mode: level,
+                                     attachments: takePendingAttachments())
+            if outcome == .started { scrollToNewest = true }
         }
     }
 
@@ -389,141 +389,55 @@ final class LinuxPanel {
         appendNotice(ComposerCommand.modelListing(settings))
     }
 
-    /// - Parameters:
-    ///   - attached: what goes with this question. Passed in rather than read from
-    ///     `pendingAttachments`, because a retry asks with the *old turn's* files while
-    ///     the composer may be holding files staged for a different question — and
-    ///     taking those would destroy them.
-    ///   - lostAttachments: whether this question was asked with something attached that
-    ///     could not be brought along — only a retry can be, and only when the bytes are
-    ///     no longer stored.
-    private func ask(_ question: String, mode: ResearchRunner.Mode,
-                     attaching attached: [PendingAttachment],
-                     lostAttachments: Bool = false) {
-        var draft = ResearchTurn(question: question)
-        draft.model = environment.preferences.providerSettings.modelName
-        draft.level = mode
-        if mode == .direct { draft.notices = [.noEvidence] }
-        if lostAttachments { draft.addNotice(.attachmentMissing) }
-        draft.attachments = attached.map { $0.attachment }
-        // Written at the one moment a turn that refers to them exists, and only when the
-        // library is being kept: "history off" means the bytes are gone, and a
-        // screenshot in a directory beside an erased thread file would be the loudest
-        // way to break that. The turn runs with the picture either way — what it is sent
-        // is the map below, held in memory for the length of the run.
-        if environment.preferences.historyEnabled {
-            for pending in attached {
-                do {
-                    try environment.attachments.write(pending.data, for: pending.attachment)
-                } catch {
-                    // No path and no error text: a failure here names a file under the
-                    // user's home, and this log records shape rather than content.
-                    StandardErrorLog().write(.warning, "An attachment could not be stored, "
-                        + "so it will not be there when this thread is reopened.")
-                    // And said where the reader is looking. The log is for whoever runs
-                    // this from a terminal; the notice is for the person who is about to
-                    // believe their screenshot is part of the saved thread.
-                    draft.addNotice(.attachmentNotStored)
-                }
-            }
-        }
-        // Immutable from here: the task's closure cannot capture a mutable variable.
-        let turn = draft
-        let bytes = Dictionary(attached.map { ($0.id, $0.data) },
-                               uniquingKeysWith: { first, _ in first })
-        thread.turns.append(turn)
-        runningTurnID = turn.id
-        isRunning = true
-        scrollToNewest = true
-        environment.archive.save(persistableThread)
-        render()
-
-        // Informational turns (`/help`) are filtered out again by `ResearchContext`;
-        // dropping them here just keeps the history honest at the source.
-        let history = thread.turns.dropLast().filter { !$0.question.isEmpty }
-        let runner = ResearchRunner(
-            environment: .init(preferences: environment.preferences, secrets: environment.secrets),
-            trace: ResearchTrace(sink: StandardErrorLog()),
-            attachmentBytes: { bytes[$0.id] })
-
-        runningTask = Task { [weak self] in
-            let finished = await runner.run(turn, mode: mode, history: history) { snapshot in
-                // Back onto the GTK loop. Not `DispatchQueue.main` and not `MainActor`:
-                // a GLib main loop drains neither, so either would leave the window
-                // frozen with no error to show for it.
-                GTK.onMainLoop { self?.apply(snapshot) }
-            }
-            GTK.onMainLoop {
-                self?.apply(finished)
-                self?.finish(finished.id)
-            }
-        }
-    }
-
-    private func apply(_ snapshot: ResearchTurn) {
-        guard snapshot.id == runningTurnID,
-              let index = thread.turns.firstIndex(where: { $0.id == snapshot.id }) else { return }
-        let previous = thread.turns[index]
-        thread.turns[index] = snapshot
-        thread.updatedAt = Date()
-
-        // A change that only extends the answer is redrawn at most ten times a second.
-        // Anything structural — a new stage, sources arriving, verdicts landing — is
-        // drawn immediately, because those are the moments the user is waiting for. The
-        // final frame is guaranteed by `finish(_:)`, which always draws.
-        let structural = SnapshotCoalescer.isStructural(snapshot, relativeTo: previous)
-        guard structural || Date().timeIntervalSince(lastRender) >= SnapshotCoalescer.defaultInterval else { return }
-        environment.archive.save(persistableThread)
-        render()
-    }
-
-    private func finish(_ id: UUID) {
-        // Only the run that is actually current may clear the running state. See
-        // `runningTurnID`.
-        guard runningTurnID == id else { return }
-        runningTurnID = nil
-        isRunning = false
-        runningTask = nil
-        environment.archive.save(persistableThread)
-        environment.archive.flush()
-        render()
-    }
-
-    /// Re-asks a turn's question the way it was asked. A turn that is still last is
-    /// replaced in place; an older one is asked again at the end, where the answer
-    /// belongs — the same rule the macOS engine follows.
-    private func retry(_ turn: ResearchTurn) {
-        guard !isRunning else { return }
-        // The level the turn was asked at, which it now records — so a deep or agent
-        // turn is retried as one, rather than quietly re-asked as a single pass.
-        let mode = turn.level
-        // Asked again means asked with what it was asked with. The bytes are still in
-        // the store — the turn being retried is what keeps them reachable — and one
-        // whose bytes have gone is dropped rather than listed on a turn that could not
-        // see it.
-        // Into a local, never into `pendingAttachments`: the composer may be holding
-        // files staged for the question the user is typing, and a retry that took them
-        // would ask an old question with them and destroy them in the same gesture.
-        let again = turn.attachments.compactMap { attachment in
-            environment.attachments.data(for: attachment).map {
-                PendingAttachment(attachment: attachment, data: $0)
-            }
-        }
-        // What did not come back is said on the new turn. A turn asked with history off
-        // never had its bytes written — they lived for the length of that run and no
-        // longer — so a retry seconds later would otherwise quietly re-ask the question
-        // without the picture. The same notice the runner raises for bytes that have
-        // gone, because it is the same fact about the same question.
-        let lost = again.count < turn.attachments.count
-        if thread.turns.last?.id == turn.id { thread.turns.removeLast() }
-        ask(turn.question, mode: mode, attaching: again, lostAttachments: lost)
-    }
-
-    /// A message from the panel itself — `/help`, or a command this platform lacks —
-    /// shown in the thread as a turn with no question.
+    /// Builds a session over one thread and wires its callbacks to this window.
     ///
-    /// Such turns are rendered but never persisted and never sent as history; both
-    /// `persistableThread` and `ResearchContext` key off the empty question.
+    /// The callbacks do two different jobs, which is why `onChange` is not simply
+    /// "repaint": every session persists its own thread — a detached run is still
+    /// writing the thread it will be reopened as — while only the session on screen
+    /// is drawn.
+    private func makeSession(thread: ResearchThread) -> ResearchSession {
+        let session = ResearchSession(
+            thread: thread,
+            preferences: environment.preferences,
+            secrets: environment.secrets,
+            logSink: StandardErrorLog(),
+            attachmentStore: environment.attachments,
+            deliver: { GTK.onMainLoop($0) },
+            after: { GTK.after($0, $1) })
+        session.onChange = { [weak self] session in
+            guard let self else { return }
+            // Saved whether or not the session is on screen: the archive upserts by
+            // thread id, so a detached run writes its own thread and no other.
+            self.environment.archive.save(session.persistableThread)
+            guard session === self.active else { return }
+            self.render()
+        }
+        session.onRunningChange = { [weak self] session in
+            guard let self else { return }
+            if !session.isRunning {
+                // The debounced save above is for mid-stream; a run that has settled —
+                // completed, failed or stopped — is written through to disk now, so a
+                // detached session's last word survives the window being closed.
+                self.environment.archive.save(session.persistableThread)
+                self.environment.archive.flush()
+            }
+            guard session === self.active else { return }
+            self.render()
+        }
+        // `onQueueReturned` is intentionally unwired: the composer refuses questions
+        // while a run is up (`submit` gates on `isRunning`), so this front end never
+        // builds the queue the macOS one hands back.
+        return session
+    }
+
+    /// Puts a session on screen. The old one is left in the map untouched — that is
+    /// the whole mechanism, not a step that forgot to cancel.
+    private func activate(_ session: ResearchSession) {
+        sessions[session.id] = session
+        active = session
+        render()
+    }
+
     // MARK: Attachments
 
     /// Takes what a drop or a paste turned out to be carrying.
@@ -594,26 +508,29 @@ final class LinuxPanel {
         }
     }
 
+    /// A message from the panel itself — `/help`, or a command this platform lacks —
+    /// shown in the thread as a turn with no question.
+    ///
+    /// Such turns are rendered but never persisted and never sent as history; both
+    /// `persistableThread` and `ResearchContext` key off the empty question.
     private func appendNotice(_ markdown: String) {
         var turn = ResearchTurn(question: "")
         turn.answer = markdown
         turn.stage = .complete
-        thread.turns.append(turn)
+        // The flag first: appending publishes synchronously, so `render` runs inside
+        // the call and must already know it should follow.
         scrollToNewest = true
-        render()
-    }
-
-    /// The thread as it is stored: research only, with the panel's own notices removed.
-    private var persistableThread: ResearchThread {
-        var stored = thread
-        stored.turns.removeAll { $0.question.isEmpty }
-        return stored
+        active.appendLocalTurn(turn)
     }
 
     // MARK: Rendering
 
+    /// Rebuilds the thread box from the session on screen.
+    ///
+    /// There is no redraw throttle of its own here: the session's `SnapshotCoalescer`
+    /// already paces published snapshots to ~10 Hz — the same rule `lastRender` used
+    /// to implement by hand — so each `onChange` is worth a render.
     private func render() {
-        lastRender = Date()
         // Sampled before the rebuild, which resets the content height: a reader who
         // had scrolled up to re-read is left where they were; one who was at the end
         // follows the answer as it grows. The rebuild keeps the scroller's value, so
@@ -622,17 +539,18 @@ final class LinuxPanel {
         scrollToNewest = false
         GTK.removeAllChildren(of: threadBox)
 
-        if thread.turns.isEmpty {
+        if active.thread.turns.isEmpty {
             GTK.append(threadBox, GTK.markupLabel(Self.emptyStateMarkup(environment: environment)))
         }
 
-        for turn in thread.turns {
+        for turn in active.thread.turns {
             GTK.append(threadBox, turnView(turn))
         }
 
         gtk_label_set_markup(vv_label(statusLabel),
-                             isRunning ? "<span size=\"small\">Researching… press Stop to cancel</span>" : "")
-        gtk_button_set_label(vv_button(sendButton), isRunning ? "Stop" : "Ask")
+                             active.isRunning
+                                ? "<span size=\"small\">Researching… press Stop to cancel</span>" : "")
+        gtk_button_set_label(vv_button(sendButton), active.isRunning ? "Stop" : "Ask")
 
         if follow {
             // One idle hop later, after the new children have been laid out and the
@@ -666,7 +584,7 @@ final class LinuxPanel {
         // One click re-asks, as on macOS. Retyping the question was the only recourse
         // before, and the composer had been cleared on submit.
         if turn.failure != nil || turn.stage == .cancelled, !turn.question.isEmpty {
-            let retry = GTK.button("Try again") { [weak self] in self?.retry(turn) }
+            let retry = GTK.button("Try again") { [weak self] in self?.active.retry(turn.id) }
             gtk_widget_set_halign(retry, GTK_ALIGN_START)
             GTK.append(box, retry)
         }
