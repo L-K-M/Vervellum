@@ -126,19 +126,46 @@ struct SelectableText: NSViewRepresentable {
     }
 
     func updateNSView(_ view: MeasuringTextView, context: Context) {
+        // The container first, and above the guard below rather than after it.
+        // `sizeThatFits` measures with whatever `layout` says *now*, so a container still
+        // configured for the previous one would draw something other than the size this
+        // view reports — the disagreement `TextLayout` says must not happen. A layout
+        // change need not touch the string, so the guard would drop it entirely.
+        //
+        // No call site varies its layout today, and comparing against the container's own
+        // state makes this a no-op while none does: `makeStack(tracksWidth:)` and
+        // `makeNSView` set exactly these two. It is here so that a call site which starts
+        // varying one is not silently wrong.
+        if let container = view.textContainer,
+           container.maximumNumberOfLines != maximumLines
+               || container.widthTracksTextView != wraps {
+            container.maximumNumberOfLines = maximumLines
+            container.widthTracksTextView = wraps
+            view.autoresizingMask = []
+            if wraps {
+                view.autoresizingMask = [.width]
+            } else {
+                container.size = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                        height: CGFloat.greatestFiniteMagnitude)
+            }
+        }
+        // Built once. The property is computed, so every mention of it below would
+        // otherwise allocate another string — and a paragraph style with it under
+        // `.singleLine` — per row per pass, on the path this file exists to keep cheap.
+        let updated = attributed
         // Compared before assigning, for the reason `AnswerTextView` gives: replacing
         // identical storage drops whatever the reader had selected, and every one of
         // these is re-rendered whenever the thread publishes — ten times a second while
         // an answer streams.
-        guard view.textStorage?.isEqual(to: attributed) != true else { return }
+        guard view.textStorage?.isEqual(to: updated) != true else { return }
         // Kept only when the words themselves did not change. None of this text streams:
         // what moves it is the theme or the text-size setting, which restyle the same
         // string, and a selection across one of those should survive. A *different*
         // string means the row was reused for another turn, and carrying a highlight over
         // words nobody chose is what a copy from the panel would then take.
-        let sameWords = view.textStorage?.string == attributed.string
+        let sameWords = view.textStorage?.string == updated.string
         let selection = view.selectedRanges
-        view.textStorage?.setAttributedString(attributed)
+        view.textStorage?.setAttributedString(updated)
         if sameWords { view.selectedRanges = selection }
     }
 

@@ -107,11 +107,31 @@ extension PanelTheme {
         static var secondaryText: NSColor {
             theme.secondaryText.map { NSColor($0) } ?? .secondaryLabelColor
         }
-        /// The same 0.62 of the secondary colour `Palette.tertiaryText` takes, so the
-        /// tier a reader sees does not depend on which of the two drew it.
+        /// The same fraction of the secondary colour `Palette.tertiaryText` takes, from
+        /// the same constant, so the tier a reader sees does not depend on which of the
+        /// two drew it. An attachment row has one of each side by side.
+        ///
+        /// The unthemed fallback goes through a dynamic provider rather than taking the
+        /// alpha off `secondaryLabelColor` directly. `withAlphaComponent` resolves a
+        /// catalog colour against whatever appearance was current when it was called, and
+        /// this one is baked into an `NSAttributedString` that `SelectableText` replaces
+        /// only when the *string* differs — so a tint frozen at launch would survive a
+        /// switch to Dark Mode with nothing left to invalidate it. A provider is asked
+        /// again for each appearance instead. The themed branch needs none of this: its
+        /// components came from a hex string and are the same in either appearance.
         static var tertiaryText: NSColor {
-            theme.secondaryText.map { NSColor($0.withAlpha($0.alpha * 0.62)) }
-                ?? NSColor.secondaryLabelColor.withAlphaComponent(0.62)
+            let fraction = PanelTheme.Palette.tertiaryAlpha
+            if let secondary = theme.secondaryText {
+                return NSColor(secondary.withAlpha(secondary.alpha * fraction))
+            }
+            return NSColor(name: nil) { appearance in
+                var resolved = NSColor.secondaryLabelColor
+                appearance.performAsCurrentDrawingAppearance {
+                    resolved = NSColor.secondaryLabelColor
+                        .withAlphaComponent(CGFloat(fraction))
+                }
+                return resolved
+            }
         }
     }
 }

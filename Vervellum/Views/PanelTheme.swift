@@ -164,9 +164,14 @@ enum PanelTheme {
         /// Transparency without stating a light and a dark variant of itself.
         static var primaryText: Color { theme.primaryText.map { Color($0) } ?? Color.primary }
         static var secondaryText: Color { theme.secondaryText.map { Color($0) } ?? Color.secondary }
+        /// How much of the secondary colour the tertiary tier keeps. Named because the
+        /// AppKit palette takes the same fraction from the same constant, and a tint
+        /// edited on one side alone would leave a row whose icon and text disagreed about
+        /// which tier they are — an attachment row has one of each, side by side.
+        static let tertiaryAlpha: Double = 0.62
         static var tertiaryText: Color {
-            theme.secondaryText.map { Color($0.withAlpha($0.alpha * 0.62)) }
-                ?? Color.secondary.opacity(0.62)
+            theme.secondaryText.map { Color($0.withAlpha($0.alpha * tertiaryAlpha)) }
+                ?? Color.secondary.opacity(tertiaryAlpha)
         }
 
         /// Flat fills for cards and chips. Deliberately not materials: see the note

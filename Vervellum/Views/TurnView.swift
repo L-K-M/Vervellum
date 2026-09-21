@@ -151,14 +151,14 @@ struct TurnView: View, Equatable {
                                            font: PanelTheme.NativeFont.caption(textScale),
                                            color: PanelTheme.NativePalette.tertiaryText,
                                            // The name is the whole record of what the
-                                           // answer was looking at, and truncating the
-                                           // tail eats the part that distinguishes one
-                                           // screenshot from the next.
+                                           // answer was looking at, and middle truncation
+                                           // eats the timestamp that tells one screenshot
+                                           // from the next. Kept anyway — both ends carry
+                                           // meaning too, and hover and selection below
+                                           // are what recover the part it hides.
                                            layout: .singleLine(.byTruncatingMiddle))
                             Spacer(minLength: 0)
                         }
-                        // Hover has the whole of it, truncation or not.
-                        .help(attachment.name)
                         // Named as an attachment, not merely named. The symbol is
                         // decorative to VoiceOver, so this row read out as a bare
                         // file name in the middle of a transcript — which is the
@@ -173,6 +173,11 @@ struct TurnView: View, Equatable {
                         .accessibilityLabel("Attached "
                             + (attachment.kind == .image ? "image" : "file")
                             + ": " + attachment.name)
+                        // Hover has the whole of it, truncation or not. Applied after the
+                        // accessibility modifiers rather than before: `.help` sets a help
+                        // trait as well as a tooltip, and the element it would have landed
+                        // on above is the one `.ignore` discards.
+                        .help(attachment.name)
                     }
                 }
             }
