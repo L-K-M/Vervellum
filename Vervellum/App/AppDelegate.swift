@@ -66,6 +66,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                            "attachments": questions.flatMap(\.attachments)])
         }
 
+        // A deleted thread's run is not merely un-saved — it is stopped. The archive's
+        // tombstone keeps its last callbacks from being persisted; this keeps them from
+        // being produced at all, and it is the only path a *detached* session — one whose
+        // thread is not on screen — is ever ended by.
+        store.onRemove = { [weak self] id in
+            guard let self else { return }
+            if let id {
+                self.engine.discardSession(for: id)
+            } else {
+                self.engine.discardAllSessions()
+            }
+        }
+
         // Before the controller, not after: the panel's content reads the palette, so
         // assigning it later would leave the default theme one frame wide.
         applyPanelPalette()
@@ -170,7 +183,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onOpenSettings: { [weak self] in self?.openSettings() },
                 onClose: { [weak self] in self?.panelController?.hide() }))
         }
-        controller.isBusy = { [weak self] in self?.engine.isRunning ?? false }
+        // `isBusy`, not `isRunning`: a detached session still researching is work in
+        // flight, and the panel must not slide away mid-answer just because the thread
+        // on screen is idle.
+        controller.isBusy = { [weak self] in self?.engine.isBusy ?? false }
         // Dismissing the panel is the natural moment to make the thread durable: the
         // store debounces writes by a second, and the user may quit right after.
         controller.onDismiss = { [weak self] in
@@ -351,8 +367,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Keep run state visible when the panel is hidden, without unsolicited sounds.
+    ///
+    /// `$isBusy` rather than `$isRunning`: a run detached by `/new` or `/history` keeps
+    /// working, and the status item is the only place that run is still visible.
     private func observeRunningState() {
-        runningObserver = engine.$isRunning
+        runningObserver = engine.$isBusy
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isRunning in

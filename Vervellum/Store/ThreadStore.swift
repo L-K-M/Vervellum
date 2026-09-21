@@ -166,10 +166,20 @@ final class ThreadStore: ObservableObject {
         }
     }
 
+    /// Called once a thread is gone — `delete` with its id, `deleteAll` with nil —
+    /// so whoever owns the running sessions can discard the one that was working on
+    /// it. Wired by `AppDelegate`; nil until then.
+    ///
+    /// Fired *after* the archive has tombstoned the id, which is the order that keeps
+    /// the guarantee: the discard can produce a save of another thread on its way out,
+    /// and that save must find the tombstone already standing.
+    var onRemove: ((UUID?) -> Void)?
+
     func save(_ thread: ResearchThread) { archive.save(thread) }
 
     func delete(id: UUID) {
         archive.delete(id: id)
+        onRemove?(id)
         sweepAttachments()
     }
 
@@ -178,6 +188,7 @@ final class ThreadStore: ObservableObject {
         // after this nothing is. A library the user asked to be gone should not leave
         // the pictures behind.
         archive.deleteAll()
+        onRemove?(nil)
         // And the thread file first, for the reason `isHistoryEnabled` gives: a delete
         // that could not remove the threads leaves them naming these bytes, so taking
         // the bytes would destroy pictures out of conversations the user still has.

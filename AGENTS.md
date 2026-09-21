@@ -166,7 +166,10 @@ VervellumTests/              macOS-only tests (hotkeys, panel geometry, Accessib
 `Sources/VervellumKit/Core/`:
 
 - `Research/` — the pipeline. `ResearchRunner` orchestrates the stages and is
-  driven by both front ends; `ChatCompletionsClient` talks to the model over
+  driven by both front ends; `ResearchSession` is one thread's live run — its task,
+  its queue of questions typed mid-run, and the `SnapshotCoalescer` pacing its
+  snapshots — which is the unit `/new` detaches instead of cancelling;
+  `ChatCompletionsClient` talks to the model over
   `HTTPTransporting` — the seam every outbound call passes through, implemented in
   production by `HTTPTransport` and in `Tests/` by `StubTransport`, which is what lets
   a whole turn be run without a network — and search goes through the `SearchBackend`
@@ -208,8 +211,9 @@ flattening is done in C rather than by re-typing raw pointers in Swift.
 - `Panel/` — `ResearchPanel` (the `NSPanel` subclass and its flags), `PanelController`
   (show / hide / place / focus handoff), and the pure `PanelPlacement` geometry.
 - `Research/` — `ResearchEngine`, an `ObservableObject` shell over the shared
-  `ResearchRunner`. It owns the thread, publishes changes, and hops each of the
-  runner's callbacks onto the main queue; every rule lives in Core.
+  `ResearchRunner`. It keeps a `ResearchSession` per open thread, publishes the one
+  on screen, and hands every session the main-queue hop its callbacks need; every
+  rule lives in Core.
 - `Model/` — `Preferences` (the macOS-only settings, forwarding the shared ones to
   `CorePreferences`) and `HotkeyBinding`.
 - `Store/` — `ThreadStore`, an `ObservableObject` shell over `ThreadArchive`. It also
@@ -248,9 +252,10 @@ flattening is done in C rather than by re-typing raw pointers in Swift.
   `SemanticVersion`, `HotkeyBinding`.
 - No type is `@MainActor`. AppKit callbacks (hotkey handlers, notification observers,
   local event monitors) drive this app, and a type-level `@MainActor` makes those
-  closures illegal in Swift 5 language mode. `ResearchEngine` instead hops each of the
-  runner's callbacks onto the main queue with `DispatchQueue.main.async`, which is FIFO,
-  so streamed chunks land in the order they were produced.
+  closures illegal in Swift 5 language mode. `ResearchSession` instead hops each of the
+  runner's callbacks through an injected `deliver` — `DispatchQueue.main.async` on
+  macOS, `GTK.onMainLoop` on Linux — which is FIFO either way, so streamed chunks land
+  in the order they were produced.
 
 ## Dependencies
 
