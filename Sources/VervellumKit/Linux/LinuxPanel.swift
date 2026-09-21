@@ -590,7 +590,10 @@ final class LinuxPanel {
         }
         // One click re-asks, as on macOS. Retyping the question was the only recourse
         // before, and the composer had been cleared on submit.
-        if turn.failure != nil || turn.stage == .cancelled, !turn.question.isEmpty {
+        // The question check matches `ResearchSession.retry`'s guard exactly — a
+        // whitespace-question turn would show a button the retry refuses to run.
+        if turn.failure != nil || turn.stage == .cancelled,
+           !turn.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let retry = GTK.button("Try again") { [weak self] in
                 // Set before the call: retrying appends and publishes synchronously,
                 // so the render that runs inside it must already know to follow.
