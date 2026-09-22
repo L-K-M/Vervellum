@@ -1,5 +1,8 @@
 # Vervellum
 
+> [!IMPORTANT]
+> LLM disclosure: This codebase was written with substantial help from large language models: AI coding agents working from the [`AGENTS.md`](AGENTS.md) brief in this repo.
+
 A hotkey-summoned research panel for macOS and Linux. It looks things up, then shows its work.
 
 **Latest release:** v<!-- version -->0.2.0<!-- /version --> · [Download](https://github.com/L-K-M/Vervellum/releases/latest)
