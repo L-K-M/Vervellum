@@ -30,6 +30,10 @@ final class SecretBlobTests: XCTestCase {
         XCTAssertNil(SecretBlob.decode(Data("not json".utf8)))
         XCTAssertNil(SecretBlob.decode(Data("[1,2,3]".utf8)))
         XCTAssertNil(SecretBlob.decode(Data(#"{"key": 42}"#.utf8)))
+        XCTAssertNil(SecretBlob.decode(Data(#"{"key": {"nested": true}}"#.utf8)))
+        XCTAssertNil(SecretBlob.decode(Data(#""just a string""#.utf8)))
+        XCTAssertNil(SecretBlob.decode(Data("null".utf8)))
+        XCTAssertNil(SecretBlob.decode(Data("true".utf8)))
         XCTAssertNil(SecretBlob.decode(Data()))
     }
 

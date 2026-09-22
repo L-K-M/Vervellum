@@ -53,6 +53,11 @@ final class KeychainStore: SecretStore {
     /// live at once (`AppDelegate`, `ProvidersView`, `PanelRootView`), and a
     /// per-instance cache would let Settings write a key that the engine's copy
     /// then reads as absent for the rest of the session.
+    ///
+    /// Single-process by assumption: a second copy of the app writing the item
+    /// between this process's read and write is clobbered by the stale cached
+    /// base. Acceptable for a menu-bar agent, but the assumption is stated so a
+    /// future caller does not read this cache as generally coherent.
     private static let lock = NSLock()
     private static var blobs: [String: Blob] = [:]
 
@@ -68,15 +73,12 @@ final class KeychainStore: SecretStore {
 
     enum KeychainError: LocalizedError {
         case unexpectedStatus(OSStatus)
-        case unreadableValue
 
         var errorDescription: String? {
             switch self {
             case .unexpectedStatus(let status):
                 let detail = SecCopyErrorMessageString(status, nil) as String?
                 return "Keychain error \(status)\(detail.map { ": \($0)" } ?? "")."
-            case .unreadableValue:
-                return "The stored key could not be read as text."
             }
         }
     }
@@ -90,6 +92,12 @@ final class KeychainStore: SecretStore {
     /// momentarily unavailable should read the same way rather than crashing a
     /// research run. The status is logged so it is still diagnosable.
     func value(for account: SecretAccount) -> String? {
+        // A `keyAccount` decodes from the settings file, which is not validated —
+        // if one ever named the blob item itself, the legacy fallback below would
+        // query the blob as a *per-account* item and hand back every key's JSON as
+        // this account's secret, and `set`/`delete` would overwrite or remove the
+        // whole blob. Reject the collision rather than trust the minting rules.
+        guard account.rawValue != Self.blobAccount else { return nil }
         guard case .loaded(let secrets) = loadBlob() else { return nil }
         if let value = secrets[account.rawValue], !value.isEmpty { return value }
 
@@ -111,6 +119,9 @@ final class KeychainStore: SecretStore {
     /// how a user removes a key, and leaving an empty entry behind would make
     /// `hasValue(for:)` lie.
     func set(_ secret: String, for account: SecretAccount) throws {
+        guard account.rawValue != Self.blobAccount else {
+            throw KeychainError.unexpectedStatus(errSecParam)
+        }
         let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { try delete(account); return }
         try mutateBlob { $0[account.rawValue] = trimmed }
@@ -121,10 +132,14 @@ final class KeychainStore: SecretStore {
 
     /// Removes the stored secret. Succeeds when nothing was stored.
     func delete(_ account: SecretAccount) throws {
-        // The legacy item first. Done the other way around, a failed delete would
-        // leave a copy that the next blob-miss read migrates straight back — a
-        // deleted key resurrecting itself.
-        try? deleteLegacy(account)
+        guard account.rawValue != Self.blobAccount else {
+            throw KeychainError.unexpectedStatus(errSecParam)
+        }
+        // The legacy item first, and its failure is fatal rather than swallowed:
+        // removing only the blob entry would leave a copy that the next blob-miss
+        // read migrates straight back — a deleted key resurrecting itself. Throwing
+        // here keeps the blob entry, which is the honest "delete failed" state.
+        try deleteLegacy(account)
         try mutateBlob { $0.removeValue(forKey: account.rawValue) }
     }
 
@@ -149,6 +164,11 @@ final class KeychainStore: SecretStore {
     private func lockedBlob() -> Blob {
         if let blob = Self.blobs[service] { return blob }
         let blob = readBlob()
+        // A locked keychain fails with errSecInteractionNotAllowed and shows no
+        // dialog, so caching that result suppresses no prompt — it would only keep
+        // every key unreadable until relaunch after the user unlocks. Retry it;
+        // denials and cancellations still cache, which is what the cache is for.
+        if case .unreadable(errSecInteractionNotAllowed) = blob { return blob }
         Self.blobs[service] = blob
         return blob
     }
@@ -163,6 +183,7 @@ final class KeychainStore: SecretStore {
         switch status {
         case errSecSuccess:
             guard let data = item as? Data, let secrets = SecretBlob.decode(data) else {
+                NSLog("Vervellum: keychain blob item found but failed to decode")
                 return .unreadable(errSecDecode)
             }
             return .loaded(secrets)
@@ -192,28 +213,10 @@ final class KeychainStore: SecretStore {
         }
     }
 
-    /// Update-then-insert rather than insert-then-update: an add against the
-    /// existing item fails with `errSecDuplicateItem`, so insert-first would take
-    /// the error path on every ordinary key change. It also beats
-    /// delete-then-insert, which has a window where the keys are simply gone.
-    /// `attributesToUpdate` carries only the change; the query identifies the item
-    /// and must not contain `kSecValueData`.
     private func persistBlob(_ secrets: [String: String]) throws {
-        let data = try SecretBlob.encode(secrets)
-        let updateStatus = SecItemUpdate(blobQuery as CFDictionary,
-                                         [kSecValueData as String: data] as CFDictionary)
-        if updateStatus == errSecSuccess { return }
-        guard updateStatus == errSecItemNotFound else {
-            throw KeychainError.unexpectedStatus(updateStatus)
-        }
-
-        var insert = blobQuery
-        insert[kSecValueData as String] = data
-        insert[kSecAttrLabel as String] = "Vervellum — API keys"
-        let addStatus = SecItemAdd(insert as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            throw KeychainError.unexpectedStatus(addStatus)
-        }
+        try upsert(query: blobQuery,
+                   value: SecretBlob.encode(secrets),
+                   label: "Vervellum — API keys")
     }
 
     // MARK: The per-account items (downgrade path)
@@ -246,30 +249,55 @@ final class KeychainStore: SecretStore {
         return string.isEmpty ? nil : string
     }
 
-    /// Writes the per-account item, using the same update-then-insert order as
-    /// `persistBlob` and for the same reason.
+    /// Writes the per-account item. `Data(secret.utf8)` rather than
+    /// `data(using:)` — UTF-8 encoding cannot fail, so there is nothing to guard.
     private func setLegacy(_ secret: String, for account: SecretAccount) throws {
-        guard let data = secret.data(using: .utf8) else { throw KeychainError.unreadableValue }
-        let updateStatus = SecItemUpdate(legacyQuery(account: account) as CFDictionary,
-                                         [kSecValueData as String: data] as CFDictionary)
-        if updateStatus == errSecSuccess { return }
-        guard updateStatus == errSecItemNotFound else {
-            throw KeychainError.unexpectedStatus(updateStatus)
-        }
-
-        var insert = legacyQuery(account: account)
-        insert[kSecValueData as String] = data
-        insert[kSecAttrLabel as String] = "Vervellum — \(account.rawValue)"
-        let addStatus = SecItemAdd(insert as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            throw KeychainError.unexpectedStatus(addStatus)
-        }
+        try upsert(query: legacyQuery(account: account),
+                   value: Data(secret.utf8),
+                   label: "Vervellum — \(account.rawValue)")
     }
 
     private func deleteLegacy(_ account: SecretAccount) throws {
         let status = SecItemDelete(legacyQuery(account: account) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
+    /// Update-then-insert rather than insert-then-update: an add against an
+    /// existing item fails with `errSecDuplicateItem`, so insert-first would take
+    /// the error path on every ordinary key change. It also beats
+    /// delete-then-insert, which has a window where the keys are simply gone.
+    /// `attributesToUpdate` carries only the change; the query identifies the item
+    /// and must not contain `kSecValueData`. The label goes in the update too, so
+    /// an item written before the label existed still gains it.
+    private func upsert(query: [String: Any], value: Data, label: String) throws {
+        let update: [String: Any] = [
+            kSecValueData as String: value,
+            kSecAttrLabel as String: label,
+        ]
+        let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw KeychainError.unexpectedStatus(updateStatus)
+        }
+
+        var insert = query
+        insert[kSecValueData as String] = value
+        insert[kSecAttrLabel as String] = label
+        let addStatus = SecItemAdd(insert as CFDictionary, nil)
+        switch addStatus {
+        case errSecSuccess:
+            return
+        case errSecDuplicateItem:
+            // Another writer inserted between the update miss and this add; the
+            // item exists now, so a plain update finishes the write.
+            let retryStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+            guard retryStatus == errSecSuccess else {
+                throw KeychainError.unexpectedStatus(retryStatus)
+            }
+        default:
+            throw KeychainError.unexpectedStatus(addStatus)
         }
     }
 }

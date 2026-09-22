@@ -314,7 +314,9 @@ dependency tree would end that.
   never in a log line, never in a URL's userinfo. On macOS they live in **one item** —
   `KeychainStore` keeps a JSON dictionary of every account in a single
   generic-password item, because keychain authorization is per item and an unsigned
-  build is prompted per item it reads. The per-account items a pre-blob build wrote
+  build is prompted per item it reads. The trade-off is recorded: one item means a
+  single ACL grant covers every key, where per-item storage capped a mis-grant at
+  one credential. The per-account items a pre-blob build wrote
   are still kept in step on writes, purely as the downgrade path (the same reason the
   `modelEndpoint`/`modelName` mirror exists); reads consult them only to migrate an
   account the blob does not hold yet. `SecretAccount.modelAPIKey` / `.searchAPIKey`
