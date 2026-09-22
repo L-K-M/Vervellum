@@ -44,8 +44,9 @@ class MeasuringTextView: NSTextView {
     ///
     /// That is a contract a call site can silently break, so building a view does not
     /// go through here: `makeView` hands over only the container, inside the lifetime
-    /// it enforces. `makeStack` direct is for a stack no view adopts — `measuring`.
-    static func makeStack(tracksWidth: Bool)
+    /// it enforces. `makeStack` direct is for a stack no view adopts — `measuring` —
+    /// and stays `private` so no new call site can reintroduce the discard.
+    private static func makeStack(tracksWidth: Bool)
         -> (NSTextStorage, NSLayoutManager, NSTextContainer) {
         let storage = NSTextStorage()
         let layout = NSLayoutManager()
