@@ -73,12 +73,19 @@ final class KeychainStore: SecretStore {
 
     enum KeychainError: LocalizedError {
         case unexpectedStatus(OSStatus)
+        /// An account named after the blob item — only possible through a
+        /// hand-edited settings file, since `SecretAccount`'s minting never
+        /// produces it. Named so the failure is self-explaining and greppable
+        /// rather than another generic `errSecParam`.
+        case reservedBlobAccount
 
         var errorDescription: String? {
             switch self {
             case .unexpectedStatus(let status):
                 let detail = SecCopyErrorMessageString(status, nil) as String?
                 return "Keychain error \(status)\(detail.map { ": \($0)" } ?? "")."
+            case .reservedBlobAccount:
+                return "An API-key account name collides with Vervellum's keychain item; correct the entry in settings."
             }
         }
     }
@@ -96,8 +103,13 @@ final class KeychainStore: SecretStore {
         // if one ever named the blob item itself, the legacy fallback below would
         // query the blob as a *per-account* item and hand back every key's JSON as
         // this account's secret, and `set`/`delete` would overwrite or remove the
-        // whole blob. Reject the collision rather than trust the minting rules.
-        guard account.rawValue != Self.blobAccount else { return nil }
+        // whole blob. Reject the collision rather than trust the minting rules —
+        // and log it, because it fires exactly when someone is already debugging
+        // why a configured provider reads as unconfigured.
+        guard account.rawValue != Self.blobAccount else {
+            NSLog("Vervellum: settings named an account after the keychain blob item; treating it as unset")
+            return nil
+        }
         guard case .loaded(let secrets) = loadBlob() else { return nil }
         if let value = secrets[account.rawValue], !value.isEmpty { return value }
 
@@ -120,7 +132,7 @@ final class KeychainStore: SecretStore {
     /// `hasValue(for:)` lie.
     func set(_ secret: String, for account: SecretAccount) throws {
         guard account.rawValue != Self.blobAccount else {
-            throw KeychainError.unexpectedStatus(errSecParam)
+            throw KeychainError.reservedBlobAccount
         }
         let trimmed = secret.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { try delete(account); return }
@@ -133,7 +145,7 @@ final class KeychainStore: SecretStore {
     /// Removes the stored secret. Succeeds when nothing was stored.
     func delete(_ account: SecretAccount) throws {
         guard account.rawValue != Self.blobAccount else {
-            throw KeychainError.unexpectedStatus(errSecParam)
+            throw KeychainError.reservedBlobAccount
         }
         // The legacy item first, and its failure is fatal rather than swallowed:
         // removing only the blob entry would leave a copy that the next blob-miss
