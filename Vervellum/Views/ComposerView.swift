@@ -329,31 +329,7 @@ final class ComposerTextView: NSTextView {
     /// event after dispatch ends and so is only the trigger during real dispatch.
     override func interpretKeyEvents(_ eventArray: [NSEvent]) {
         coordinator?.eventModifiers = eventArray.first?.modifierFlags ?? []
-        isInterpretingKeyEvents = true
-        defer { isInterpretingKeyEvents = false }
         super.interpretKeyEvents(eventArray)
-    }
-
-    /// Set while `interpretKeyEvents` is dispatching, so `doCommandBySelector`
-    /// knows the flags are already the event's own rather than reaching for
-    /// `NSApp.currentEvent` — which would clobber the stash for a synthetic
-    /// `interpretKeyEvents` call (a test's) with whatever was dispatched before it.
-    private var isInterpretingKeyEvents = false
-
-    /// The one call that always runs before the delegate is consulted, whichever
-    /// route the event took — so it doubles as a second place to record the flags,
-    /// off `NSApp.currentEvent`, which during real dispatch is the event itself.
-    /// Covers any path that reaches the delegate without `interpretKeyEvents`;
-    /// skipped while inside it, where the flags are already set. Outside dispatch
-    /// the current event is a leftover rather than the trigger, and a stale
-    /// `.keyDown` could carry a dead press's flags — but a stray modified flag can
-    /// only turn an ask into a line break, never the other way, so it errs safe.
-    override func doCommandBySelector(_ selector: Selector) {
-        if !isInterpretingKeyEvents,
-           let event = NSApp.currentEvent, event.type == .keyDown {
-            coordinator?.eventModifiers = event.modifierFlags
-        }
-        super.doCommandBySelector(selector)
     }
 
     // MARK: Pasting and dropping
