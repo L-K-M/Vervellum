@@ -311,12 +311,18 @@ dependency tree would end that.
   and an `enum` in a JSON Schema is a description rather than a gate. A page found by
   an earlier search is talking to that planner; treat its output accordingly.
 - **Keys live in the Keychain only.** Never in `UserDefaults`, never in a thread,
-  never in a log line, never in a URL's userinfo. **One item per configured provider**:
-  `SecretAccount.modelAPIKey` / `.searchAPIKey` are the accounts every pre-profiles
-  build wrote and belong to the migrated first provider, and every provider added since
-  gets its own through `SecretAccount.derived(from:for:)`. Never read a fixed account
-  for "the model key" — ask `SecretStore.modelKey(for:)`, or one provider's credential
-  is sent to another.
+  never in a log line, never in a URL's userinfo. On macOS they live in **one item** —
+  `KeychainStore` keeps a JSON dictionary of every account in a single
+  generic-password item, because keychain authorization is per item and an unsigned
+  build is prompted per item it reads. The per-account items a pre-blob build wrote
+  are still kept in step on writes, purely as the downgrade path (the same reason the
+  `modelEndpoint`/`modelName` mirror exists); reads consult them only to migrate an
+  account the blob does not hold yet. `SecretAccount.modelAPIKey` / `.searchAPIKey`
+  are the accounts every pre-profiles build wrote and belong to the migrated first
+  provider, and every provider added since gets its own through
+  `SecretAccount.derived(from:for:)`. Never read a fixed account for "the model key"
+  — ask `SecretStore.modelKey(for:)`, or one provider's credential is sent to
+  another.
 - **Show on every Space / over full-screen:** keep `collectionBehavior` =
   `[.canJoinAllSpaces, .canJoinAllApplications, .fullScreenAuxiliary, .transient]` and
   `hidesOnDeactivate = false` on the panel. Level is *not* the lever — see PLAN.md §2 —

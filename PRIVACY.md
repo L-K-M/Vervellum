@@ -98,8 +98,9 @@ your IP address.
 - **Preferences.** Panel position, size, text scale, shortcuts and behaviour toggles
   live in Vervellum's application preferences on macOS, and in
   `~/.config/vervellum/settings.json` on Linux.
-- **API keys.** In your login Keychain on macOS, one item per configured provider, so
-  one provider's key is never sent to another. On Linux, explicit `VERVELLUM_MODEL_KEY`
+- **API keys.** In your login Keychain on macOS, as one item holding every
+  configured provider's key under its own account name, so one provider's key is
+  never sent to another. On Linux, explicit `VERVELLUM_MODEL_KEY`
   and `VERVELLUM_SEARCH_KEY` override reads for the first model provider and the search
   server, and `VERVELLUM_READER_KEY` for a reader service; otherwise the keyring is
   tried before the mode-0600 file. Writes prefer the keyring, then the file. In every case they are never written to
