@@ -41,6 +41,10 @@ class MeasuringTextView: NSTextView {
     /// a usable zombie stack or none at all is a heap accident, which is how the panel
     /// came to draw some blocks of an answer and blank the rest — measured correctly by
     /// `sizeThatFits` (that stack is a different one) either way.
+    ///
+    /// That is a contract a call site can silently break, so building a view does not
+    /// go through here: `makeView` hands over only the container, inside the lifetime
+    /// it enforces. `makeStack` direct is for a stack no view adopts — `measuring`.
     static func makeStack(tracksWidth: Bool)
         -> (NSTextStorage, NSLayoutManager, NSTextContainer) {
         let storage = NSTextStorage()
@@ -58,6 +62,21 @@ class MeasuringTextView: NSTextView {
         storage.addLayoutManager(layout)
         layout.addTextContainer(container)
         return (storage, layout, container)
+    }
+
+    /// Builds a text view on a fresh stack, keeping the whole stack alive until the
+    /// view has adopted it.
+    ///
+    /// `build` receives the container and returns the view to adopt it — the only way
+    /// to reach a stack for a text view, so the `makeStack` lifetime contract cannot
+    /// be broken at a call site. Extending through `init` is sufficient because
+    /// adoption retains the whole stack — the container, layout manager and storage
+    /// are the view's from then on, which is why a measuring stack, with no view above
+    /// it, must hold all three itself.
+    static func makeView<V: NSTextView>(tracksWidth: Bool,
+                                        build: (NSTextContainer) -> V) -> V {
+        let stack = makeStack(tracksWidth: tracksWidth)
+        return withExtendedLifetime(stack) { build(stack.2) }
     }
 
     /// The stack this view is measured on, built once and kept.

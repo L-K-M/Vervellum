@@ -89,19 +89,13 @@ struct SelectableText: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> MeasuringTextView {
-        let stack = MeasuringTextView.makeStack(tracksWidth: wraps)
-        let container = stack.2
-        container.maximumNumberOfLines = maximumLines
-        if !wraps {
-            container.size = NSSize(width: CGFloat.greatestFiniteMagnitude,
-                                    height: CGFloat.greatestFiniteMagnitude)
-        }
-
-        // `stack` must still be bound when the view adopts the container — see
-        // `makeStack`: the container's layout-manager reference is `unowned`, and a
-        // stack discarded here leaves `init` a pointer into freed memory.
-        let view = withExtendedLifetime(stack) {
-            MeasuringTextView(frame: .zero, textContainer: container)
+        let view = MeasuringTextView.makeView(tracksWidth: wraps) { container in
+            container.maximumNumberOfLines = maximumLines
+            if !wraps {
+                container.size = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                        height: CGFloat.greatestFiniteMagnitude)
+            }
+            return MeasuringTextView(frame: .zero, textContainer: container)
         }
         view.isEditable = false
         view.isSelectable = true
