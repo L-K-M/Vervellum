@@ -21,11 +21,14 @@ private final class Draft {
 /// character that reached the model would not be the one the user typed. Both fail
 /// silently, which is what earns them a suite: the panel goes on looking like it works.
 ///
-/// A modified Return arrives as one of two selectors, and which one is AppKit's choice
-/// rather than Vervellum's: Shift-Return is `insertLineBreak:` and Option-Return is
-/// `insertNewlineIgnoringFieldEditor:`. Both are pinned here because the composer's
-/// promise is about the gesture rather than the selector, and a binding that differs by
-/// keyboard layout or by macOS version must not change what the key does.
+/// A modified Return arrives as one of several selectors, and which one is AppKit's
+/// choice rather than Vervellum's: Option-Return is `insertNewlineIgnoringFieldEditor:`,
+/// Control-Return is `insertLineBreak:`, and Shift-Return is `insertNewline:` — the
+/// standard bindings carry no `$\r` at all, so it falls back to the plain-Return
+/// selector and can only be told apart by the modifiers recorded on the way in.
+/// The selectors are pinned here because the composer's promise is about the gesture,
+/// and a binding that differs by keyboard layout or macOS version must not change
+/// what the key does.
 @MainActor
 final class ComposerKeyTests: XCTestCase {
 
@@ -51,9 +54,61 @@ final class ComposerKeyTests: XCTestCase {
         return textView
     }
 
-    /// The point of the whole file: the key that is advertised as adding a line adds a
-    /// line, and adds a newline rather than the separator AppKit would have inserted.
-    func testShiftReturnEntersANewline() {
+    /// The point of the whole file — and the way the press actually arrives. The
+    /// standard bindings have no `$\r`, so Shift-Return reaches `doCommandBy` as
+    /// `insertNewline:`, the selector a plain Return sends; only the modifiers
+    /// `interpretKeyEvents` stashed on `eventModifiers` keep it from asking.
+    func testShiftReturnArrivesAsInsertNewlineAndBreaksALine() {
+        let draft = Draft("a question")
+        var sent = 0
+        let composer = coordinator(submitOnReturn: true, draft: draft) { sent += 1 }
+        let textView = field(holding: draft.text)
+        composer.eventModifiers = .shift
+
+        XCTAssertTrue(composer.textView(textView,
+                                        doCommandBy: #selector(NSResponder.insertNewline(_:))))
+        XCTAssertEqual(textView.string, "a question\n")
+        XCTAssertEqual(sent, 0, "a modified Return never asks")
+    }
+
+    /// The same fallback under a different flag: an Option-Return that a custom
+    /// `DefaultKeyBinding.dict` — or a layout whose bindings differ — sends to
+    /// `insertNewline:` still opens a line. (`~\r` normally arrives as
+    /// `insertNewlineIgnoringFieldEditor:`, pinned below.)
+    func testOptionReturnViaInsertNewlineBreaksALine() {
+        let draft = Draft("a question")
+        var sent = 0
+        let composer = coordinator(submitOnReturn: true, draft: draft) { sent += 1 }
+        let textView = field(holding: draft.text)
+        composer.eventModifiers = .option
+
+        XCTAssertTrue(composer.textView(textView,
+                                        doCommandBy: #selector(NSResponder.insertNewline(_:))))
+        XCTAssertEqual(textView.string, "a question\n")
+        XCTAssertEqual(sent, 0, "a modified Return never asks")
+    }
+
+    /// The modifiers beat the preference: under "Return inserts a newline" a
+    /// Shift-Return still opens a line rather than asking — the chord for asking
+    /// in that mode is ⌘Return, handled at the panel level.
+    func testShiftReturnUnderTheInvertedPreferenceStillBreaksALine() {
+        let draft = Draft("a question")
+        var sent = 0
+        let composer = coordinator(submitOnReturn: false, draft: draft) { sent += 1 }
+        let textView = field(holding: draft.text)
+        composer.eventModifiers = .shift
+
+        XCTAssertTrue(composer.textView(textView,
+                                        doCommandBy: #selector(NSResponder.insertNewline(_:))))
+        XCTAssertEqual(textView.string, "a question\n")
+        XCTAssertEqual(sent, 0, "a modified Return never asks")
+    }
+
+    /// The selector Shift-Return sends on a system whose bindings do define `$\r` —
+    /// a `DefaultKeyBinding.dict`, or a macOS whose table differs. The composer takes
+    /// the key rather than leaving it to the text view, and inserts a newline rather
+    /// than the U+2028 LINE SEPARATOR `insertLineBreak:` would have produced.
+    func testLineBreakSelectorEntersANewline() {
         let draft = Draft("a question")
         var sent = 0
         let composer = coordinator(submitOnReturn: true, draft: draft) { sent += 1 }
@@ -64,6 +119,39 @@ final class ComposerKeyTests: XCTestCase {
                       "the composer takes the key rather than leaving it to the text view")
         XCTAssertEqual(textView.string, "a question\n")
         XCTAssertEqual(sent, 0, "opening a line is not asking the question")
+    }
+
+    /// The whole claim, end to end: a real Shift-Return event through
+    /// `interpretKeyEvents`, which resolves the binding itself rather than trusting
+    /// this file's word for which selector arrives. `ComposerTextView` stashes the
+    /// event's flags on the way in, and the answer must still be a newline — under
+    /// the standard dictionary, with no `$\r`, the press falls back to
+    /// `insertNewline:` and only the modifiers keep it from asking.
+    func testARealShiftReturnEventBreaksALine() {
+        let draft = Draft("a question")
+        var sent = 0
+        let composer = coordinator(submitOnReturn: true, draft: draft) { sent += 1 }
+        let textView = ComposerTextView(frame: NSRect(x: 0, y: 0, width: 320, height: 60))
+        textView.string = draft.text
+        textView.setSelectedRange(NSRange(location: (draft.text as NSString).length, length: 0))
+        textView.delegate = composer
+        textView.coordinator = composer
+        // In a window, though never shown: without one the view has no input
+        // context, and `interpretKeyEvents` may resolve nothing at all.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 60),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = textView
+
+        let shiftReturn = NSEvent.keyEvent(with: .keyDown, location: .zero,
+                                           modifierFlags: .shift, timestamp: 0,
+                                           windowNumber: 0, context: nil,
+                                           characters: "\r", charactersIgnoringModifiers: "\r",
+                                           isARepeat: false, keyCode: UInt16(KeyCode.return))!
+        textView.interpretKeyEvents([shiftReturn])
+
+        XCTAssertEqual(textView.string, "a question\n")
+        XCTAssertEqual(sent, 0, "a modified Return never asks")
+        window.contentView = nil
     }
 
     /// Option-Return is the same gesture under a different selector.

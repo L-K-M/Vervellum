@@ -401,9 +401,9 @@ struct PanelRootView: View {
                              // no list in it.
                              //
                              // `onSubmit` is the user's submit gesture, not the Return
-                             // key: with submit-on-Return off, `ComposerView` routes
-                             // Shift-Return here instead. Whatever key sends a question
-                             // is the key that takes the highlighted command.
+                             // key: with submit-on-Return off, ⌘Return is what reaches
+                             // here. Whatever key sends a question is the key that
+                             // takes the highlighted command.
                              onSubmit: { submitFromComposer() },
                              onArrow: moveThroughCompletionsOrHistory,
                              attachmentCount: attachments.count,
@@ -1323,7 +1323,7 @@ struct PanelRootView: View {
     ///
     /// Which key is a preference, not a constant. With submit-on-Return off, plain
     /// Return inserts a newline and never reaches `onSubmit` — `ComposerView` answers
-    /// false to `insertNewline:` in that mode — so Shift-Return is what completes a row,
+    /// false to `insertNewline:` in that mode — so ⌘Return is what completes a row,
     /// and naming Return would have sent exactly the readers this exists for to a key
     /// that puts a line break in their question.
     ///
@@ -1335,7 +1335,7 @@ struct PanelRootView: View {
               ComposerCommand.isHalfTypedCommand(new),
               reopened || ComposerCommand.completions(for: old) == nil
         else { return }
-        let key = preferences.submitOnReturn ? "Return" : "Shift-Return"
+        let key = preferences.submitOnReturn ? "Return" : "Command-Return"
         announce("Command list, \(opened.count) \(opened.count == 1 ? "match" : "matches"). "
                  + "\(key) completes the highlighted one.")
     }

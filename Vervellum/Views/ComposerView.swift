@@ -10,10 +10,11 @@ import AppKit
 ///   non-activating panel does not reliably re-take first responder when the panel is
 ///   shown again — the view never left the hierarchy, so nothing re-fires. Owning the
 ///   text view means focus can simply be *asserted*.
-/// * **Return.** A modified Return never fires a field's action: Option-Return maps to
-///   `insertNewlineIgnoringFieldEditor:` and Shift-Return to `insertLineBreak:`, and
-///   neither is `insertNewline:` — so with a SwiftUI `TextField`, `.onSubmit` sees
-///   plain Return only and a modified Return silently does nothing.
+/// * **Return.** The selector a modified Return arrives as is a binding-dictionary
+///   accident, not a contract: `~\r` is `insertNewlineIgnoringFieldEditor:` and `^\r`
+///   is `insertLineBreak:`, while `$\r` has no binding at all and falls back to
+///   `insertNewline:` — the selector a plain Return sends. Telling them apart needs
+///   the event's modifiers, which a SwiftUI `TextField` never lets you see.
 /// * **Growth.** The composer must grow from one line to several as the question gets
 ///   longer, and then stop. That is a height calculation on the layout manager, not
 ///   something a `TextField` exposes.
@@ -210,6 +211,27 @@ struct ComposerView: NSViewRepresentable {
             self.parent = parent
         }
 
+        /// The modifiers on the key event currently being handled.
+        ///
+        /// `doCommandBy` is handed a selector, not the event — and the selector alone
+        /// cannot tell a modified Return from a plain one. The standard bindings map
+        /// `~\r` to `insertNewlineIgnoringFieldEditor:` and `^\r` to `insertLineBreak:`
+        /// but carry no `$\r` at all, so Shift-Return falls back to the bare-Return
+        /// binding and arrives as `insertNewline:` — the selector this view treats as
+        /// "ask". Left intercepted that way, the press submits the question.
+        /// `NSTextView`'s own `insertNewline:` avoids the same trap by reading the
+        /// modifiers off `NSApp.currentEvent` and redirecting to a line break, which
+        /// is the whole reason Shift-Return ever broke a line; this interception sits
+        /// in front of that redirect, so it has to repeat the check on the same flags.
+        ///
+        /// `ComposerTextView` records the flags in `interpretKeyEvents`, the funnel
+        /// every route to the delegate shares: `keyDown`, `performKeyEquivalent`
+        /// and the input context all dispatch commands through it, so a Shift-Return
+        /// can arrive here with `keyDown` never having run. A stash rather than
+        /// `NSApp.currentEvent` so a test can set it — a test cannot make a
+        /// synthetic `keyDown` the current event.
+        var eventModifiers: NSEvent.ModifierFlags = []
+
         deinit {
             if let showObserver { NotificationCenter.default.removeObserver(showObserver) }
         }
@@ -244,27 +266,29 @@ struct ComposerView: NSViewRepresentable {
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
             switch selector {
             case #selector(NSResponder.insertNewline(_:)):
+                // A modified Return lands here too: `$\r` has no binding, so
+                // Shift-Return falls back to this selector — and a modified Return
+                // breaks a line whatever `submitOnReturn` says. Command is not in
+                // the set because `performKeyEquivalent` claims ⌘⏎ before the event
+                // reaches the view; Shift, Option and Control are checked so that
+                // every remaining modified Return opens a line rather than asking.
+                // See `eventModifiers` for why the flags, not the selector, decide.
+                if !eventModifiers.isDisjoint(with: [.shift, .option, .control]) {
+                    textView.insertText("\n", replacementRange: textView.selectedRange())
+                    return true
+                }
                 guard parent.submitOnReturn else { return false }
                 parent.onSubmit()
                 return true
 
-            // A Return that carries Shift or Option always breaks a line, whatever
-            // `submitOnReturn` says. The preference used to invert both keys, which
-            // left "Return inserts a newline" mode with no way to break a line at
-            // all — plain Return was the only newline it had, and it was already
-            // spoken for. The always-send chord is ⌘⏎, handled at the panel level,
-            // so nothing is lost by keeping these two on the text side.
-            //
-            // Both selectors, because AppKit's standard key bindings send *different*
-            // ones for the two keys: Option-Return is
-            // `insertNewlineIgnoringFieldEditor:` and Shift-Return is
-            // `insertLineBreak:`. Handling only the first is why Shift-Return did not
-            // add a line — it fell through to `default`, and `NSTextView`'s own
-            // `insertLineBreak:` inserts U+2028 LINE SEPARATOR rather than a newline,
-            // so the character that reached the model was not the one the user typed.
-            // Listing both is also what makes this robust if the bindings differ by
-            // keyboard layout or macOS version: whichever selector arrives, the
-            // composer does the same thing.
+            // The modified-Return selectors that *do* have standard bindings:
+            // `~\r` is `insertNewlineIgnoringFieldEditor:` (Option-Return) and `^\r`
+            // is `insertLineBreak:` (Control-Return). Both always break a line,
+            // whatever `submitOnReturn` says — and with a real `\n`, not the U+2028
+            // LINE SEPARATOR `NSTextView`'s own `insertLineBreak:` would insert,
+            // which is not the character the user typed. Shift-Return never reaches
+            // here under the standard dictionary, but a `DefaultKeyBinding.dict`
+            // can map it to either selector, so both stay handled.
             case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)),
                  #selector(NSResponder.insertLineBreak(_:)):
                 textView.insertText("\n", replacementRange: textView.selectedRange())
@@ -286,8 +310,51 @@ struct ComposerView: NSViewRepresentable {
 /// `NSTextView` handles the text half of both gestures already and does it better than
 /// anything written here would; these overrides claim the cases it would otherwise turn
 /// into a file path or a "you can't drop that" bounce, and hand everything else back.
-private final class ComposerTextView: NSTextView {
+/// Internal rather than private so `ComposerKeyTests` can feed a real Shift-Return
+/// event through `interpretKeyEvents` — the fallback that decides the selector is
+/// exactly the thing the suite exists to pin, and that only happens end to end.
+final class ComposerTextView: NSTextView {
     weak var coordinator: ComposerView.Coordinator?
+
+    /// Records the press's modifiers for `doCommandBy`, which is handed a selector
+    /// rather than the event. See `eventModifiers` for why a selector cannot tell
+    /// a Shift-Return from a plain one.
+    ///
+    /// `interpretKeyEvents` is the funnel rather than `keyDown` because keyDown is
+    /// only one of the routes that reach it — the window offers every press to
+    /// `performKeyEquivalent` first, and `NSTextView` answers that pass by running
+    /// the key bindings itself. A Shift-Return can therefore arrive at
+    /// `doCommandBy` with `keyDown` never having run. Reading the flags off the
+    /// event array also avoids `NSApp.currentEvent`, which keeps holding the *last*
+    /// event after dispatch ends and so is only the trigger during real dispatch.
+    override func interpretKeyEvents(_ eventArray: [NSEvent]) {
+        coordinator?.eventModifiers = eventArray.first?.modifierFlags ?? []
+        isInterpretingKeyEvents = true
+        defer { isInterpretingKeyEvents = false }
+        super.interpretKeyEvents(eventArray)
+    }
+
+    /// Set while `interpretKeyEvents` is dispatching, so `doCommandBySelector`
+    /// knows the flags are already the event's own rather than reaching for
+    /// `NSApp.currentEvent` — which would clobber the stash for a synthetic
+    /// `interpretKeyEvents` call (a test's) with whatever was dispatched before it.
+    private var isInterpretingKeyEvents = false
+
+    /// The one call that always runs before the delegate is consulted, whichever
+    /// route the event took — so it doubles as a second place to record the flags,
+    /// off `NSApp.currentEvent`, which during real dispatch is the event itself.
+    /// Covers any path that reaches the delegate without `interpretKeyEvents`;
+    /// skipped while inside it, where the flags are already set. Outside dispatch
+    /// the current event is a leftover rather than the trigger, and a stale
+    /// `.keyDown` could carry a dead press's flags — but a stray modified flag can
+    /// only turn an ask into a line break, never the other way, so it errs safe.
+    override func doCommandBySelector(_ selector: Selector) {
+        if !isInterpretingKeyEvents,
+           let event = NSApp.currentEvent, event.type == .keyDown {
+            coordinator?.eventModifiers = event.modifierFlags
+        }
+        super.doCommandBySelector(selector)
+    }
 
     // MARK: Pasting and dropping
 
