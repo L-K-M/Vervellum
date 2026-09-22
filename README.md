@@ -5,7 +5,7 @@
 
 A hotkey-summoned research panel for macOS and Linux. It looks things up, then shows its work.
 
-**Latest release:** v<!-- version -->0.3.0<!-- /version --> · [Download](https://github.com/L-K-M/Vervellum/releases/latest)
+**Latest release:** v<!-- version -->0.3.1<!-- /version --> · [Download](https://github.com/L-K-M/Vervellum/releases/latest)
 
 ![Screenshot of Vervellum researching the claim that Julius Caesar's nose was three inches long](media-sources/screenshot.png)
 
