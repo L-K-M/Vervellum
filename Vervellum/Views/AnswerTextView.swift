@@ -32,8 +32,13 @@ struct AnswerTextView: NSViewRepresentable {
     var onHover: (CitationHover?) -> Void
 
     func makeNSView(context: Context) -> HoverTextView {
-        let (_, _, container) = MeasuringTextView.makeStack(tracksWidth: true)
-        let view = HoverTextView(frame: .zero, textContainer: container)
+        let stack = MeasuringTextView.makeStack(tracksWidth: true)
+        // `stack` must still be bound when the view adopts the container — see
+        // `makeStack`: the container's layout-manager reference is `unowned`, and a
+        // stack discarded here leaves `init` a pointer into freed memory.
+        let view = withExtendedLifetime(stack) {
+            HoverTextView(frame: .zero, textContainer: stack.2)
+        }
         view.isEditable = false
         view.isSelectable = true
         view.drawsBackground = false

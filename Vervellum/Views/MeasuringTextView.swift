@@ -32,6 +32,15 @@ class MeasuringTextView: NSTextView {
     ///   actually gave it rather than at one this file guessed. False for one used only
     ///   for measurement — where an assigned width has to survive until the measurement
     ///   is taken — and for text that must not wrap at all.
+    ///
+    /// A caller building a text view must keep the whole tuple alive until
+    /// `NSTextView(frame:textContainer:)` has run — `withExtendedLifetime` is enough.
+    /// The container's reference to its layout manager is `unowned`, so a storage and
+    /// layout manager nobody holds die at the binding that discarded them, and `init`
+    /// then adopts a container pointing at freed memory: whether the view ends up with
+    /// a usable zombie stack or none at all is a heap accident, which is how the panel
+    /// came to draw some blocks of an answer and blank the rest — measured correctly by
+    /// `sizeThatFits` (that stack is a different one) either way.
     static func makeStack(tracksWidth: Bool)
         -> (NSTextStorage, NSLayoutManager, NSTextContainer) {
         let storage = NSTextStorage()
