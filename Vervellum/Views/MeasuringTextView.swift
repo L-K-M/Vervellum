@@ -32,7 +32,21 @@ class MeasuringTextView: NSTextView {
     ///   actually gave it rather than at one this file guessed. False for one used only
     ///   for measurement — where an assigned width has to survive until the measurement
     ///   is taken — and for text that must not wrap at all.
-    static func makeStack(tracksWidth: Bool)
+    ///
+    /// A caller building a text view must keep the whole tuple alive until
+    /// `NSTextView(frame:textContainer:)` has run — `withExtendedLifetime` is enough.
+    /// The container's reference to its layout manager is `unowned`, so a storage and
+    /// layout manager nobody holds die at the binding that discarded them, and `init`
+    /// then adopts a container pointing at freed memory: whether the view ends up with
+    /// a usable zombie stack or none at all is a heap accident, which is how the panel
+    /// came to draw some blocks of an answer and blank the rest — measured correctly by
+    /// `sizeThatFits` (that stack is a different one) either way.
+    ///
+    /// That is a contract a call site can silently break, so building a view does not
+    /// go through here: `makeView` hands over only the container, inside the lifetime
+    /// it enforces. `makeStack` direct is for a stack no view adopts — `measuring` —
+    /// and stays `private` so no new call site can reintroduce the discard.
+    private static func makeStack(tracksWidth: Bool)
         -> (NSTextStorage, NSLayoutManager, NSTextContainer) {
         let storage = NSTextStorage()
         let layout = NSLayoutManager()
@@ -50,6 +64,31 @@ class MeasuringTextView: NSTextView {
         layout.addTextContainer(container)
         return (storage, layout, container)
     }
+
+    /// Builds a text view on a fresh stack, keeping the whole stack alive until the
+    /// view has adopted it.
+    ///
+    /// `build` receives the container and returns the view to adopt it — the only way
+    /// to reach a stack for a text view, so the `makeStack` lifetime contract cannot
+    /// be broken at a call site.
+    static func makeView<V: MeasuringTextView>(tracksWidth: Bool,
+                                               build: (NSTextContainer) -> V) -> V {
+        let stack = makeStack(tracksWidth: tracksWidth)
+        // The tuple must still be bound when the view adopts the container — see
+        // `makeStack`. What it does afterwards is just as undocumented: TextKit 1's
+        // declared strong edges run storage → layout manager → container, and the
+        // back-pointers are `unowned`, so a view that retained only its container
+        // would leave the rest of the stack to die one frame later. `adoptedStack`
+        // keeps all three alive for the view's lifetime rather than betting on what
+        // adoption retains.
+        let view = withExtendedLifetime(stack) { build(stack.2) }
+        view.adoptedStack = stack
+        return view
+    }
+
+    /// The stack this view was built on, held for the view's whole lifetime. Written
+    /// only by `makeView`; read by nothing — its job is to exist.
+    private var adoptedStack: (NSTextStorage, NSLayoutManager, NSTextContainer)?
 
     /// The stack this view is measured on, built once and kept.
     ///

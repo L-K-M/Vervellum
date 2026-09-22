@@ -89,14 +89,17 @@ struct SelectableText: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> MeasuringTextView {
-        let (_, _, container) = MeasuringTextView.makeStack(tracksWidth: wraps)
-        container.maximumNumberOfLines = maximumLines
-        if !wraps {
-            container.size = NSSize(width: CGFloat.greatestFiniteMagnitude,
-                                    height: CGFloat.greatestFiniteMagnitude)
+        // The return type is spelled out: a multi-statement closure does not
+        // always feed its result back into `makeView`'s generic parameter, which
+        // would settle for the `NSTextView` bound and cost the view its type.
+        let view = MeasuringTextView.makeView(tracksWidth: wraps) { container -> MeasuringTextView in
+            container.maximumNumberOfLines = maximumLines
+            if !wraps {
+                container.size = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                                        height: CGFloat.greatestFiniteMagnitude)
+            }
+            return MeasuringTextView(frame: .zero, textContainer: container)
         }
-
-        let view = MeasuringTextView(frame: .zero, textContainer: container)
         view.isEditable = false
         view.isSelectable = true
         view.drawsBackground = false

@@ -32,8 +32,9 @@ struct AnswerTextView: NSViewRepresentable {
     var onHover: (CitationHover?) -> Void
 
     func makeNSView(context: Context) -> HoverTextView {
-        let (_, _, container) = MeasuringTextView.makeStack(tracksWidth: true)
-        let view = HoverTextView(frame: .zero, textContainer: container)
+        let view = MeasuringTextView.makeView(tracksWidth: true) { container in
+            HoverTextView(frame: .zero, textContainer: container)
+        }
         view.isEditable = false
         view.isSelectable = true
         view.drawsBackground = false
