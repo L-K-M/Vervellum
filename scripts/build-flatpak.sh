@@ -22,11 +22,15 @@ DEB=""
 for argument in "$@"; do
   case "$argument" in
     --install) INSTALL=1 ;;
-    -h|--help) sed -n '2,9s/^# //p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,10s/^# //p' "$0"; exit 0 ;;
     *.deb) DEB="$argument" ;;
     *) echo "Unknown argument: $argument" >&2; exit 2 ;;
   esac
 done
+
+# A relative .deb argument names the caller's directory, not the
+# repository root we cd'd into above.
+if [[ -n "$DEB" && "$DEB" != /* ]]; then DEB="$OLDPWD/$DEB"; fi
 
 command -v flatpak-builder >/dev/null 2>&1 ||
   die "flatpak-builder not found: install flatpak and flatpak-builder"
@@ -36,7 +40,7 @@ command -v dpkg-deb >/dev/null 2>&1 ||
 if [[ -z "$DEB" ]]; then
   swift build -c release --product vervellum
   packaging/build-deb.sh
-  DEB="$(ls -t build/vervellum_*_*.deb | head -1)"
+  DEB="$(find build -maxdepth 1 -name 'vervellum_*_*.deb' -printf '%T@\t%p\n' 2>/dev/null | sort -rn | head -n1 | cut -f2- || true)"
 fi
 [ -f "$DEB" ] || die ".deb not found: $DEB"
 
@@ -49,7 +53,7 @@ cp -a "$WORK/debroot/usr/." "$WORK/stage/"
 
 # Scripts and service files hardcode /usr; inside flatpak the prefix is /app.
 while IFS= read -r f; do
-  sed -i 's|/usr/|/app/|g' "$f"
+  sed -i '1!s|/usr/|/app/|g' "$f"
 done < <(grep -rl '/usr/' "$WORK/stage/bin/" 2>/dev/null || true)
 while IFS= read -r f; do
   sed -i 's|Exec=/usr/bin/|Exec=|' "$f"
@@ -58,12 +62,15 @@ done < <(find "$WORK/stage/share/applications" "$WORK/stage/share/dbus-1/service
 
 # The deb already ships ch.lkmc.Vervellum.{desktop,png,service} — flatpak's
 # app-id-named export names — so this is a verification pass, not a rename.
-DESKTOP="$(find "$WORK/stage/share/applications" -name '*.desktop' | head -1)"
+DESKTOP="$(find "$WORK/stage/share/applications" -name '*.desktop' -print -quit 2>/dev/null || true)"
 [ -n "$DESKTOP" ] || die "no .desktop file inside $DEB"
 [ "$(basename "$DESKTOP")" = "$APP_ID.desktop" ] ||
   mv "$DESKTOP" "$WORK/stage/share/applications/$APP_ID.desktop"
+DESKTOP="$WORK/stage/share/applications/$APP_ID.desktop"
+# The launcher resolves Icon= through flatpak's exported name.
+sed -i "s|^Icon=.*|Icon=$APP_ID|" "$DESKTOP"
 if ! find "$WORK/stage/share/icons" "$WORK/stage/share/pixmaps" -name "$APP_ID.*" 2>/dev/null | grep -q .; then
-  ICON="$(find "$WORK/stage/share/icons" -name '*.png' | sort | tail -1)"
+  ICON="$(find "$WORK/stage/share/icons" -name '*.png' -printf '%s\t%p\n' 2>/dev/null | sort -rn | tail -n1 | cut -f2- || true)"
   [ -n "$ICON" ] || die "no icon inside $DEB"
   mkdir -p "$WORK/stage/share/icons/hicolor/256x256/apps"
   cp "$ICON" "$WORK/stage/share/icons/hicolor/256x256/apps/$APP_ID.png"
@@ -76,6 +83,12 @@ flatpak-builder --user --install-deps-from=flathub --force-clean \
   --disable-rofiles-fuse \
   --state-dir="$WORK/state" --repo="$WORK/repo" \
   "$WORK/build" "$MANIFEST"
+
+# Smoke check: the staged tree must leave an executable under
+# /app/bin — catches a failed /usr->/app remap before the bundle
+# ships.
+flatpak-builder --run "$WORK/build" "$MANIFEST" \
+  sh -c 'for f in /app/bin/*; do [ -f "$f" ] && [ -x "$f" ] && exit 0; done; exit 1'
 
 BUNDLE="$ROOT/dist/vervellum-linux-amd64.flatpak"
 flatpak build-bundle --runtime-repo="$FLATHUB_REPO" \
