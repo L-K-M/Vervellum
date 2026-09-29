@@ -123,11 +123,11 @@ jobs:
       - name: Smoke-run inside the sandbox
         run: |
           GTK_A11Y=none \
-            flatpak-builder --run dist/flatpak/build \
+            flatpak-builder --user --state-dir=dist/flatpak/state --run dist/flatpak/build \
             flatpak/ch.lkmc.Vervellum.yml vervellum --version
           # Secrets ride the runtime's secret-tool CLI — if a runtime bumps it
           # out, the app silently degrades to file storage. Fail loud instead.
-          flatpak-builder --run dist/flatpak/build \
+          flatpak-builder --user --state-dir=dist/flatpak/state --run dist/flatpak/build \
             flatpak/ch.lkmc.Vervellum.yml sh -c 'command -v secret-tool'
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
