@@ -72,9 +72,56 @@ jobs:
           path: build/*.deb
           if-no-files-found: error
 
+  # The .deb's payload repacked under flatpak's /app prefix. Bare runner,
+  # not the Swift container: bwrap needs the host's unprivileged-userns
+  # sysctl, which a job container cannot reach.
+  flatpak:
+    name: Build the Flatpak bundle
+    needs: linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false   # nothing here runs git after checkout
+
+      - name: Fetch the Debian package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vervellum-deb
+          path: ${{ runner.temp }}/deb
+
+      - name: Build the bundle
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+          # Ubuntu 24.04 denies the unprivileged user namespaces bubblewrap
+          # (flatpak's sandbox helper) builds in.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          scripts/build-flatpak.sh "$(ls -t "$RUNNER_TEMP"/deb/*.deb | head -1)"
+
+      - name: Smoke-run inside the sandbox
+        run: |
+          GTK_A11Y=none \
+            flatpak-builder --run dist/flatpak/build \
+            flatpak/ch.lkmc.Vervellum.yml vervellum --version
+          # Secrets ride the runtime's secret-tool CLI — if a runtime bumps it
+          # out, the app silently degrades to file storage. Fail loud instead.
+          flatpak-builder --run dist/flatpak/build \
+            flatpak/ch.lkmc.Vervellum.yml sh -c 'command -v secret-tool'
+
+      - name: Upload the bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vervellum-flatpak
+          path: dist/vervellum-linux-amd64.flatpak
+          if-no-files-found: error
+
   release:
     name: Build & publish (unsigned)
-    needs: linux
+    needs: [linux, flatpak]
     runs-on: macos-26
     timeout-minutes: 45   # don't let a wedged xcodebuild stall a release for 6h
     steps:
@@ -108,6 +155,12 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: vervellum-deb
+          path: ${{ runner.temp }}/linux
+
+      - name: Fetch the Flatpak bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vervellum-flatpak
           path: ${{ runner.temp }}/linux
 
       # Gate the release on the test suite. With no signing/notarization downstream,
@@ -172,6 +225,9 @@ jobs:
           DEB=$(find "$RUNNER_TEMP/linux" -name '*.deb' -print -quit)
           [ -n "$DEB" ] || { echo "::error::the Debian package was not produced"; exit 1; }
           echo "DEB=$DEB" >> "$GITHUB_ENV"
+          FLATPAK=$(find "$RUNNER_TEMP/linux" -name '*.flatpak' -print -quit)
+          [ -n "$FLATPAK" ] || { echo "::error::the Flatpak bundle was not produced"; exit 1; }
+          echo "FLATPAK=$FLATPAK" >> "$GITHUB_ENV"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
@@ -181,6 +237,7 @@ jobs:
             ${{ env.DMG }}
             ${{ env.ZIP }}
             ${{ env.DEB }}
+            ${{ env.FLATPAK }}
           # A pre-release tag (contains a hyphen, e.g. v1.1.0-beta.1) must be marked as a
           # prerelease and NOT made "latest" — otherwise the in-app updater's
           # releases/latest fetch offers the beta to every stable user, silently defeating
@@ -204,6 +261,10 @@ jobs:
             vervellum --install-shortcut
             ```
 
+            Or sandboxed: `flatpak install ./vervellum-linux-amd64.flatpak`
+            (pulls the GNOME runtime from Flathub; the GNOME custom-shortcut
+            backend still works — it writes host dconf through the session bus).
+
             The package is not signed either. `vervellum --ask "…"` works with no
             desktop session at all.
 
@@ -218,9 +279,9 @@ jobs:
           mkdir "$RUNNER_TEMP/published"
           gh release download "$GITHUB_REF_NAME" --dir "$RUNNER_TEMP/published" \
             --pattern "$(basename "$ZIP")" --pattern "$(basename "$DMG")" \
-            --pattern "$(basename "$DEB")"
+            --pattern "$(basename "$DEB")" --pattern "$(basename "$FLATPAK")"
           failed=0
-          for f in "$ZIP" "$DMG" "$DEB"; do
+          for f in "$ZIP" "$DMG" "$DEB" "$FLATPAK"; do
             if ! cmp -- "$f" "$RUNNER_TEMP/published/$(basename "$f")"; then
               # The published copy provably differs from what was built: take it
               # down before failing, so the in-app updater can't keep serving

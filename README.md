@@ -157,6 +157,9 @@ runs the searches and answers based on current sources.
 ```bash
 sudo apt install ./vervellum_0.1.0_amd64.deb
 vervellum --install-shortcut          # binds ⌃⌥⌘Space in GNOME
+
+# or sandboxed (any distro with Flatpak):
+flatpak install ./vervellum-linux-amd64.flatpak
 ```
 
 Configure it by editing `~/.config/vervellum/settings.json`:
@@ -260,6 +263,7 @@ on Linux) plus `libgtk-4-dev` and `pkg-config`.
 swift build -c release --product vervellum
 swift test --parallel            # the shared core's tests
 packaging/build-deb.sh 0.1.0     # -> build/vervellum_0.1.0_<arch>.deb
+scripts/build-flatpak.sh       # repacks the .deb -> dist/vervellum-linux-amd64.flatpak
 ```
 
 ### macOS
