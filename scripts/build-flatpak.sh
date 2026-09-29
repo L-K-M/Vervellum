@@ -62,7 +62,7 @@ done < <(find "$WORK/stage/share/applications" "$WORK/stage/share/dbus-1/service
 
 # The deb already ships ch.lkmc.Vervellum.{desktop,png,service} — flatpak's
 # app-id-named export names — so this is a verification pass, not a rename.
-DESKTOP="$(find "$WORK/stage/share/applications" -name '*.desktop' -print -quit 2>/dev/null || true)"
+DESKTOP="$(find "$WORK/stage/share/applications" -type f -name '*.desktop' -print -quit 2>/dev/null || true)"
 [ -n "$DESKTOP" ] || die "no .desktop file inside $DEB"
 [ "$(basename "$DESKTOP")" = "$APP_ID.desktop" ] ||
   mv "$DESKTOP" "$WORK/stage/share/applications/$APP_ID.desktop"
