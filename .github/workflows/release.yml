@@ -263,7 +263,8 @@ jobs:
 
             Or sandboxed: `flatpak install ./vervellum-linux-amd64.flatpak`
             (pulls the GNOME runtime from Flathub; the GNOME custom-shortcut
-            backend still works — it writes host dconf through the session bus).
+            backend still works — it writes host dconf through the session bus;
+            settings live in ~/.var/app/ch.lkmc.Vervellum/config/vervellum/).
 
             The package is not signed either. `vervellum --ask "…"` works with no
             desktop session at all.

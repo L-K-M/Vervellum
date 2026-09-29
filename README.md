@@ -160,6 +160,8 @@ vervellum --install-shortcut          # binds ⌃⌥⌘Space in GNOME
 
 # or sandboxed (any distro with Flatpak):
 flatpak install ./vervellum-linux-amd64.flatpak
+# Flatpak redirects HOME: its settings live under
+# ~/.var/app/ch.lkmc.Vervellum/config/vervellum/ instead.
 ```
 
 Configure it by editing `~/.config/vervellum/settings.json`:
