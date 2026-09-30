@@ -49,6 +49,8 @@ rm -rf "$WORK/debroot" "$WORK/stage" "$WORK/build" "$WORK/repo"
 mkdir -p "$WORK"   # dpkg-deb creates the target dir but not its parents
 dpkg-deb -x "$DEB" "$WORK/debroot"
 mkdir -p "$WORK/stage"
+extra="$(find "$WORK/debroot" -mindepth 1 -maxdepth 1 -not -name usr -not -name DEBIAN 2>/dev/null || true)"
+[ -z "$extra" ] || die "$DEB ships paths outside /usr that staging would drop: $extra"
 cp -a "$WORK/debroot/usr/." "$WORK/stage/"
 
 # Scripts and service files hardcode /usr; inside flatpak the prefix is /app.
