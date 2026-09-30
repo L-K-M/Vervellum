@@ -1,0 +1,34 @@
+# Flatpak manifest. scripts/build-flatpak.sh extracts the release .deb into
+# dist/flatpak/stage and builds from that — the bundle ships the same files
+# the .deb installs, relaid under flatpak's /app prefix.
+id: ch.lkmc.Vervellum
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: vervellum
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  # Providers are HTTP services (SearXNG, Kagi CLI backends).
+  - --share=network
+  # API tokens go through secret-tool → Secret Service. secret-tool itself
+  # ships in the runtime (part of libsecret); CI asserts it is present.
+  - --talk-name=org.freedesktop.secrets
+  # The GNOME shortcut installer runs gsettings against the host session:
+  # org.gnome.settings-daemon.plugins.media-keys custom-keybindings live in
+  # dconf. The installed shortcut itself invokes `gapplication action
+  # ch.lkmc.Vervellum toggle` on the host, which activates the sandboxed
+  # app through its exported D-Bus service file.
+  - --talk-name=ca.desrt.dconf
+  - --filesystem=xdg-run/dconf
+  - --filesystem=xdg-config/dconf
+modules:
+  - name: vervellum
+    buildsystem: simple
+    sources:
+      - type: dir
+        path: ../dist/flatpak/stage
+    build-commands:
+      - rm -rf DEBIAN
+      - "if [ -d usr ]; then cp -a usr/. /app/; else cp -a . /app/; fi"
