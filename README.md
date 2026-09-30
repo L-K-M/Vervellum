@@ -159,7 +159,7 @@ sudo apt install ./vervellum_0.1.0_amd64.deb
 vervellum --install-shortcut          # binds ⌃⌥⌘Space in GNOME
 
 # or sandboxed (any distro with Flatpak):
-flatpak install ./vervellum-linux-amd64.flatpak
+flatpak install --user ./vervellum-linux-amd64.flatpak
 # Flatpak redirects HOME: its settings live under
 # ~/.var/app/ch.lkmc.Vervellum/config/vervellum/ instead.
 ```
