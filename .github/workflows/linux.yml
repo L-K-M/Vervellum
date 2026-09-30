@@ -128,9 +128,10 @@ jobs:
             flatpak-builder --run dist/flatpak/build \
             flatpak/ch.lkmc.Vervellum.yml vervellum --version
           # Secrets ride the runtime's secret-tool CLI — if a runtime bumps it
-          # out, the app silently degrades to file storage. Fail loud instead.
-          flatpak-builder --run dist/flatpak/build \
-            flatpak/ch.lkmc.Vervellum.yml sh -c 'command -v secret-tool'
+          # out, the app silently degrades to file storage. The --run sandbox is
+          # Sdk-flavoured, so probe the installed bundle's real runtime instead.
+          flatpak install --user --noninteractive dist/vervellum-linux-amd64.flatpak
+          flatpak run --command=sh ch.lkmc.Vervellum -c 'command -v secret-tool'
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
