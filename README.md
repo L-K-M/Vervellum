@@ -265,7 +265,7 @@ on Linux) plus `libgtk-4-dev` and `pkg-config`.
 swift build -c release --product vervellum
 swift test --parallel            # the shared core's tests
 packaging/build-deb.sh 0.1.0     # -> build/vervellum_0.1.0_<arch>.deb
-scripts/build-flatpak.sh       # repacks the .deb -> dist/vervellum-linux-amd64.flatpak
+scripts/build-flatpak.sh build/vervellum_0.1.0_*.deb   # repacks it -> dist/vervellum-linux-amd64.flatpak
 ```
 
 ### macOS
