@@ -1690,12 +1690,13 @@ final class ResearchRunner: ResearchRunning {
                           evidence: evidence, assessment: secondAssessment)
     }
 
-    /// The answer stage, shared by the first pass and by a regather round's second.
+    /// Streams every answer, including direct turns and a regather round's second pass.
     ///
     /// Streams into `turn.answer` as it goes — the stage exists so the user starts
     /// reading within a second or two — which is why a caller that might discard the
     /// answer snapshots it first rather than asking this to buffer.
     private func streamAnswer(chain: ModelChain,
+                              label: String = "Answer",
                               prompt: String,
                               answerExtra: [String: Any],
                               question: String,
@@ -1732,7 +1733,7 @@ final class ResearchRunner: ResearchRunning {
         let withheldContext = answerImages.isEmpty ? nil : ResearchContext.assemble(
             question: question, history: history, today: today,
             extra: Self.namingImagesUnavailable(answerExtra, attachments))
-        let text = try await chain.perform("Answer", beforeRetry: { [weak self] in
+        let text = try await chain.perform(label, beforeRetry: { [weak self] in
             self?.update { $0.answer = "" }
         }) { chat in
             let images = chat.imagesWillBeSent ? answerImages : []
@@ -1741,7 +1742,7 @@ final class ResearchRunner: ResearchRunning {
             let text = try await chat.streamText(
                 system: prompt, payload: payload,
                 withoutImages: images.isEmpty ? nil : withheldContext?.payload,
-                label: "Answer", images: images
+                label: label, images: images
             ) { [weak self] chunk in
                 self?.update { $0.answer += chunk }
             }
@@ -2458,40 +2459,11 @@ final class ResearchRunner: ResearchRunning {
         update { $0.stage = .answering }
         var directExtra: [String: Any] = [:]
         if !attachments.payload.isEmpty { directExtra["attachments"] = attachments.payload }
-        let context = ResearchContext.assemble(question: question, history: history,
-                                               today: today, extra: directExtra)
-        if context.trimmed { update { $0.addNotice(.contextTrimmed) } }
-        // The same second payload the research path builds, for the same reason: a
-        // question about a picture, asked of a provider that cannot see it, must arrive
-        // with the picture *named as unavailable* rather than with nothing at all.
-        let withheldContext = attachments.images.isEmpty ? nil : ResearchContext.assemble(
-            question: question, history: history, today: today,
-            extra: Self.namingImagesUnavailable(directExtra, attachments))
-        // Same reset as the research path's answer stage, for the same reason.
-        var sentImages = false
-        _ = try await chain.perform("Direct answer", beforeRetry: { [weak self] in
-            self?.update { $0.answer = "" }
-        }) { chat in
-            let images = chat.imagesWillBeSent ? attachments.images : []
-            let payload = images.isEmpty ? (withheldContext ?? context).payload
-                                         : context.payload
-            let text = try await chat.streamText(
-                system: ResearchPrompts.direct, payload: payload,
-                withoutImages: images.isEmpty ? nil : withheldContext?.payload,
-                label: "Direct answer", images: images
-            ) { [weak self] chunk in
-                self?.update { $0.answer += chunk }
-            }
-            // After the call, as in the research path's answer: a rejected image was
-            // retried without and must be reported as left out.
-            sentImages = !images.isEmpty && !chat.withheldImages
-            return text
-        }
-        // And here, for the same reason as the research path.
-        if !sentImages, withheldContext?.trimmed == true {
-            update { $0.addNotice(.contextTrimmed) }
-        }
-        if !attachments.images.isEmpty, !sentImages { update { $0.addNotice(.imagesNotSent) } }
+
+        _ = try await streamAnswer(chain: chain, label: "Direct answer",
+                                   prompt: ResearchPrompts.direct, answerExtra: directExtra,
+                                   question: question, history: history, today: today,
+                                   attachments: attachments)
         recordAnsweringModel(from: chain)
         // The same check the research path makes after its answer. A Stop pressed
         // mid-stream ends the stream rather than failing it, and without this the

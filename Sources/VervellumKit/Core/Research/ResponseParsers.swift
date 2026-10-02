@@ -1,5 +1,25 @@
 import Foundation
 
+private let booleanEncoding = String(cString: NSNumber(value: true).objCType)
+
+/// Shared by planned reads and assessment citations; ordering and range policy stay
+/// with each caller so an exact number cannot silently name a different source.
+private func sourceNumber(_ value: Any) -> Int? {
+    if let number = value as? NSNumber {
+        // JSON booleans use a distinct NSNumber encoding. `as? Bool` also
+        // accepts numeric 0/1, while `as? Int` turns true into source 1.
+        guard String(cString: number.objCType) != booleanEncoding else { return nil }
+        if let integer = value as? Int { return integer }
+
+        // Exact conversion rejects fractions, infinities, and overflow without
+        // trapping; rounded() would manufacture a source the model never cited.
+        return Int(exactly: number.doubleValue)
+    }
+
+    guard let text = value as? String else { return nil }
+    return Int(text.trimmingCharacters(in: .whitespaces))
+}
+
 /// Validates the model's search plan.
 ///
 /// A plan is cheap to get wrong and expensive to act on: each entry becomes a billed
@@ -102,30 +122,11 @@ enum PlanParser {
     /// runner's budget is the real gate.
     private static func readRequests(from value: Any?) -> [Int] {
         guard let raw = value as? [Any] else { return [] }
-        // The boolean encoding `NSNumber` uses, so `as? Int` cannot smuggle a `true`
-        // through as source 1.
-        let booleanEncoding = String(cString: NSNumber(value: true).objCType)
         var seen: Set<Int> = []
         var requests: [Int] = []
         for entry in raw {
-            let number: Int?
-            // The boolean check comes first, on purpose: `NSNumber(true) as? Int`
-            // happily answers 1, and the next branch would let a `true` name source 1.
-            if let boxed = entry as? NSNumber,
-               String(cString: boxed.objCType) == booleanEncoding {
-                number = nil
-            } else if let exact = entry as? Int {
-                number = exact
-            } else if let boxed = entry as? NSNumber {
-                // Exact integers only: `Double 1.5 as? Int` rounds, and a rounded
-                // citation names a page the model never cited.
-                number = Int(exactly: boxed.doubleValue)
-            } else if let text = entry as? String {
-                number = Int(text.trimmingCharacters(in: .whitespaces))
-            } else {
-                number = nil
-            }
-            guard let number, number >= 1, seen.insert(number).inserted else { continue }
+            guard let number = sourceNumber(entry), number >= 1,
+                  seen.insert(number).inserted else { continue }
             requests.append(number)
             if requests.count >= PageReaderFactory.maxDeepPages { break }
         }
@@ -211,24 +212,6 @@ enum AssessmentParser {
     /// Cap on findings kept, matching the prompt's own limit.
     static let maxFindings = 8
     static let maxFollowups = 3
-
-    private static let booleanEncoding = String(cString: NSNumber(value: true).objCType)
-
-    private static func sourceNumber(_ value: Any) -> Int? {
-        if let number = value as? NSNumber {
-            // JSON booleans use a distinct NSNumber encoding. `as? Bool` also
-            // accepts numeric 0/1, while `as? Int` turns true into source 1.
-            guard String(cString: number.objCType) != booleanEncoding else { return nil }
-            if let integer = value as? Int { return integer }
-
-            // Exact conversion rejects fractions, infinities, and overflow without
-            // trapping; rounded() would manufacture a source the model never cited.
-            return Int(exactly: number.doubleValue)
-        }
-
-        guard let text = value as? String else { return nil }
-        return Int(text.trimmingCharacters(in: .whitespaces))
-    }
 
     static func parse(_ object: [String: Any], sourceCount: Int) throws -> Assessment {
         guard let rawFindings = object["findings"] as? [Any] else {

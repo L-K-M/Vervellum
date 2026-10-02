@@ -147,7 +147,7 @@ final class AttachmentFlowTests: XCTestCase {
         // screenshot — they exist nowhere else.
         //
         // Asserted straight after `cancel()` on purpose, and that is the contract, not
-        // an assumption about timing: `stopRunningTurn` empties `queue` and calls
+        // an assumption about timing: `cancel()` empties `queue` and calls
         // `onQueueReturned` on the next line, in the same call. There is no second
         // chance to deliver it — after the return the questions are held by nothing —
         // so a hand-back that arrived a run loop later would arrive after the composer
@@ -157,7 +157,7 @@ final class AttachmentFlowTests: XCTestCase {
         engine.onQueueReturned = { returned = $0 }
         engine.cancel()
         XCTAssertEqual(returned.flatMap { $0.attachments }, [pending])
-        // The queue is *emptied*, not copied out of. `stopRunningTurn` takes it and
+        // The queue is *emptied*, not copied out of. `cancel()` takes it and
         // clears it in the same call, which is what makes the hand-back the only one
         // there will be — and it is what this line pins about Stop.
         XCTAssertTrue(engine.queue.isEmpty)

@@ -118,6 +118,31 @@ final class PlanParserTests: XCTestCase {
                        "a whole 2.0 is a 2; a boolean is not a 1 and 1.5 is not a 2")
     }
 
+    func testReadRequestsPreservePriorityAcrossRealJSONRepresentations() throws {
+        let json = #"{"searches":[],"read":[3," 2 ",1e0,2.0,"3",true,1.5,null,{},[],0,-1,"1.5","\n4\n","9223372036854775808",1e308]}"#
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let plan = try PlanParser.parse(object, maxSearches: 4)
+
+        // The page cap is not reached; newline-padded integer strings are rejected.
+        XCTAssertEqual(plan.readRequests, [3, 2, 1])
+    }
+
+    func testReadRequestsKeepExactIntegerBoundaries() throws {
+        let values: [Any] = [NSNumber(value: Int.max), String(Int.max), NSNumber(value: Int.min),
+                             NSNumber(value: UInt64.max), Double(Int.max), Double.nan,
+                             Double.infinity, -Double.infinity]
+        let plan = try PlanParser.parse(["searches": [Any](), "read": values], maxSearches: 4)
+
+        XCTAssertEqual(plan.readRequests, [Int.max], "Large exact integers must not round through Double")
+    }
+
+    func testReadRequestCapCountsDistinctUsablePagesInPriorityOrder() throws {
+        let values: [Any] = [true, "bad", 0, 20, "20"] + Array((1..<20).reversed())
+        let plan = try PlanParser.parse(["searches": [Any](), "read": values], maxSearches: 4)
+
+        XCTAssertEqual(plan.readRequests, Array((1...20).reversed().prefix(PageReaderFactory.maxDeepPages)))
+    }
+
     /// An absent key is the common case and means "read nothing".
     func testNoReadKeyMeansNoReadRequests() throws {
         let plan = try PlanParser.parse(["searches": [Any]()], maxSearches: 4)

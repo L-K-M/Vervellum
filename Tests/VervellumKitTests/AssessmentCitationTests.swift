@@ -45,6 +45,18 @@ final class AssessmentCitationTests: XCTestCase {
         }
     }
 
+    func testLargeExactCitationsRetainTheirIdentity() throws {
+        let json = """
+            {"findings":[{"claim":"Claim","verdict":"supported",
+            "sources":[\(Int.max)," \(Int.max) ",1e308,18446744073709551615]}]}
+            """
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let assessment = try AssessmentParser.parse(object, sourceCount: Int.max)
+
+        XCTAssertEqual(assessment.findings.first?.sourceNumbers, [Int.max])
+        XCTAssertEqual(assessment.notices, [.invalidCitation])
+    }
+
     func testInvalidCitationsDoNotEraseNonEvidentialVerdicts() throws {
         for verdict in ["insufficient", "opinion"] {
             let assessment = try parseJSON(sources: "[true, 1.5]", verdict: verdict)
