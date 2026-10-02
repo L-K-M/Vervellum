@@ -348,8 +348,8 @@ final class ResearchSession {
         if !pending.isEmpty {
             queue.removeAll()
             onChange?(self)
+            onQueueReturned?(self, pending)
         }
-        if !pending.isEmpty { onQueueReturned?(self, pending) }
 
         guard let task else { return }
         // Whatever the coalescer is holding is the newest truth the user has seen;

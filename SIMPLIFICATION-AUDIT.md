@@ -83,6 +83,15 @@ macOS runs Xcode 26 `clean test`, including shared and platform-specific tests.
   `SECURITY.md` explicitly permits erasing newer schemas; blocking that action
   would change supported behavior. Startup preservation and explicit deletion
   are different contracts.
+- Automated review round one found only minor/informational feedback. Combine
+  cancellation's duplicate empty-queue checks; the captured queue is immutable
+  and callback order stays identical. Clarify the numeric-padding test without
+  changing its expectations. Its cap is eight, not three.
+- Defer severity storage in the test sink and explicit labels at every research
+  call site: severity code is untouched and one shared label already feeds both
+  logging paths. `LogLevel` has no `.error` case. Existing transport comments
+  describe `onTermination` cancellation; live hotkey recording uses Carbon
+  directly. Removed helpers never provided a reachable uninstallation feature.
 
 ## Deferred candidates and separate findings
 

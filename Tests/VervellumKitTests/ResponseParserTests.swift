@@ -123,6 +123,7 @@ final class PlanParserTests: XCTestCase {
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
         let plan = try PlanParser.parse(object, maxSearches: 4)
 
+        // The page cap is not reached; newline-padded integer strings are rejected.
         XCTAssertEqual(plan.readRequests, [3, 2, 1])
     }
 
