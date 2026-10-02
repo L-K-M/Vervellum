@@ -73,10 +73,11 @@ final class ResearchRunnerTests: XCTestCase {
     private func run(_ question: String,
                      mode: ResearchRunner.Mode = .research,
                      pageReading: PageReadingMode = .direct,
-                     searchKind: SearchProviderKind = .searxng,
-                     searchEndpoint: String = ResearchRunnerTests.searchEndpoint,
-                     transport: StubTransport,
-                     commandRunner: StubCommandRunner = StubCommandRunner { _ in .unrouted },
+                      searchKind: SearchProviderKind = .searxng,
+                      searchEndpoint: String = ResearchRunnerTests.searchEndpoint,
+                      transport: StubTransport,
+                      logSink: LogSink = SilentLog(),
+                      commandRunner: StubCommandRunner = StubCommandRunner { _ in .unrouted },
                      sendsImages: Bool = false,
                      attachments: [Attachment] = [],
                      extraSearchEndpoints: [String] = [],
@@ -87,7 +88,7 @@ final class ResearchRunnerTests: XCTestCase {
                                                              searchEndpoint: searchEndpoint,
                                                              sendsImages: sendsImages,
                                                              extraSearchEndpoints: extraSearchEndpoints),
-                                    trace: ResearchTrace(sink: SilentLog()),
+                                    trace: ResearchTrace(sink: logSink),
                                     transport: transport,
                                     commandRunner: commandRunner,
                                     attachmentBytes: attachmentBytes)
@@ -316,7 +317,8 @@ final class ResearchRunnerTests: XCTestCase {
             }
         }
 
-        let turn = await run("How is stellar parallax measured?", transport: transport)
+        let log = RecordingLog()
+        let turn = await run("How is stellar parallax measured?", transport: transport, logSink: log)
 
         XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
         XCTAssertEqual(turn.reading, "The question asks about a documented fact.")
@@ -332,6 +334,8 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(turn.limitations, "Only one page was consulted.")
         XCTAssertEqual(turn.followups, ["What does the other side say?"])
         XCTAssertTrue(turn.notices.isEmpty, "unexpected notices: \(turn.notices)")
+        XCTAssertTrue(log.messages.contains { $0.contains("] Answer started") })
+        XCTAssertTrue(log.messages.contains { $0.contains("] Answer completed in ") })
 
         // The order the stages actually ran in. The two page reads are concurrent — one
         // task group, deliberately, because they are unrelated hosts — so they are
