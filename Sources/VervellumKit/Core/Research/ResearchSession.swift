@@ -344,7 +344,34 @@ final class ResearchSession {
     /// Stop means stop *everything that was asked for*, so anything still queued is
     /// cancelled too — and handed back to the composer rather than thrown away.
     func cancel() {
-        stopRunningTurn(returningQueue: true)
+        let pending = queue
+        if !pending.isEmpty {
+            queue.removeAll()
+            onChange?(self)
+        }
+        if !pending.isEmpty { onQueueReturned?(self, pending) }
+
+        guard let task else { return }
+        // Whatever the coalescer is holding is the newest truth the user has seen;
+        // publish it, then stop anything scheduled, so a late flush cannot repaint the
+        // turn as mid-answer after it has been marked cancelled.
+        coalescer?.flush()
+        coalescer?.discardPending()
+        task.cancel()
+        self.task = nil
+        if let id = runningTurnID {
+            update(id) { turn in
+                if !turn.stage.isTerminal {
+                    turn.stage = .cancelled
+                    turn.duration = Date().timeIntervalSince(turn.askedAt)
+                    turn.applyCitationValidation(sourceCount: turn.sources.count)
+                }
+            }
+        }
+        runningTurnID = nil
+        isRunning = false
+        onChange?(self)
+        onRunningChange?(self)
     }
 
     /// Ends the session for good — the thread it was working on has been deleted.
@@ -373,37 +400,6 @@ final class ResearchSession {
         let before = queue.count
         queue.removeAll { $0.id == id }
         if queue.count != before { onChange?(self) }
-    }
-
-    private func stopRunningTurn(returningQueue: Bool) {
-        let pending = queue
-        if !pending.isEmpty {
-            queue.removeAll()
-            onChange?(self)
-        }
-        if returningQueue, !pending.isEmpty { onQueueReturned?(self, pending) }
-
-        guard let task else { return }
-        // Whatever the coalescer is holding is the newest truth the user has seen;
-        // publish it, then stop anything scheduled, so a late flush cannot repaint the
-        // turn as mid-answer after it has been marked cancelled.
-        coalescer?.flush()
-        coalescer?.discardPending()
-        task.cancel()
-        self.task = nil
-        if let id = runningTurnID {
-            update(id) { turn in
-                if !turn.stage.isTerminal {
-                    turn.stage = .cancelled
-                    turn.duration = Date().timeIntervalSince(turn.askedAt)
-                    turn.applyCitationValidation(sourceCount: turn.sources.count)
-                }
-            }
-        }
-        runningTurnID = nil
-        isRunning = false
-        onChange?(self)
-        onRunningChange?(self)
     }
 
     // MARK: Turn mutation
