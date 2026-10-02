@@ -177,6 +177,121 @@ final class ResearchRunnerTests: XCTestCase {
                 "limitations": "", "followups": []]
     }
 
+    // MARK: Direct answers
+
+    private final class RecordingLog: LogSink {
+        private let lock = NSLock()
+        private var lines: [String] = []
+
+        var messages: [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return lines
+        }
+
+        func write(_ level: LogLevel, _ message: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            lines.append(message)
+        }
+    }
+
+    func testDirectAnswerKeepsItsContextProgressWarningsAndTraceLabel() async throws {
+        let transport = StubTransport { call in
+            call.kind == .stream
+                ? .stream(["First [9]. ", "See https://invented.example/."])
+                : .unrouted
+        }
+        var captured = environment()
+        captured.settings.searchEndpoint = "not a search endpoint"
+        let log = RecordingLog()
+        let runner = ResearchRunner(environment: captured,
+                                    trace: ResearchTrace(id: "direct", sink: log),
+                                    transport: transport, attachmentBytes: { _ in nil })
+        var prior = ResearchTurn(question: "Earlier question")
+        prior.stage = .complete
+        prior.answer = "Earlier answer."
+        var submitted = ResearchTurn(question: "Explain this https://linked.example/page")
+        submitted.level = .direct
+        submitted.addNotice(.noEvidence)
+        var snapshots: [ResearchTurn] = []
+
+        let finished = await runner.run(submitted, mode: .direct, history: [prior]) {
+            snapshots.append($0)
+        }
+
+        XCTAssertEqual(finished.stage, .complete)
+        XCTAssertEqual(finished.answer, "First [9]. See https://invented.example/.")
+        XCTAssertEqual(finished.model, "test-model")
+        XCTAssertEqual(finished.notices, [.noEvidence, .invalidCitation, .literalURL])
+        XCTAssertTrue(finished.sources.isEmpty)
+        XCTAssertTrue(finished.findings.isEmpty)
+        XCTAssertTrue(snapshots.contains { $0.stage == .answering && $0.answer == "First [9]. " })
+        XCTAssertEqual(snapshots.last, finished)
+
+        XCTAssertEqual(transport.calls.count, 1, "Direct answers never search or read pasted links")
+        let call = try XCTUnwrap(transport.calls.first)
+        XCTAssertEqual(call.systemPrompt, ResearchPrompts.direct)
+        XCTAssertEqual(call.body?["model"] as? String, "test-model")
+        XCTAssertEqual(call.body?["stream"] as? Bool, true)
+        let content = try XCTUnwrap(call.userContent)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(content.utf8)) as? [String: Any])
+        XCTAssertEqual(Set(payload.keys), ["question", "today", "thread"])
+        XCTAssertEqual(payload["question"] as? String, submitted.question)
+        let history = try XCTUnwrap(payload["thread"] as? [[String: String]])
+        XCTAssertEqual(history, [["question": "Earlier question", "answer": "Earlier answer."]])
+        XCTAssertTrue(log.messages.contains("[direct] Direct answer started"))
+        XCTAssertTrue(log.messages.contains { $0.hasPrefix("[direct] Direct answer completed in ") })
+        XCTAssertFalse(log.messages.contains { $0.hasPrefix("[direct] Answer ") })
+    }
+
+    func testDirectAnswerFallbackReplacesPartialProseBeforeTheNextProviderWrites() async throws {
+        let transport = StubTransport { call in
+            guard call.kind == .stream else { return .unrouted }
+            if call.body?["model"] as? String == "test-model" {
+                return .events([["choices": [["delta": ["content": "Discarded fragment"]]]]])
+            }
+            return .stream(["Replacement answer"])
+        }
+        var captured = environment(pageReading: .off)
+        captured.settings.modelProfiles.append(ModelProfile.new(
+            name: "Backup", endpoint: "https://backup.test/v1", model: "backup-model"))
+        let runner = ResearchRunner(environment: captured, trace: ResearchTrace(sink: SilentLog()),
+                                    transport: transport, attachmentBytes: { _ in nil })
+        var snapshots: [ResearchTurn] = []
+        let finished = await runner.run(ResearchTurn(question: "Question"), mode: .direct, history: []) {
+            snapshots.append($0)
+        }
+
+        XCTAssertEqual(finished.stage, .complete)
+        XCTAssertEqual(finished.answer, "Replacement answer")
+        XCTAssertEqual(finished.model, "backup-model")
+        XCTAssertEqual(finished.notices, [.modelFellBack])
+        XCTAssertEqual(transport.calls.compactMap { $0.body?["model"] as? String },
+                       ["test-model", "backup-model"])
+        XCTAssertEqual(transport.calls.first?.userContent, transport.calls.last?.userContent)
+        let partial = try XCTUnwrap(snapshots.firstIndex { $0.answer == "Discarded fragment" })
+        let replacement = try XCTUnwrap(snapshots.firstIndex { $0.answer == "Replacement answer" })
+        XCTAssertLessThan(partial, replacement)
+        XCTAssertTrue(snapshots[(partial + 1)..<replacement].contains { $0.answer.isEmpty },
+                      "The dead provider's prose must disappear before its replacement arrives")
+    }
+
+    func testDirectAnswerRetainsIncompleteProseAndItsCitationWarnings() async {
+        let transport = StubTransport { call in
+            call.kind == .stream
+                ? .events([["choices": [["delta": ["content": "Partial [9] https://invented.example/"]]]]])
+                : .unrouted
+        }
+        let finished = await run("Question", mode: .direct, transport: transport)
+
+        XCTAssertEqual(finished.stage, .failed)
+        XCTAssertEqual(finished.failure, ResearchError.streamInterrupted.message)
+        XCTAssertEqual(finished.answer, "Partial [9] https://invented.example/")
+        XCTAssertEqual(finished.notices, [.invalidCitation, .literalURL])
+        XCTAssertEqual(transport.calls.count, 1)
+    }
+
     // MARK: A whole turn
 
     func testAResearchTurnRunsItsStagesInOrder() async throws {

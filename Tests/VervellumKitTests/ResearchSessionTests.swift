@@ -297,6 +297,61 @@ final class ResearchSessionTests: XCTestCase {
         XCTAssertFalse(session.isRunning)
     }
 
+    func testCancelReturnsAttachmentsBeforePublishingTheStoppedRun() {
+        let hops = HopQueue()
+        let gate = Gate()
+        let runner = StubRunner(gate: gate)
+        let session = makeSession(runner: runner, deliver: hops.deliver)
+        let attachment = Attachment(kind: .image, name: "waiting.png", mediaType: "image/png", byteCount: 4)
+        let pending = PendingAttachment(attachment: attachment, data: Data([0x89, 0x50, 0x4E, 0x47]))
+        session.ask("first")
+        hops.expect(1)
+        hops.drain()
+        session.ask("second", mode: .deep, attachments: [pending])
+        session.ask("third", mode: .direct)
+        var events: [String] = []
+        session.onChange = {
+            events.append("change:\($0.queue.count):\($0.isRunning):\($0.thread.turns.last?.stage.rawValue ?? "missing")")
+        }
+        session.onQueueReturned = { state, questions in
+            events.append("returned")
+            XCTAssertTrue(state.queue.isEmpty)
+            XCTAssertTrue(state.isRunning)
+            XCTAssertEqual(questions.map(\.question), ["second", "third"])
+            XCTAssertEqual(questions.map(\.mode), [.deep, .direct])
+            XCTAssertEqual(questions.first?.attachments.first?.attachment, attachment)
+            XCTAssertEqual(questions.first?.attachments.first?.data, pending.data)
+        }
+        session.onRunningChange = { events.append("running:\($0.isRunning)") }
+
+        session.cancel()
+        session.cancel()
+
+        XCTAssertEqual(events, ["change:0:true:answering", "returned",
+                                "change:0:false:cancelled", "running:false"])
+        XCTAssertEqual(session.thread.turns.first?.answer, "partial")
+        gate.release()
+        hops.expect(1)
+        hops.drain()
+        XCTAssertEqual(session.thread.turns.first?.stage, .cancelled)
+        XCTAssertEqual(runner.runCount, 1, "Neither Stop nor late completion may start queued work")
+        XCTAssertEqual(events.count, 4, "Late completion must not publish over Stop")
+    }
+
+    func testCancelAnIdleSessionDoesNotPublishChanges() {
+        let hops = HopQueue()
+        let session = makeSession(runner: StubRunner(), deliver: hops.deliver)
+        session.onChange = { _ in XCTFail("An idle Stop changed the thread") }
+        session.onRunningChange = { _ in XCTFail("An idle Stop changed running state") }
+        session.onQueueReturned = { _, _ in XCTFail("An idle Stop returned a question") }
+
+        session.cancel()
+        session.cancel()
+
+        XCTAssertTrue(session.thread.turns.isEmpty)
+        XCTAssertFalse(session.isRunning)
+    }
+
     func testDiscardStopsTheRunAndSealsIt() {
         let hops = HopQueue()
         let gate = Gate()
