@@ -57,7 +57,6 @@ final class Preferences: ObservableObject {
         /// to be read while working; dismissing on click-away would throw the result
         /// away at the exact moment it became useful.
         static let dismissOnFocusLoss = false
-        static let launchAtLogin = false
     }
 
     private enum Key {

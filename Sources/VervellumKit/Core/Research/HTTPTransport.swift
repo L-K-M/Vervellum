@@ -115,10 +115,6 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, HTTPTransporting, @
     private final class Exchange {
         var head: CheckedContinuation<HTTPURLResponse, Error>?
         var body: AsyncThrowingStream<Data, Error>.Continuation?
-        var response: HTTPURLResponse?
-        /// Held so the request can be stopped when the caller abandons the body, and so
-        /// the producer can be cut off if it outruns the cap.
-        weak var task: URLSessionTask?
         var bytesYielded = 0
         var limit = HTTPTransport.maxStreamBytes
         /// Set by the cancellation handler. Read under the lock by `open`, which may
@@ -349,7 +345,6 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, HTTPTransporting, @
                       limit: Int) async throws -> (HTTPURLResponse, AsyncThrowingStream<Data, Error>) {
         let exchange = Exchange()
         let task = session.dataTask(with: request)
-        exchange.task = task
         exchange.limit = limit
 
         // The build closure runs synchronously, so the continuation is in place before
@@ -702,7 +697,6 @@ final class HTTPTransport: NSObject, URLSessionDataDelegate, HTTPTransporting, @
         guard let http = response as? HTTPURLResponse else { return }
         lock.lock()
         guard let exchange = exchanges[dataTask.taskIdentifier] else { lock.unlock(); return }
-        exchange.response = http
         let head = exchange.head
         exchange.head = nil
         lock.unlock()

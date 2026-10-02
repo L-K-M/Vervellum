@@ -72,20 +72,6 @@ enum ShortcutInstaller {
         return true
     }
 
-    /// Removes the binding, leaving any others alone.
-    @discardableResult
-    static func uninstall() -> Bool {
-        guard gsettingsPath != nil,
-              let list = run(["get", listSchema, "custom-keybindings"]),
-              let slot = existingSlot(in: list) else { return false }
-        let remaining = paths(in: list).filter { $0 != slot }
-        _ = run(["set", listSchema, "custom-keybindings", encode(remaining)])
-        // The list entry alone is not enough: dconf keeps the values behind it and the
-        // next install would find a ghost binding.
-        _ = run(["reset-recursively", "\(itemSchema):\(slot)"])
-        return true
-    }
-
     static var command: String { "gapplication action \(VervellumLinuxApp.applicationID) toggle" }
 
     // MARK: Slot bookkeeping

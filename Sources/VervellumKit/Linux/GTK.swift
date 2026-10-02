@@ -339,8 +339,6 @@ enum GTK {
 
     static func margins(_ widget: Widget, _ all: Int32) { vv_set_margins(widget, all) }
 
-    static func expandVertically(_ widget: Widget) { gtk_widget_set_vexpand(widget, 1) }
-
     static func addStyle(_ widget: Widget, _ name: String) {
         gtk_widget_add_css_class(widget, name)
     }
@@ -448,10 +446,6 @@ enum GTK {
         let button = gtk_button_new_with_label(title)!
         onSignal(UnsafeMutableRawPointer(button), "clicked", action)
         return button
-    }
-
-    static func setEnabled(_ widget: Widget, _ enabled: Bool) {
-        gtk_widget_set_sensitive(widget, enabled ? 1 : 0)
     }
 
     /// Attaches a key controller in the default bubble phase.
