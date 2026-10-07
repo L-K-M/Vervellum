@@ -60,9 +60,10 @@ jobs:
         uses: L-K-M/zai-code-review@ed5d384eaa86b049fed3331ddb4c1ec08fd555f4
         with:
           ZAI_API_KEY: ${{ env.ZAI_API_KEY }}
-          ZAI_MODEL: glm-5.3-flash # keep flash: this repo deliberately reviews with it
+          ZAI_MODEL: glm-5.3
+          ZAI_MODEL_FAST: glm-5.3-flash
           ZAI_REASONING_EFFORT: high
-          ZAI_MAX_OUTPUT_TOKENS: 32768
+          ZAI_MAX_OUTPUT_TOKENS: 98304  # glm documented max output cap
           ZAI_REQUEST_TIMEOUT_SECONDS: 900
           # A follow-up round reviews the delta since the last fully reviewed
           # head plus a bounded rotating sample of the rest, so a PR that gets
@@ -80,7 +81,7 @@ jobs:
           # the action then retries with. Bigger chunks would hit that more
           # often, not less.
           MAX_CHUNK_CHARS: 25000
-          ZAI_REVIEWER_NAME: GLM 5.3 Flash Code Review
+          ZAI_REVIEWER_NAME: GLM 5.3 Code Review
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Report an unfinished review on the PR
@@ -113,7 +114,7 @@ jobs:
 
           notice="${RUNNER_TEMP}/review-unfinished.md"
           {
-            echo "### GLM 5.3 Flash Code Review did not finish"
+            echo "### GLM 5.3 Code Review did not finish"
             echo
             echo "The reviewer ${summary}, so this revision has no findings. Read the missing review as missing, not as a clean one."
             echo
