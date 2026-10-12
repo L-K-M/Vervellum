@@ -226,7 +226,11 @@ struct PanelRootView: View {
     private var thread: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: PanelTheme.Space.section) {
+                // Keep row lifetimes stable while scrolling. LazyVStack repeatedly
+                // changes item phases for these variable-height AppKit-backed rows;
+                // the resulting view-graph churn can occupy the main loop forever.
+                // Finished turns still skip body updates through `.equatable()` below.
+                VStack(alignment: .leading, spacing: PanelTheme.Space.section) {
                     if engine.thread.isEmpty && notice == nil {
                         EmptyStateView(isConfigured: isConfigured,
                                        summonShortcut: preferences.summonHotkey.displayString,
@@ -259,7 +263,7 @@ struct PanelRootView: View {
                 }
                 .padding(.horizontal, PanelTheme.Space.gutter)
                 .padding(.vertical, PanelTheme.Space.large)
-                // Keep observation alive outside lazy children, but inside the scroll content.
+                // Observe the full scroll content, including its bottom anchor.
                 .background(BottomSentinel { pinned in isPinnedToBottom = pinned })
             }
             .overlay(alignment: .bottom) {

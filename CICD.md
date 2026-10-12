@@ -24,6 +24,7 @@ One job on `macos-26` with Xcode pinned to `26.0`:
 ```bash
 xcodebuild -project Vervellum.xcodeproj -scheme Vervellum \
   -destination 'platform=macOS' -resultBundlePath TestResults.xcresult \
+  -test-timeouts-enabled YES -maximum-test-execution-time-allowance 60 \
   CODE_SIGNING_ALLOWED=NO clean test | xcbeautify
 ```
 
@@ -39,6 +40,9 @@ Notes on the shape of this job, each of which is there for a reason:
   left in `.git/config` for the duration of the build.
 - **A 30-minute timeout.** A wedged `xcodebuild` is a documented failure mode, and macOS
   runners bill at 10×; without this it would burn six hours.
+- **Individual tests time out after 60 seconds.** The hosted transcript test exercises
+  scrolling on the main loop; a layout freeze can prevent XCTest's own waits from
+  returning, so the external test runner must be able to stop the stuck host.
 - **Concurrency cancels PR runs only.** Cancelling a push to `main` would leave that
   commit permanently marked "cancelled", masking breakage and putting holes in
   CI-status bisection.
