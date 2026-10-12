@@ -478,6 +478,14 @@ per layer.
 Verdict meaning is never carried by colour alone: each verdict has a distinct SF
 Symbol, a text label, and an accessibility string that spells it out.
 
+The macOS transcript uses a regular `VStack`, keeping its AppKit text views alive
+when they scroll out of sight. A frozen panel's main thread was continuously
+processing `LazyVStack` item-phase changes and layout estimates. Removing that
+virtualization path also fixes older answers disappearing after scrolling past a
+short follow-up. Completed turns still skip body updates through `.equatable()`;
+opening a large thread now creates all its rows up front. The hosted-panel test
+checks scrolling, rewrapping, selectable text and main-loop responsiveness.
+
 ---
 
 ## 5.6 Two platforms, one core
