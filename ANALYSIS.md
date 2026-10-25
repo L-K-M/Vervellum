@@ -19,7 +19,7 @@ Implemented or in-flight work is separated below; do not reimplement it. Origina
 Astra findings remain in review PR #40. Earlier identifiers are mapped to consolidated
 tasks so neither distinct requirements nor their provenance disappear.
 
-Merged the [Fable review](https://github.com/L-K-M/Vervellum/blob/claude/ai-popup-tool-review-dezpkl/fable.md)
+Merged the [Fable review](fable.md)
 (`fable.md`, sections 1–12) at `main` `8652ea8`: seventeen of its findings ship as
 [pull requests #53–#68](#fable-patches), its remaining findings and ideas are folded
 into the existing tasks as **Fable status** paragraphs or added as A54–A70, and its
