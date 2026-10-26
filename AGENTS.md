@@ -278,7 +278,7 @@ dependency tree would end that.
   that changes ICU needs that version's `LICENSE` in `packaging/licenses/`.
 - Anything else that ends up in a package (a library, vendored file, font or icon) needs
   a license that allows redistribution and an entry in that spec. Keep the CI checks on
-  the installed package and the Flatpak passing.
+  the `.deb` and the Flatpak passing.
 
 ## Critical Constraints
 
