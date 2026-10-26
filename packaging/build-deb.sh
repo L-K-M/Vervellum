@@ -83,7 +83,15 @@ DOC="$STAGE/usr/share/doc/vervellum"
 SWIFT_INFO="$(swift -print-target-info)"
 SWIFT_RESOURCES="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["paths"]["runtimeResourcePath"])' <<<"$SWIFT_INFO")"
 # "Swift version 6.1.2 (swift-6.1.2-RELEASE)": the tag names the sources the notices link to.
-SWIFT_TAG="$(python3 -c 'import json, re, sys; print(re.search(r"\((swift-[^)]+)\)", json.load(sys.stdin)["compilerVersion"]).group(1))' <<<"$SWIFT_INFO")"
+# A toolchain that reports no tag (a snapshot) stops here with a message, not a traceback.
+SWIFT_TAG="$(python3 -c '
+import json, re, sys
+version = json.load(sys.stdin)["compilerVersion"]
+match = re.search(r"\((swift-[^)]+)\)", version)
+if not match:
+    sys.exit(f"build-deb.sh: no swift-<tag> in the compiler version: {version}")
+print(match.group(1))
+' <<<"$SWIFT_INFO")"
 SWIFT_VERSION="${SWIFT_TAG#swift-}"
 SWIFT_VERSION="${SWIFT_VERSION%-RELEASE}"
 export SWIFT_LICENSE="$SWIFT_RESOURCES/../../share/swift/LICENSE.txt" SWIFT_TAG SWIFT_VERSION
