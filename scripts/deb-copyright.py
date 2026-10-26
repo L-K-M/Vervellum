@@ -188,7 +188,7 @@ def load_spec(path):
     if "pending" in own:
         if not str(own["pending"]).strip():
             die(f"{path}: own.pending needs a sentence explaining that no license is stated")
-        own_info = {"pending": own["pending"].strip()}
+        own_info = {"pending": str(own["pending"]).strip()}
     else:
         dep5, atoms = parse_expression(own.get("license", ""), "own")
         own_info = {"dep5": dep5, "spdx": own["license"], "copyright": as_list(own.get("copyright") or die("own: needs copyright"), "own", "copyright"),
@@ -277,7 +277,8 @@ def generate(spec, own, components, notices_path):
                               + field("Copyright", comp["copyright"]) + f"License: {comp['dep5']}\n"
                               + field("Comment", note))
     for binary, comps in sorted(by_binary.items()):
-        parts = [] if "pending" in own else [own["dep5"]]
+        # Wrap an own "a or b" like the components' licenses, or "a or b and c" is ambiguous.
+        parts = [] if "pending" in own else [f"({own['dep5']})" if wrap_needed(own["dep5"]) else own["dep5"]]
         holders = [] if "pending" in own else list(own["copyright"])
         note = [f"{binary} statically links:"]
         for comp in comps:
@@ -450,6 +451,9 @@ def main():
     if args.mode == "check":
         check(args.copyright, args.no_common_licenses, args.require)
         return
+    # Before anything is written, so a bad call leaves no half-written output.
+    if args.merge_notices and not args.notices_out:
+        die("--merge-notices needs --notices-out")
     spec, own, components = load_spec(args.spec)
     notices_name = Path(args.notices_out).name if args.notices_out else args.notices_name
     copyright_text = generate(spec, own, components, notices_name)
@@ -458,8 +462,6 @@ def main():
     if args.notices_out:
         Path(args.notices_out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.notices_out).write_text(notices(spec, own, components, args.merge_notices), encoding="utf-8")
-    elif args.merge_notices:
-        die("--merge-notices needs --notices-out")
     if args.sources_out:
         Path(args.sources_out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.sources_out).write_text(sources(spec, components), encoding="utf-8")
