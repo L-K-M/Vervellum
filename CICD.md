@@ -125,6 +125,12 @@ Three details that are easy to get wrong and are handled in the script:
 - A version with no Debian revision makes this a *native* package, which requires
   `changelog.gz` rather than `changelog.Debian.gz`.
 
+The statically linked runtime includes ICU, whose license must ship with the binary. The
+script writes `copyright` and `Third-Party-Notices.txt` into `/usr/share/doc/vervellum/`
+from `packaging/licenses/components.json`, and fails if the binary links a runtime or
+ICU version those notices do not name. Both workflows check the files inside the built
+`.deb`, and again under `/app/share/doc/vervellum/` in the Flatpak smoke step.
+
 ## Automated review (`zai-code-review.yml`)
 
 Runs on `pull_request_target`, which exposes repository secrets and a write-capable

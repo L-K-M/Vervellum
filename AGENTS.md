@@ -265,6 +265,21 @@ syntax, a hand-written block parser above it). Keep it that way: a research pane
 handles untrusted web content has a small enough attack surface to reason about, and a
 dependency tree would end that.
 
+## Licensing
+
+- Vervellum's own code is the Unlicense (`LICENSE`). Keep the README, the About pane and
+  `packaging/licenses/components.json` (the package's `copyright`) consistent with it.
+- The Linux binary is not only our code: `--static-swift-stdlib` links the Swift runtime,
+  Foundation and ICU into it. `packaging/build-deb.sh` writes `copyright` and
+  `Third-Party-Notices.txt` into `usr/share/doc/vervellum/` from
+  `packaging/licenses/components.json` with `scripts/deb-copyright.py`, which fails on a
+  missing license text. `scripts/static-runtime-notices.py` fails the build when the
+  binary links a runtime or an ICU version the notices do not name: a toolchain bump
+  that changes ICU needs that version's `LICENSE` in `packaging/licenses/`.
+- Anything else that ends up in a package (a library, vendored file, font or icon) needs
+  a license that allows redistribution and an entry in that spec. Keep the CI checks on
+  the `.deb` and the Flatpak passing.
+
 ## Critical Constraints
 
 - **The citation rule above is not negotiable.** See "The one load-bearing design

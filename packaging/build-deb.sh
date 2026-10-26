@@ -5,7 +5,7 @@
 #
 # Run it on the oldest Ubuntu release you intend to support: a .deb links against the
 # library versions present at build time, so building on a newer release produces a
-# package that will not install on an older one.
+# package that will not install on an older one. Needs python3 for the license notices.
 set -euo pipefail
 
 VERSION="${1:-0.1.0}"
@@ -69,7 +69,40 @@ Exec=/usr/bin/vervellum --gapplication-service
 SERVICE
 chmod 0644 "$STAGE/usr/share/dbus-1/services/$APP_ID.service"
 
-install -m 0644 "$ROOT/packaging/debian/copyright" "$STAGE/usr/share/doc/vervellum/copyright"
+echo "==> Writing license notices"
+# --static-swift-stdlib puts third-party code into the binary: the Swift runtime and
+# Foundation, and ICU with its data. ICU's license is not covered by Swift's Runtime
+# Library Exception and must travel with every copy, so the copyright file declares it
+# and Third-Party-Notices.txt carries the full texts. Both come from one spec, and the
+# generator fails on a missing license text.
+#
+# The Swift text and version come from the toolchain that built the binary.
+# runtimeResourcePath is <prefix>/usr/lib/swift, so the license is
+# <prefix>/usr/share/swift/LICENSE.txt in the swift:* images and in a tarball install.
+DOC="$STAGE/usr/share/doc/vervellum"
+SWIFT_INFO="$(swift -print-target-info)"
+SWIFT_RESOURCES="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["paths"]["runtimeResourcePath"])' <<<"$SWIFT_INFO")"
+# "Swift version 6.1.2 (swift-6.1.2-RELEASE)": the tag names the sources the notices link to.
+# A toolchain that reports no tag (a snapshot) stops here with a message, not a traceback.
+SWIFT_TAG="$(python3 -c '
+import json, re, sys
+version = json.load(sys.stdin)["compilerVersion"]
+match = re.search(r"\((swift-[^)]+)\)", version)
+if not match:
+    sys.exit(f"build-deb.sh: no swift-<tag> in the compiler version: {version}")
+print(match.group(1))
+' <<<"$SWIFT_INFO")"
+SWIFT_VERSION="${SWIFT_TAG#swift-}"
+SWIFT_VERSION="${SWIFT_VERSION%-RELEASE}"
+export SWIFT_LICENSE="$SWIFT_RESOURCES/../../share/swift/LICENSE.txt" SWIFT_TAG SWIFT_VERSION
+python3 "$ROOT/scripts/deb-copyright.py" generate "$ROOT/packaging/licenses/components.json" \
+    --copyright-out "$DOC/copyright" --notices-out "$DOC/Third-Party-Notices.txt"
+python3 "$ROOT/scripts/deb-copyright.py" check "$DOC/copyright" --no-common-licenses
+# Compare the notices with what the stripped binary actually links. A toolchain bump that
+# adds a runtime or changes ICU's version then fails here instead of shipping stale notices.
+python3 "$ROOT/scripts/static-runtime-notices.py" check "$STAGE/usr/bin" --notices "$DOC/Third-Party-Notices.txt"
+python3 "$ROOT/scripts/static-runtime-notices.py" check "$STAGE/usr/bin" --notices "$DOC/copyright"
+chmod 0644 "$DOC/copyright" "$DOC/Third-Party-Notices.txt"
 
 # A version with no Debian revision makes this a *native* package, and lintian then
 # requires changelog.gz — not changelog.Debian.gz. (The tilde above is what keeps a

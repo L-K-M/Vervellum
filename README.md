@@ -332,3 +332,13 @@ Or right-click the app → **Open** → **Open**.
 The Linux `.deb` is unsigned as well. It's built in the official Swift container
 for Ubuntu 24.04, links the Swift runtime statically, and declares its remaining
 dependencies with `dpkg-shlibdeps` instead of a hand-written list.
+
+## License
+
+Vervellum's own code is released under the [Unlicense](LICENSE). The macOS app bundles
+no third-party code: it links only system frameworks. The Linux `.deb` and Flatpak
+statically link the Swift standard library, Foundation and libdispatch (Apache License
+2.0 with the Swift Runtime Library Exception) and ICU (Unicode License V3, plus the
+terms for its dictionaries and data) into the binary. These keep their own licenses.
+Their notices ship in `/usr/share/doc/vervellum/` (Flatpak: `/app/share/doc/vervellum/`)
+as `copyright` and `Third-Party-Notices.txt`.

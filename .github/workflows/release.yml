@@ -41,8 +41,9 @@ jobs:
       - name: Install build dependencies
         run: |
           apt-get update
+          # python3 runs the license notice generator in build-deb.sh.
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            libgtk-4-dev pkg-config dpkg-dev binutils desktop-file-utils
+            libgtk-4-dev pkg-config dpkg-dev binutils desktop-file-utils python3
 
       - name: Version from tag
         # DEB_VERSION is what build-deb.sh names the package: a pre-release's hyphen
@@ -59,6 +60,20 @@ jobs:
 
       - name: Package
         run: packaging/build-deb.sh "$VERSION"
+
+      # The binary statically links the Swift runtime and ICU, whose notices must ship
+      # with it; the copyright file must not claim ICU as our own code. This reads the
+      # .deb itself: the container's minimized dpkg config skips /usr/share/doc (all but
+      # copyright) on install.
+      - name: Check the license notices
+        run: |
+          dpkg-deb -x build/vervellum_${DEB_VERSION}_*.deb /tmp/deb
+          DOC=/tmp/deb/usr/share/doc/vervellum
+          test -s "$DOC/copyright"
+          test -s "$DOC/Third-Party-Notices.txt"
+          grep -q 'Unicode, Inc' "$DOC/copyright"
+          grep -q 'Unicode, Inc' "$DOC/Third-Party-Notices.txt"
+          grep -q 'Runtime Library Exception' "$DOC/Third-Party-Notices.txt"
 
       - name: Install the package
         run: |
@@ -112,6 +127,8 @@ jobs:
           # Sdk-flavoured, so probe the installed bundle's real runtime instead.
           flatpak install --user --noninteractive dist/vervellum-linux-amd64.flatpak
           flatpak run --command=sh ch.lkmc.Vervellum -c 'command -v secret-tool'
+          # The repack must carry the .deb's notices under /app.
+          flatpak run --command=sh ch.lkmc.Vervellum -c 'test -s /app/share/doc/vervellum/copyright && test -s /app/share/doc/vervellum/Third-Party-Notices.txt && grep -q "Unicode, Inc" /app/share/doc/vervellum/Third-Party-Notices.txt'
 
       - name: Upload the bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

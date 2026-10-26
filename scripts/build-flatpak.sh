@@ -54,9 +54,10 @@ extra="$(find "$WORK/debroot" -mindepth 1 -maxdepth 1 -not -name usr -not -name 
 cp -a "$WORK/debroot/usr/." "$WORK/stage/"
 
 # Scripts and service files hardcode /usr; inside flatpak the prefix is /app.
+# share/doc is skipped: license texts must stay verbatim.
 while IFS= read -r f; do
   sed -i '/^#!/!s|/usr/|/app/|g' "$f"
-done < <(grep -rIl '/usr/' "$WORK/stage" 2>/dev/null || true)
+done < <(find "$WORK/stage" -path "$WORK/stage/share/doc" -prune -o -type f -exec grep -Il '/usr/' {} + 2>/dev/null || true)
 while IFS= read -r f; do
   sed -i -e 's|Exec=/usr/bin/|Exec=|g' -e 's|Exec=/app/bin/|Exec=|g' -e '/^TryExec=/d' "$f"
 done < <(find "$WORK/stage/share/applications" "$WORK/stage/share/dbus-1/services" \
