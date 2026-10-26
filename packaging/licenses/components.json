@@ -1,0 +1,59 @@
+{
+  "_comment": [
+    "What packaging/build-deb.sh writes to usr/share/doc/vervellum/copyright and",
+    "Third-Party-Notices.txt, through scripts/deb-copyright.py. Paths are relative to",
+    "this file. $SWIFT_LICENSE, $SWIFT_VERSION and $SWIFT_TAG come from the toolchain",
+    "that built the binary. --static-swift-stdlib links the Swift runtime and",
+    "Foundation's ICU into usr/bin/vervellum; scripts/static-runtime-notices.py fails",
+    "the build if the binary links anything else, or another ICU major version than",
+    "the vendored license text."
+  ],
+  "package": "vervellum",
+  "upstream_name": "Vervellum",
+  "upstream_contact": "L-K-M <noreply@lkmc.ch>",
+  "source": "https://github.com/L-K-M/Vervellum",
+  "own": {
+    "copyright": [
+      "2026 L-K-M"
+    ],
+    "license": "Unlicense",
+    "license_files": [
+      "../../LICENSE"
+    ]
+  },
+  "components": [
+    {
+      "name": "Swift standard library, Foundation and libdispatch",
+      "version": "$SWIFT_VERSION",
+      "license": "Apache-2.0 WITH Swift-exception",
+      "copyright": [
+        "Apple Inc. and the Swift project authors"
+      ],
+      "source_url": "https://github.com/swiftlang/swift/tree/$SWIFT_TAG",
+      "license_files": [
+        "$SWIFT_LICENSE"
+      ],
+      "embedded_in": [
+        "usr/bin/vervellum"
+      ],
+      "comment": "Linked by --static-swift-stdlib: the standard library, swift-corelibs-foundation, swift-foundation with swift-collections, libdispatch and swift-foundation-icu's packaging, all under this license. The Runtime Library Exception waives attribution; listed for completeness."
+    },
+    {
+      "name": "ICU",
+      "version": "74.1",
+      "license": "Unicode-3.0",
+      "copyright": [
+        "2016 and later Unicode, Inc. and others",
+        "1995-2016 International Business Machines Corporation and others"
+      ],
+      "source_url": "https://github.com/swiftlang/swift-foundation-icu/tree/$SWIFT_TAG",
+      "license_files": [
+        "ICU-74.1-LICENSE.txt"
+      ],
+      "embedded_in": [
+        "usr/bin/vervellum"
+      ],
+      "comment": "Foundation's ICU code and data, including the break-iterator dictionaries and time zone data whose third-party terms are part of the license text. Not covered by the Swift Runtime Library Exception."
+    }
+  ]
+}

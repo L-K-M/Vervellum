@@ -41,8 +41,9 @@ jobs:
       - name: Install build dependencies
         run: |
           apt-get update
+          # python3 runs the license notice generator in build-deb.sh.
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            libgtk-4-dev pkg-config dpkg-dev binutils desktop-file-utils
+            libgtk-4-dev pkg-config dpkg-dev binutils desktop-file-utils python3
 
       - name: Version from tag
         # DEB_VERSION is what build-deb.sh names the package: a pre-release's hyphen
