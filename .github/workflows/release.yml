@@ -64,6 +64,13 @@ jobs:
         run: |
           dpkg --install --force-depends build/vervellum_${DEB_VERSION}_*.deb
           /usr/bin/vervellum --version
+          # The binary statically links the Swift runtime and ICU, whose notices must
+          # ship with it; the copyright file must not claim ICU as our own code.
+          test -s /usr/share/doc/vervellum/copyright
+          test -s /usr/share/doc/vervellum/Third-Party-Notices.txt
+          grep -q 'Unicode, Inc' /usr/share/doc/vervellum/copyright
+          grep -q 'Unicode, Inc' /usr/share/doc/vervellum/Third-Party-Notices.txt
+          grep -q 'Runtime Library Exception' /usr/share/doc/vervellum/Third-Party-Notices.txt
 
       - name: Upload the package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -112,6 +119,8 @@ jobs:
           # Sdk-flavoured, so probe the installed bundle's real runtime instead.
           flatpak install --user --noninteractive dist/vervellum-linux-amd64.flatpak
           flatpak run --command=sh ch.lkmc.Vervellum -c 'command -v secret-tool'
+          # The repack must carry the .deb's notices under /app.
+          flatpak run --command=sh ch.lkmc.Vervellum -c 'test -s /app/share/doc/vervellum/copyright && test -s /app/share/doc/vervellum/Third-Party-Notices.txt && grep -q "Unicode, Inc" /app/share/doc/vervellum/Third-Party-Notices.txt'
 
       - name: Upload the bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
