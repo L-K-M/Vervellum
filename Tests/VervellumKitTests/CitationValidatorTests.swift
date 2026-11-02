@@ -98,6 +98,15 @@ final class CitationValidatorTests: XCTestCase {
             sourceCount: 1)
         XCTAssertEqual(inline.literalURLs, [])
 
+        // A prose URL that runs into a following code span is still a prose URL:
+        // the regex happily eats the opening backtick, so an overlap test alone
+        // would swallow it with the span it merely touches.
+        let adjacent = CitationValidator.validate(
+            answer: "See https://example.com/made-up`x` and cite [1].",
+            sourceCount: 1)
+        XCTAssertEqual(adjacent.literalURLs, ["https://example.com/made-up`x`"])
+        XCTAssertFalse(adjacent.isClean)
+
         let prose = CitationValidator.validate(
             answer: "See https://example.com/made-up and `curl https://example.com/ok`.",
             sourceCount: 1)

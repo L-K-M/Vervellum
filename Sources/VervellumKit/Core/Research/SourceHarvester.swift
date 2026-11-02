@@ -78,10 +78,12 @@ enum SourceHarvester {
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return regex.matches(in: text, range: range).compactMap { match in
             guard let swiftRange = Range(match.range, in: text) else { return nil }
-            // A citation check passes code ranges here. A URL inside a fence is an
-            // example, and overlapping the fence is enough: the match may run into
-            // the closing backtick, which is still code.
-            if excluding.contains(where: { $0.overlaps(swiftRange) }) { return nil }
+            // A citation check passes code ranges here. A URL that *starts* inside
+            // one is an example and is skipped. A match that merely runs into a
+            // span's opening backtick started in prose and is a prose URL — dropping
+            // it would make the literal-URL guard miss the one shape it exists to
+            // catch.
+            if excluding.contains(where: { $0.contains(swiftRange.lowerBound) }) { return nil }
             return normalized(String(text[swiftRange]))
         }
     }
