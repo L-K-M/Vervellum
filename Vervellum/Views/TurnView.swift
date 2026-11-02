@@ -78,6 +78,13 @@ struct TurnView: View, Equatable {
                 MarkdownBody(markdown: turn.answer, sources: turn.sources, scale: textScale)
                     .padding(.vertical, PanelTheme.Space.hair)
                 answerFooter
+                // The findings below grade the *draft*, so the draft has to be readable.
+                // It used to be written to the thread and shown nowhere: the reader could
+                // see that a correction happened without ever seeing what it changed.
+                if let draft = turn.draftAnswer, !draft.isEmpty {
+                    DraftAnswerDisclosure(draft: draft, sources: turn.sources)
+                        .padding(.vertical, PanelTheme.Space.hair)
+                }
             } else if turn.stage == .answering {
                 // The gap between "searching finished" and the first token is the one
                 // moment with nothing to show. A caret keeps it alive.
@@ -222,6 +229,47 @@ struct TurnView: View, Equatable {
         }
     }
 
+}
+
+/// The answer as first written, kept when a revision replaced it.
+///
+/// Collapsed by default: the corrected answer is the one to read, and the draft is what
+/// the findings table below refers to. One click shows the prose those claims were
+/// written about, with its citation chips against the same numbered source list.
+private struct DraftAnswerDisclosure: View {
+    @Environment(\.panelTextScale) private var textScale
+    @State private var isExpanded = false
+
+    let draft: String
+    let sources: [Source]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
+            Button {
+                withAnimation(PanelTheme.Motion.disclosure) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: PanelTheme.Space.small) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(PanelTheme.Font.at(10, textScale))
+                    Text("First draft, before the correction")
+                        .font(PanelTheme.Font.caption(textScale))
+                    Spacer(minLength: 0)
+                    // Turned rather than swapped, so the row animates instead of jumping.
+                    Image(systemName: "chevron.down")
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                        .font(PanelTheme.Font.at(9, textScale, weight: .semibold))
+                }
+                .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? "Hide the first draft" : "Show the first draft")
+
+            if isExpanded {
+                MarkdownBody(markdown: draft, sources: sources, scale: textScale)
+            }
+        }
+    }
 }
 
 /// A blinking caret for the moment between the last search and the first token.

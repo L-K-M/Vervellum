@@ -285,6 +285,13 @@ enum PangoMarkup {
 
     // MARK: Turn sections
 
+    /// The first draft of a revised answer, kept so the claims table can be read against
+    /// the prose it was written about.
+    static func draft(_ markdown: String, sources: [Source]) -> String {
+        sectionLabel("First draft — before the correction") + "\n"
+            + answer(markdown, sources: sources)
+    }
+
     static func question(_ text: String) -> String {
         "<span weight=\"bold\">" + GTK.escape(text) + "</span>"
     }

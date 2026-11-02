@@ -34,6 +34,24 @@ final class TranscriptFormatterTests: XCTestCase {
         XCTAssertTrue(text.contains("[2] Two — https://two.example.com"))
     }
 
+    /// The draft the findings were written about has to travel with them. It used to be
+    /// kept on the turn and shown nowhere, so an export carried a claims table grading
+    /// prose nobody could read.
+    func testCarriesTheDraftWhenAnAnswerWasRevised() {
+        var subject = turn()
+        XCTAssertFalse(TranscriptFormatter.plainText(subject).contains("First draft"),
+                       "no revision, no draft")
+        subject.draftAnswer = "Because of something else [1]."
+        let text = TranscriptFormatter.plainText(subject)
+        XCTAssertTrue(text.contains("First draft (before the correction)"), text)
+        XCTAssertTrue(text.contains("Because of something else [1]."), text)
+        // And after the answer, before the claims it explains.
+        XCTAssertLessThan(text.range(of: subject.answer)!.lowerBound,
+                          text.range(of: "First draft")!.lowerBound)
+        XCTAssertLessThan(text.range(of: "First draft")!.lowerBound,
+                          text.range(of: "Claims")!.lowerBound)
+    }
+
     /// A dump of everything the search returned misrepresents what the answer rests on.
     func testOmitsUncitedSources() {
         XCTAssertFalse(TranscriptFormatter.plainText(turn()).contains("three.example.com"))

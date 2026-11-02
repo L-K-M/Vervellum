@@ -617,6 +617,15 @@ final class LinuxPanel {
             let answer = GTK.markupLabel(PangoMarkup.answer(turn.answer, sources: turn.sources))
             GTK.onLinkActivated(answer, Self.openLink)
             GTK.append(box, answer)
+            // The findings below grade the draft, so the draft has to be readable here
+            // too. macOS discloses it behind a toggle; GTK labels have no such thing,
+            // so the heading says what it is and the reader scrolls.
+            if let draft = turn.draftAnswer, !draft.isEmpty {
+                let draftLabel = GTK.markupLabel(
+                    PangoMarkup.draft(draft, sources: turn.sources))
+                GTK.onLinkActivated(draftLabel, Self.openLink)
+                GTK.append(box, draftLabel)
+            }
         }
         if let findings = PangoMarkup.findings(turn.findings) {
             GTK.append(box, GTK.markupLabel(findings))

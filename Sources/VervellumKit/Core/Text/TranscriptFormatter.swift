@@ -31,6 +31,16 @@ enum TranscriptFormatter {
 
         lines.append(turn.answer)
 
+        // The draft the findings were written about. It is kept so a reader can see what
+        // the correction changed, and an export that omitted it would leave the claims
+        // table grading prose nobody can read — the half of the revision story this
+        // closes. Only present when a revision actually replaced the answer.
+        if let draft = turn.draftAnswer, !draft.isEmpty {
+            lines.append("")
+            lines.append("First draft (before the correction)")
+            lines.append(draft)
+        }
+
         if !turn.findings.isEmpty {
             lines.append("")
             lines.append("Claims")
