@@ -2229,6 +2229,30 @@ final class ResearchRunnerTests: XCTestCase {
         }
     }
 
+    /// A URL in a code sample is not the citation-rule break a prose URL is. Discarding
+    /// the rewrite would keep a contradicted claim on screen because of an example.
+    func testARevisionThatWritesAURLOnlyInsideCodeIsKept() async throws {
+        let rewritten = """
+            Parallax is measured in arcseconds [1].
+
+            ```
+            curl https://a.example/one
+            ```
+            """
+        let transport = revisionTransport(
+            verdict: "mixed",
+            answer: ["Parallax is measured in degrees [1]."],
+            revision: .stream([rewritten]))
+
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertEqual(turn.answer, rewritten.trimmingCharacters(in: .whitespacesAndNewlines))
+        XCTAssertTrue(turn.notices.contains(.answerRevised), "\(turn.notices)")
+        XCTAssertFalse(turn.notices.contains(.literalURL), "\(turn.notices)")
+        XCTAssertFalse(turn.notices.contains(.revisionUnavailable), "\(turn.notices)")
+    }
+
     /// The reviser reading the findings and judging that none of them warrants a change
     /// is a real answer, not a failure — and not a revision either. Nothing is said,
     /// because nothing happened.

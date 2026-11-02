@@ -73,11 +73,15 @@ enum SourceHarvester {
     }
 
     /// Bare `http(s)://…` runs inside free text.
-    static func bareURLs(in text: String) -> [String] {
+    static func bareURLs(in text: String, excluding: [Range<String.Index>] = []) -> [String] {
         guard let regex = urlRegex else { return [] }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return regex.matches(in: text, range: range).compactMap { match in
             guard let swiftRange = Range(match.range, in: text) else { return nil }
+            // A citation check passes code ranges here. A URL inside a fence is an
+            // example, and overlapping the fence is enough: the match may run into
+            // the closing backtick, which is still code.
+            if excluding.contains(where: { $0.overlaps(swiftRange) }) { return nil }
             return normalized(String(text[swiftRange]))
         }
     }

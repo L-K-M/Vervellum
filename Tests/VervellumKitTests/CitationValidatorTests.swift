@@ -84,6 +84,26 @@ final class CitationValidatorTests: XCTestCase {
         XCTAssertFalse(result.isClean)
     }
 
+    /// A URL inside code is an example, not a prose citation. Flagging it discards a
+    /// revision that only wrote the address in a fence.
+    func testAURLInsideCodeIsNotALiteralURL() {
+        let fenced = CitationValidator.validate(
+            answer: "See source [1].\n\n```\ncurl https://example.com/made-up\n```\n",
+            sourceCount: 1)
+        XCTAssertEqual(fenced.literalURLs, [])
+        XCTAssertTrue(fenced.isClean)
+
+        let inline = CitationValidator.validate(
+            answer: "Run `curl https://example.com/made-up` and cite [1].",
+            sourceCount: 1)
+        XCTAssertEqual(inline.literalURLs, [])
+
+        let prose = CitationValidator.validate(
+            answer: "See https://example.com/made-up and `curl https://example.com/ok`.",
+            sourceCount: 1)
+        XCTAssertEqual(prose.literalURLs, ["https://example.com/made-up"])
+    }
+
     /// A markdown link is not a citation marker, and neither is a bracketed aside.
     func testDoesNotMatchMarkdownLinksOrProseBrackets() {
         let markdown = CitationValidator.validate(answer: "[docs](https://example.com)", sourceCount: 3)

@@ -58,13 +58,15 @@ enum CitationValidator {
         var cited: Set<Int> = []
         var outOfRange: [Int] = []
 
+        let code = scope == .document ? codeRanges(in: answer) : inlineCodeRanges(in: answer[...])
+        let urls = SourceHarvester.bareURLs(in: answer, excluding: code)
+
         guard let regex = citationRegex else {
             return Result(spans: [.text(answer)], citedSourceIndices: [],
-                          outOfRangeCitations: [], literalURLs: SourceHarvester.bareURLs(in: answer))
+                          outOfRangeCitations: [], literalURLs: urls)
         }
 
         let full = NSRange(answer.startIndex..<answer.endIndex, in: answer)
-        let code = scope == .document ? codeRanges(in: answer) : inlineCodeRanges(in: answer[...])
         var cursor = answer.startIndex
 
         for match in regex.matches(in: answer, range: full) {
@@ -106,7 +108,7 @@ enum CitationValidator {
         return Result(spans: spans,
                       citedSourceIndices: cited.sorted(),
                       outOfRangeCitations: outOfRange,
-                      literalURLs: SourceHarvester.bareURLs(in: answer))
+                      literalURLs: urls)
     }
 
     // MARK: Code
