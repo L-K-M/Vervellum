@@ -36,6 +36,18 @@ final class PlanParserTests: XCTestCase {
         guard case .answer = answer.action else { return XCTFail("expected an answer action") }
     }
 
+    func testAgentReadsRejectBooleanAndFractionalSourceNumbers() throws {
+        let data = Data(#"{"action":"read","sources":[true,false,1.5,"3",2.0]}"#.utf8)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let step = try AgentStepParser.parse(object)
+        guard case .read(let numbers) = step.action else { return XCTFail("expected read") }
+        XCTAssertEqual(numbers, [3, 2])
+
+        var booleanOnly = object
+        booleanOnly["sources"] = Array((object["sources"] as? [Any] ?? []).prefix(2))
+        XCTAssertThrowsError(try AgentStepParser.parse(booleanOnly))
+    }
+
     func testRejectsAnUnknownOrMissingAction() {
         XCTAssertThrowsError(try AgentStepParser.parse(["thought": "…", "action": "think"]))
         XCTAssertThrowsError(try AgentStepParser.parse(["thought": "…"]))

@@ -173,10 +173,8 @@ enum AgentStepParser {
             // Numbers as leniently as the assessment reads its citations — models
             // write numbers as strings — but never reinterpreted: what is not a
             // number names no page.
-            let sources = (object["sources"] as? [Any] ?? []).compactMap { value in
-                (value as? Int)
-                    ?? (value as? String).flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-            }.filter { $0 >= 1 }
+            let sources = (object["sources"] as? [Any] ?? [])
+                .compactMap(sourceNumber).filter { $0 >= 1 }
             guard !sources.isEmpty else {
                 throw ResearchError("The agent step named no page to read.")
             }
