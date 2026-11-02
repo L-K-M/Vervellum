@@ -120,21 +120,26 @@ private struct HistoryRow: View {
                 Spacer(minLength: 0)
                 if isRunning {
                     // The row is live: this thread's session is still answering.
-                    // Always visible rather than hover-gated like the delete button —
-                    // it is the *reason* the row's contents may change underfoot.
+                    // Always visible — it is the *reason* the row's contents may
+                    // change underfoot.
                     ProgressView()
                         .controlSize(.small)
                         .accessibilityLabel("Still researching")
                 }
-                if isHovering {
-                    Button(action: onDelete) {
-                        Image(systemName: "trash")
-                            .font(PanelTheme.Font.at(10, textScale))
-                            .foregroundStyle(PanelTheme.Palette.tertiaryText)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Delete this thread")
+                // Always drawn, not hover-gated: a keyboard or VoiceOver user
+                // cannot hover, and the trash is the only way to remove a thread
+                // from the list. Hover keeps its affordance through the tint on
+                // the icon instead of through visibility.
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(PanelTheme.Font.at(10, textScale))
+                        .foregroundStyle(isHovering
+                                         ? PanelTheme.Palette.primaryText
+                                         : PanelTheme.Palette.tertiaryText)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete thread: \(thread.title)")
+                .help("Delete this thread")
             }
             .padding(.horizontal, PanelTheme.Space.medium)
             .padding(.vertical, PanelTheme.Space.small)
@@ -142,6 +147,10 @@ private struct HistoryRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // The row is itself a button, and SwiftUI flattens a button's label into
+        // one element unless told to contain its children — which would take the
+        // delete button out of the accessibility tree with it.
+        .accessibilityElement(children: .contain)
         .onHover { isHovering = $0 }
     }
 
