@@ -52,7 +52,7 @@ final class CorePreferences {
         /// exactly that reason. It is also the setting that changes *who Vervellum talks
         /// to*, so it is named in `PRIVACY.md` and switchable in one control; `.off` is
         /// what every build before it did.
-        static let pageReading = PageReadingMode.direct
+        static let pageReading = ProviderSettings.defaultPageReading
         static let readerEndpoint = ProviderSettings.defaultReaderEndpoint
         /// A failing model provider hands the turn to the next one configured.
         ///

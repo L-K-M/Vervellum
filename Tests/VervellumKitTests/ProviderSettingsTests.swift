@@ -465,6 +465,20 @@ final class ProviderSettingsTests: XCTestCase {
         let future = #"{"modelProfiles":[],"searchProfiles":[],"pageReading":"future-proxy"}"#
         let unknown = try JSONDecoder().decode(ProviderSettings.self, from: Data(future.utf8))
         XCTAssertEqual(unknown.pageReading, .off)
+
+        let explicitNull = #"{"modelProfiles":[],"searchProfiles":[],"pageReading":null}"#
+        let nullMode = try JSONDecoder().decode(ProviderSettings.self,
+                                               from: Data(explicitNull.utf8))
+        XCTAssertEqual(nullMode.pageReading, .off,
+                       "an explicit but unusable value fails closed")
+
+        for mode in PageReadingMode.allCases {
+            let document = "{\"modelProfiles\":[],\"searchProfiles\":[],"
+                + "\"pageReading\":\"\(mode.rawValue)\"}"
+            let decoded = try JSONDecoder().decode(ProviderSettings.self,
+                                                   from: Data(document.utf8))
+            XCTAssertEqual(decoded.pageReading, mode)
+        }
     }
 
     func testFallbackOffLeavesOnlyTheSelection() {

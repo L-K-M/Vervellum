@@ -28,9 +28,14 @@ final class CorePreferencesTests: XCTestCase {
     /// means a newer build chose a mode this one cannot honour; silently turning that
     /// into direct browsing would contact source hosts the stored setting never chose.
     func testAnUnknownStoredPageReadingModeFailsClosed() {
-        XCTAssertEqual(preferences().providerSettings.pageReading, .direct)
+        XCTAssertEqual(preferences().providerSettings.pageReading,
+                       ProviderSettings.defaultPageReading)
         XCTAssertEqual(preferences(["pageReading": "future-proxy"]).providerSettings.pageReading,
                        .off)
+        for mode in PageReadingMode.allCases {
+            XCTAssertEqual(preferences(["pageReading": mode.rawValue])
+                .providerSettings.pageReading, mode)
+        }
     }
 
     /// The default, not the bottom of the range it is clamped into.

@@ -322,6 +322,11 @@ struct ProviderSettings: Equatable, Codable {
     /// a load path is a setting that changes when nobody touched it.
     static let defaultModelFallback = true
 
+    /// The deliberate product default when no value was ever written. An unknown value
+    /// is different: it records a real choice by a newer build and is handled
+    /// fail-closed rather than being reinterpreted as this default.
+    static let defaultPageReading = PageReadingMode.direct
+
     static let defaultSearchEndpoint = "https://api.z.ai/api/mcp/web_search_prime/mcp"
 
     /// The command a Kagi provider uses when its field is left blank. A bare name,
@@ -342,7 +347,7 @@ struct ProviderSettings: Equatable, Codable {
          searchProfiles: [SearchProfile] = [],
          selectedSearchID: UUID? = nil,
          modelFallback: Bool = ProviderSettings.defaultModelFallback,
-         pageReading: PageReadingMode = .direct,
+         pageReading: PageReadingMode = ProviderSettings.defaultPageReading,
          readerEndpoint: String = ProviderSettings.defaultReaderEndpoint) {
         self.modelProfiles = modelProfiles
         self.selectedModelID = selectedModelID
@@ -364,7 +369,7 @@ struct ProviderSettings: Equatable, Codable {
          searchEndpoint: String = ProviderSettings.defaultSearchEndpoint,
          searchKind: SearchProviderKind = .mcp,
          modelFallback: Bool = ProviderSettings.defaultModelFallback,
-         pageReading: PageReadingMode = .direct,
+         pageReading: PageReadingMode = ProviderSettings.defaultPageReading,
          readerEndpoint: String = ProviderSettings.defaultReaderEndpoint) {
         let model = ModelProfile(name: "", endpoint: modelEndpoint, model: modelName,
                                  keyAccount: SecretAccount.modelAPIKey.rawValue)
@@ -785,7 +790,11 @@ struct ProviderSettings: Equatable, Codable {
         // Present but unknown is a future choice this build cannot honour. It must not
         // become `.direct`, the one mode that contacts hosts the user did not configure.
         if !container.contains(.pageReading) {
-            pageReading = .direct
+            pageReading = Self.defaultPageReading
+        } else if (try? container.decodeNil(forKey: .pageReading)) == true {
+            // Null is present but does not name a mode. Treat it like any other
+            // unusable value rather than guessing at a network-enabled choice.
+            pageReading = .off
         } else if let rawMode = try? container.decode(String.self, forKey: .pageReading),
                   let mode = PageReadingMode(rawValue: rawMode) {
             pageReading = mode
