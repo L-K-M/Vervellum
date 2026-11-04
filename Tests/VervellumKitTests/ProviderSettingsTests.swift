@@ -235,6 +235,21 @@ final class ProviderSettingsTests: XCTestCase {
                        "A profile with no recorded account still gets one")
     }
 
+    func testWronglyTypedModelFieldsDoNotDiscardTheProfileList() throws {
+        let listing = #"[{"id":17,"name":false,"endpoint":[],"model":{},"keyAccount":5,"sendsImages":"no"},{"name":"Good","endpoint":"https://good.example/v1","model":"good"}]"#
+
+        let decoded = try XCTUnwrap(ProviderSettings.decodeModelProfiles(listing))
+
+        XCTAssertEqual(decoded.count, 2)
+        XCTAssertEqual(decoded[0].name, "")
+        XCTAssertEqual(decoded[0].endpoint, "")
+        XCTAssertEqual(decoded[0].model, "")
+        XCTAssertTrue(decoded[0].sendsImages)
+        XCTAssertEqual(decoded[0].keyAccount,
+                       SecretAccount.derived(from: .modelAPIKey, for: decoded[0].id).rawValue)
+        XCTAssertEqual(decoded[1].name, "Good")
+    }
+
     /// A profile is never listed as a blank row.
     func testDisplayNameFallsBackThroughTheModelToTheHost() {
         XCTAssertEqual(ModelProfile.new(name: "Named", endpoint: "https://a.example.com", model: "m")
@@ -359,6 +374,20 @@ final class ProviderSettingsTests: XCTestCase {
         XCTAssertEqual(decoded?.count, 1)
         XCTAssertEqual(decoded?.first?.kind, .mcp)
         XCTAssertEqual(decoded?.first?.name, "Future")
+    }
+
+    func testWronglyTypedSearchFieldsDoNotDiscardTheProfileList() throws {
+        let listing = #"[{"id":17,"name":false,"kind":[],"endpoint":{},"keyAccount":5},{"name":"Good","kind":"searxng","endpoint":"https://good.example"}]"#
+
+        let decoded = try XCTUnwrap(ProviderSettings.decodeSearchProfiles(listing))
+
+        XCTAssertEqual(decoded.count, 2)
+        XCTAssertEqual(decoded[0].name, "")
+        XCTAssertEqual(decoded[0].kind, .mcp)
+        XCTAssertEqual(decoded[0].endpoint, "")
+        XCTAssertEqual(decoded[0].keyAccount,
+                       SecretAccount.derived(from: .searchAPIKey, for: decoded[0].id).rawValue)
+        XCTAssertEqual(decoded[1].name, "Good")
     }
 
     /// The backends are told apart by protocol, not by guessing from the address.

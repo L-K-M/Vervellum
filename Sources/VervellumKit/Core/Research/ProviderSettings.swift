@@ -140,16 +140,16 @@ struct SearchProfile: Codable, Equatable, Identifiable {
     /// Lenient, for the reason `ModelProfile.init(from:)` is.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        let id = ((try? container.decodeIfPresent(UUID.self, forKey: .id)) ?? nil) ?? UUID()
         self.id = id
-        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        name = ((try? container.decodeIfPresent(String.self, forKey: .name)) ?? nil) ?? ""
         // An unrecognised kind reads as `.mcp` rather than failing the whole list: that
         // is what a settings file written by a build with more backends looks like, and
         // one unknown entry must not cost the user every other provider.
         let rawKind = (try? container.decodeIfPresent(String.self, forKey: .kind)) ?? nil
         kind = rawKind.flatMap { SearchProviderKind(rawValue: $0) } ?? .mcp
-        endpoint = try container.decodeIfPresent(String.self, forKey: .endpoint) ?? ""
-        keyAccount = try container.decodeIfPresent(String.self, forKey: .keyAccount)
+        endpoint = ((try? container.decodeIfPresent(String.self, forKey: .endpoint)) ?? nil) ?? ""
+        keyAccount = ((try? container.decodeIfPresent(String.self, forKey: .keyAccount)) ?? nil)
             ?? SecretAccount.derived(from: .searchAPIKey, for: id).rawValue
     }
 }
@@ -253,19 +253,24 @@ struct ModelProfile: Codable, Equatable, Identifiable {
     /// re-pasting every endpoint they had configured.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        // `try?` deliberately surrounds each decode rather than this initializer. A
+        // hand-edited field with the wrong JSON type should cost that field, not every
+        // other provider in the array. The extra `?? nil` flattens decodeIfPresent's
+        // optional so both a missing value and a type mismatch reach the same fallback.
+        let id = ((try? container.decodeIfPresent(UUID.self, forKey: .id)) ?? nil) ?? UUID()
         self.id = id
-        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
-        endpoint = try container.decodeIfPresent(String.self, forKey: .endpoint) ?? ""
-        model = try container.decodeIfPresent(String.self, forKey: .model) ?? ""
-        keyAccount = try container.decodeIfPresent(String.self, forKey: .keyAccount)
+        name = ((try? container.decodeIfPresent(String.self, forKey: .name)) ?? nil) ?? ""
+        endpoint = ((try? container.decodeIfPresent(String.self, forKey: .endpoint)) ?? nil) ?? ""
+        model = ((try? container.decodeIfPresent(String.self, forKey: .model)) ?? nil) ?? ""
+        keyAccount = ((try? container.decodeIfPresent(String.self, forKey: .keyAccount)) ?? nil)
             ?? SecretAccount.derived(from: .modelAPIKey, for: id).rawValue
         // Absent means a settings file written before this existed. Read as "yes": the
         // endpoint either has eyes or answers 400, and `ChatCompletionsClient` turns that
         // 400 into the same turn without the picture plus a notice. An explicit `false`
         // is still honoured and is the right answer for a provider that accepts the part
         // and ignores it.
-        sendsImages = try container.decodeIfPresent(Bool.self, forKey: .sendsImages) ?? true
+        sendsImages = ((try? container.decodeIfPresent(Bool.self, forKey: .sendsImages)) ?? nil)
+            ?? true
     }
 }
 
