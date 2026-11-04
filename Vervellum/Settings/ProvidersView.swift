@@ -604,28 +604,35 @@ struct ProvidersView: View {
         settings.modelFallback = modelFallback
         settings.pageReading = pageReading
         settings.readerEndpoint = readerEndpoint
-        preferences.providerSettings = settings
 
+        // Blank means "leave the stored key alone" — see the type's documentation.
+        // The check trims first, because `KeychainStore.set` trims too and *deletes*
+        // on an empty result: a field holding one stray space from a sloppy paste must
+        // not wipe a working key while reporting "Saved."
+        var writes: [ProviderSettingsSaver.SecretWrite] = []
+        for profile in profiles {
+            let typed = keyEntries[profile.id] ?? ""
+            if !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                writes.append((profile.secretAccount, typed))
+            }
+        }
+        for profile in searchProfiles {
+            let typed = searchKeyEntries[profile.id] ?? ""
+            if !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                writes.append((profile.secretAccount, typed))
+            }
+        }
+        if !readerKeyEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            writes.append((.readerAPIKey, readerKeyEntry))
+        }
+
+        let cleanupFailed: Bool
         do {
-            for account in accountsToDelete { try keychain.delete(account) }
-            accountsToDelete = []
-            // Blank means "leave the stored key alone" — see the type's documentation.
-            // The check trims first, because `KeychainStore.set` trims too and *deletes*
-            // on an empty result: a field holding one stray space from a sloppy paste
-            // would otherwise pass `!isEmpty` and wipe a working key, reporting "Saved."
-            for profile in profiles {
-                let typed = keyEntries[profile.id] ?? ""
-                guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-                try keychain.set(typed, for: profile.secretAccount)
-            }
-            for profile in searchProfiles {
-                let typed = searchKeyEntries[profile.id] ?? ""
-                guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-                try keychain.set(typed, for: profile.secretAccount)
-            }
-            if !readerKeyEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                try keychain.set(readerKeyEntry, for: .readerAPIKey)
-            }
+            let pendingCleanup = try ProviderSettingsSaver.commit(
+                settings: settings, writes: writes, deleting: accountsToDelete,
+                secrets: keychain, persist: { preferences.providerSettings = $0 })
+            accountsToDelete = pendingCleanup
+            cleanupFailed = !pendingCleanup.isEmpty
             keyEntries = [:]
             searchKeyEntries = [:]
             readerKeyEntry = ""
@@ -656,7 +663,13 @@ struct ProvidersView: View {
         // a second one the user is halfway through configuring is not an error yet.
         let problems = saved.problems(hasModelKey: keychain.hasModelKey(for: saved),
                                       hasSearchKey: keychain.hasSearchKey(for: saved))
-        statusIsProblem = !problems.isEmpty
-        status = problems.isEmpty ? "Saved." : problems.joined(separator: " ")
+        if cleanupFailed {
+            statusIsProblem = true
+            status = "Saved, but a removed provider's key could not be deleted. "
+                + "Save again to retry."
+        } else {
+            statusIsProblem = !problems.isEmpty
+            status = problems.isEmpty ? "Saved." : problems.joined(separator: " ")
+        }
     }
 }
