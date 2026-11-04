@@ -324,8 +324,14 @@ struct ProviderSettings: Equatable, Codable {
 
     /// The deliberate product default when no value was ever written. An unknown value
     /// is different: it records a real choice by a newer build and is handled
-    /// fail-closed rather than being reinterpreted as this default.
+    /// fail-closed rather than being reinterpreted as this default. This default is
+    /// network-enabled by design: no stored value means a new install, not a rejected
+    /// choice. Review the privacy documentation before changing that distinction.
     static let defaultPageReading = PageReadingMode.direct
+
+    /// A stored choice this build cannot interpret must never become a mode that
+    /// contacts source hosts. Named once so every unusable-value path stays fail-closed.
+    static let failClosedPageReading = PageReadingMode.off
 
     static let defaultSearchEndpoint = "https://api.z.ai/api/mcp/web_search_prime/mcp"
 
@@ -794,12 +800,12 @@ struct ProviderSettings: Equatable, Codable {
         } else if (try? container.decodeNil(forKey: .pageReading)) == true {
             // Null is present but does not name a mode. Treat it like any other
             // unusable value rather than guessing at a network-enabled choice.
-            pageReading = .off
+            pageReading = Self.failClosedPageReading
         } else if let rawMode = try? container.decode(String.self, forKey: .pageReading),
                   let mode = PageReadingMode(rawValue: rawMode) {
             pageReading = mode
         } else {
-            pageReading = .off
+            pageReading = Self.failClosedPageReading
         }
         readerEndpoint = try container.decodeIfPresent(String.self, forKey: .readerEndpoint)
             ?? Self.defaultReaderEndpoint
