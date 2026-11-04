@@ -74,19 +74,56 @@ final class ProviderSettingsSaverTests: XCTestCase {
 
     func testSettingsPersistBeforeDestructiveCleanupAndFailedDeletesRemainPending() throws {
         let secrets = RecordingSecrets()
-        secrets.failingDelete = .readerAPIKey
+        let removed = SecretAccount.derived(from: .searchAPIKey, for: UUID())
+        let failed = SecretAccount.derived(from: .searchAPIKey, for: UUID())
+        secrets.failingDelete = failed
         let settings = ProviderSettings(modelEndpoint: "https://new.example/v1", modelName: "new")
 
         let pending = try ProviderSettingsSaver.commit(
             settings: settings,
             writes: [(.modelAPIKey, "model")],
-            deleting: [.searchAPIKey, .readerAPIKey],
+            deleting: [removed, failed],
             secrets: secrets,
             persist: { _ in secrets.events.append("persist") })
 
         XCTAssertEqual(secrets.events, [
-            "set:model-api-key", "persist", "delete:search-api-key", "delete:reader-api-key",
+            "set:model-api-key", "persist",
+            "delete:\(removed.rawValue)", "delete:\(failed.rawValue)",
         ])
-        XCTAssertEqual(pending, [.readerAPIKey])
+        XCTAssertEqual(pending, [failed])
+    }
+
+    func testAnAccountWrittenInTheCommitIsNotDeletedDuringCleanup() throws {
+        let secrets = RecordingSecrets()
+        let account = SecretAccount.derived(from: .modelAPIKey, for: UUID())
+        let settings = ProviderSettings(modelEndpoint: "https://new.example/v1", modelName: "new")
+
+        let pending = try ProviderSettingsSaver.commit(
+            settings: settings,
+            writes: [(account, "new-key")],
+            deleting: [account],
+            secrets: secrets,
+            persist: { _ in secrets.events.append("persist") })
+
+        XCTAssertEqual(secrets.values[account], "new-key")
+        XCTAssertEqual(secrets.events, ["set:\(account.rawValue)", "persist"])
+        XCTAssertTrue(pending.isEmpty)
+    }
+
+    func testAnAccountReferencedByCommittedSettingsIsNotDeletedDuringCleanup() throws {
+        let secrets = RecordingSecrets()
+        secrets.values[.modelAPIKey] = "kept-model-key"
+        let settings = ProviderSettings(modelEndpoint: "https://new.example/v1", modelName: "new")
+
+        let pending = try ProviderSettingsSaver.commit(
+            settings: settings,
+            writes: [],
+            deleting: [.modelAPIKey],
+            secrets: secrets,
+            persist: { _ in secrets.events.append("persist") })
+
+        XCTAssertEqual(secrets.values[.modelAPIKey], "kept-model-key")
+        XCTAssertEqual(secrets.events, ["persist"])
+        XCTAssertTrue(pending.isEmpty)
     }
 }

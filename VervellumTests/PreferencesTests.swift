@@ -98,6 +98,18 @@ final class PreferencesTests: XCTestCase {
         XCTAssertEqual(Preferences(defaults: defaults).providerSettings, settings)
     }
 
+    func testPendingProviderKeyCleanupSurvivesClosingSettings() {
+        let preferences = Preferences(defaults: defaults)
+        let derived = SecretAccount.derived(from: .modelAPIKey, for: UUID())
+
+        preferences.pendingProviderKeyDeletions = [.modelAPIKey, derived, .modelAPIKey]
+
+        XCTAssertEqual(Preferences(defaults: defaults).pendingProviderKeyDeletions,
+                       [.modelAPIKey, derived])
+        preferences.pendingProviderKeyDeletions = []
+        XCTAssertTrue(Preferences(defaults: defaults).pendingProviderKeyDeletions.isEmpty)
+    }
+
     // MARK: Change notification
 
     /// `onChanged` is what re-places an open panel, so it has to fire for the settings

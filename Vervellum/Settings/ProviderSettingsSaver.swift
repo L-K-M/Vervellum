@@ -64,8 +64,18 @@ enum ProviderSettingsSaver {
 
         persist(settings)
 
+        // A stale deletion request must never win over the settings that were just
+        // committed. This protects both a key written in this save and a profile whose
+        // password field was blank (which deliberately means "keep the stored key").
+        var protectedAccounts = Set(settings.modelProfiles.map(\.secretAccount))
+        protectedAccounts.formUnion(settings.searchProfiles.map(\.secretAccount))
+        protectedAccounts.formUnion(writes.map(\.account))
+        // The reader key is retained when page reading is switched off or made direct;
+        // only its explicit Clear button is allowed to remove it.
+        protectedAccounts.insert(.readerAPIKey)
+
         var stillPending: [SecretAccount] = []
-        for account in accounts {
+        for account in accounts where !protectedAccounts.contains(account) {
             do {
                 try secrets.delete(account)
             } catch {

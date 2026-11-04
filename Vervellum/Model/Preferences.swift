@@ -66,6 +66,7 @@ final class Preferences: ObservableObject {
         static let panelWidth = "panelWidth"
         static let panelHeight = "panelHeight"
         static let dismissOnFocusLoss = "dismissOnFocusLoss"
+        static let pendingProviderKeyDeletions = "pendingProviderKeyDeletions"
     }
 
     // MARK: Shared settings, forwarded
@@ -73,6 +74,27 @@ final class Preferences: ObservableObject {
     var providerSettings: ProviderSettings {
         get { core.providerSettings }
         set { core.providerSettings = newValue }
+    }
+
+    /// Accounts left behind when a post-save Keychain cleanup failed. These are account
+    /// identifiers, not credentials; keeping the retry journal in preferences means
+    /// closing Settings cannot silently abandon an orphaned key forever.
+    var pendingProviderKeyDeletions: [SecretAccount] {
+        get {
+            var seen = Set<SecretAccount>()
+            return (defaults.stringArray(forKey: Key.pendingProviderKeyDeletions) ?? [])
+                .map(SecretAccount.init(rawValue:))
+                .filter { seen.insert($0).inserted }
+        }
+        set {
+            var seen = Set<SecretAccount>()
+            let accounts = newValue.filter { seen.insert($0).inserted }.map(\.rawValue)
+            if accounts.isEmpty {
+                defaults.removeObject(forKey: Key.pendingProviderKeyDeletions)
+            } else {
+                defaults.set(accounts, forKey: Key.pendingProviderKeyDeletions)
+            }
+        }
     }
 
     var historyEnabled: Bool {

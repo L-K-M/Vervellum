@@ -535,7 +535,7 @@ struct ProvidersView: View {
         selectedSearchID = settings.selectedSearch?.id ?? searchProfiles.first?.id
         keyEntries = [:]
         searchKeyEntries = [:]
-        accountsToDelete = []
+        accountsToDelete = preferences.pendingProviderKeyDeletions
         // Not carried across an open: the endpoints may have changed elsewhere, and a
         // list is one click away. A fetch still running is cancelled with them — which
         // reaches the ones this view still has a handle on, meaning a pane switch inside
@@ -627,11 +627,16 @@ struct ProvidersView: View {
         }
 
         let cleanupFailed: Bool
+        // Persist the cleanup intent before touching either store. A crash or a closed
+        // Settings window can then retry it; active accounts are protected inside
+        // `commit`, so a failed credential write cannot make this journal destructive.
+        preferences.pendingProviderKeyDeletions = accountsToDelete
         do {
             let pendingCleanup = try ProviderSettingsSaver.commit(
                 settings: settings, writes: writes, deleting: accountsToDelete,
                 secrets: keychain, persist: { preferences.providerSettings = $0 })
             accountsToDelete = pendingCleanup
+            preferences.pendingProviderKeyDeletions = pendingCleanup
             cleanupFailed = !pendingCleanup.isEmpty
             keyEntries = [:]
             searchKeyEntries = [:]
@@ -665,8 +670,8 @@ struct ProvidersView: View {
                                       hasSearchKey: keychain.hasSearchKey(for: saved))
         if cleanupFailed {
             statusIsProblem = true
-            status = "Saved, but a removed provider's key could not be deleted. "
-                + "Save again to retry."
+            status = (["Saved, but a removed provider's key could not be deleted. "
+                       + "Save again to retry."] + problems).joined(separator: " ")
         } else {
             statusIsProblem = !problems.isEmpty
             status = problems.isEmpty ? "Saved." : problems.joined(separator: " ")
