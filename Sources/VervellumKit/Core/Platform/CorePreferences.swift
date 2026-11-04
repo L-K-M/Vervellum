@@ -187,8 +187,13 @@ final class CorePreferences {
             searchKind: store.string(for: Key.searchProvider)
                 .flatMap { SearchProviderKind(rawValue: $0) } ?? .mcp,
             modelFallback: store.bool(for: Key.modelFallback) ?? Default.modelFallback,
-            pageReading: store.string(for: Key.pageReading)
-                .flatMap { PageReadingMode(rawValue: $0) } ?? Default.pageReading,
+            // Absent is a fresh install and takes the product default. Present but
+            // unknown is a mode written by a newer build, and must fail closed: `.direct`
+            // contacts hosts the user did not configure, so it cannot be the downgrade
+            // interpretation of a choice this build does not understand.
+            pageReading: store.string(for: Key.pageReading).map {
+                PageReadingMode(rawValue: $0) ?? .off
+            } ?? Default.pageReading,
             readerEndpoint: store.string(for: Key.readerEndpoint) ?? Default.readerEndpoint)
 
         if let encoded = store.string(for: Key.modelProviders),

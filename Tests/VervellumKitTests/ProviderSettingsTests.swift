@@ -454,6 +454,19 @@ final class ProviderSettingsTests: XCTestCase {
         XCTAssertTrue(salvaged.modelFallback)
     }
 
+    /// The whole-settings Codable path is used by fixtures and integrations outside the
+    /// scalar store. It needs the same absent-versus-unknown privacy boundary as
+    /// CorePreferences: an old document defaults on, a future mode fails closed.
+    func testAnUnknownDecodedPageReadingModeFailsClosed() throws {
+        let before = #"{"modelProfiles":[],"searchProfiles":[]}"#
+        let missing = try JSONDecoder().decode(ProviderSettings.self, from: Data(before.utf8))
+        XCTAssertEqual(missing.pageReading, .direct)
+
+        let future = #"{"modelProfiles":[],"searchProfiles":[],"pageReading":"future-proxy"}"#
+        let unknown = try JSONDecoder().decode(ProviderSettings.self, from: Data(future.utf8))
+        XCTAssertEqual(unknown.pageReading, .off)
+    }
+
     func testFallbackOffLeavesOnlyTheSelection() {
         let alpha = chainProfile("alpha")
         let beta = chainProfile("beta")

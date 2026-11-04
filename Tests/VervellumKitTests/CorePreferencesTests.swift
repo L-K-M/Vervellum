@@ -24,6 +24,15 @@ final class CorePreferencesTests: XCTestCase {
         XCTAssertEqual(settings.providerSettings.searchEndpoint, ProviderSettings.defaultSearchEndpoint)
     }
 
+    /// Missing means a fresh install and takes the product default. Present but unknown
+    /// means a newer build chose a mode this one cannot honour; silently turning that
+    /// into direct browsing would contact source hosts the stored setting never chose.
+    func testAnUnknownStoredPageReadingModeFailsClosed() {
+        XCTAssertEqual(preferences().providerSettings.pageReading, .direct)
+        XCTAssertEqual(preferences(["pageReading": "future-proxy"]).providerSettings.pageReading,
+                       .off)
+    }
+
     /// The default, not the bottom of the range it is clamped into.
     ///
     /// The two are a long way apart — 200 against 10 — and only one thing separates

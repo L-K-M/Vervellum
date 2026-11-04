@@ -781,8 +781,17 @@ struct ProviderSettings: Equatable, Codable {
         // `.unknown` notice comment records as having emptied a library once already.
         modelFallback = ((try? container.decodeIfPresent(Bool.self, forKey: .modelFallback)) ?? nil)
             ?? Self.defaultModelFallback
-        let rawMode = (try? container.decodeIfPresent(String.self, forKey: .pageReading)) ?? nil
-        pageReading = rawMode.flatMap { PageReadingMode(rawValue: $0) } ?? .direct
+        // Missing means the document predates page reading and takes the normal default.
+        // Present but unknown is a future choice this build cannot honour. It must not
+        // become `.direct`, the one mode that contacts hosts the user did not configure.
+        if !container.contains(.pageReading) {
+            pageReading = .direct
+        } else if let rawMode = try? container.decode(String.self, forKey: .pageReading),
+                  let mode = PageReadingMode(rawValue: rawMode) {
+            pageReading = mode
+        } else {
+            pageReading = .off
+        }
         readerEndpoint = try container.decodeIfPresent(String.self, forKey: .readerEndpoint)
             ?? Self.defaultReaderEndpoint
     }
