@@ -109,7 +109,8 @@ final class CitationValidatorTests: XCTestCase {
             "Contact user@evil.com.",
             "Contact 用户@例子.中国.",
             "See evil.example or www.other.example/path.",
-            "See www.evil.unlisted or evil.unlisted/path.",
+            "See www.evil.host or evil.unlisted/path.",
+            "See service.localhost.",
             "See evil.photography or download.zip.",
             "See EVIL.COM.",
             "See com.evil.com, evil.id, EVIL.MD, or com.example.app.",
@@ -120,6 +121,20 @@ final class CitationValidatorTests: XCTestCase {
             XCTAssertFalse(result.literalURLs.isEmpty, answer)
             XCTAssertFalse(result.isClean, answer)
         }
+    }
+
+    func testRepeatedDestinationsAreReportedOnceWithoutProsePunctuation() {
+        let answer = "(See https://evil.example/path) and https://evil.example/path."
+
+        XCTAssertEqual(CitationValidator.validate(answer: answer, sourceCount: 0).literalURLs,
+                       ["https://evil.example/path"])
+    }
+
+    func testBalancedParenthesesInsideAURLArePreserved() {
+        let answer = "See https://en.wikipedia.org/wiki/Mercury_(planet)."
+
+        XCTAssertEqual(CitationValidator.validate(answer: answer, sourceCount: 0).literalURLs,
+                       ["https://en.wikipedia.org/wiki/Mercury_(planet)"])
     }
 
     /// Dotted identifiers whose final component is not an actual root-zone label are

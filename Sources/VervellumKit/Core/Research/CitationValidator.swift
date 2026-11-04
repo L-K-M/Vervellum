@@ -37,6 +37,8 @@ enum CitationValidator {
         var outOfRangeCitations: [Int]
         /// Links or bare domains the model wrote despite being told not to. The old
         /// property name remains part of the archive-facing notice vocabulary.
+        /// Populated only for document scope; inline scope exists solely for the
+        /// renderer's citation masking and deliberately skips destination scanning.
         var literalURLs: [String]
 
         var isClean: Bool { outOfRangeCitations.isEmpty && literalURLs.isEmpty }

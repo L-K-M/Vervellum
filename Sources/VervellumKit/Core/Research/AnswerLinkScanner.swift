@@ -60,7 +60,11 @@ enum AnswerLinkScanner {
                NSIntersectionRange(last.range, candidate.range).length > 0 { continue }
             accepted.append(candidate)
         }
-        return accepted.map { trimmedDisplay($0.text) }
+        var seen: Set<String> = []
+        return accepted.compactMap { candidate in
+            let display = trimmedDisplay(candidate.text)
+            return seen.insert(display).inserted ? display : nil
+        }
     }
 
     private static func appendMatches(
@@ -176,6 +180,9 @@ enum AnswerLinkScanner {
     private static let protocolRelativeURL = try? NSRegularExpression(
         pattern: #"(?i)(?<![:/\p{L}\p{N}_-])//(?:\[[0-9a-f:.]+\]|[\p{L}\p{N}](?:[\p{L}\p{N}.-]{0,251}[\p{L}\p{N}])?)(?::[0-9]{1,5})?(?:/[^\s<>\"']*)?"#)
 
+    // A bare IPv4 address is indistinguishable from a four-part numeric version such
+    // as `1.2.3.4`. Detection wins that ambiguity: otherwise a model has a reliable
+    // spelling for a fabricated destination with no scheme, port, or path.
     private static let bareIPv4 = try? NSRegularExpression(
         pattern: #"(?<![\p{L}\p{N}_.-])(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])(?![\p{L}\p{N}_.-])(?::[0-9]{1,5})?(?:/[^\s<>\"']*)?"#)
 
@@ -188,7 +195,9 @@ enum AnswerLinkScanner {
     private static let bareDomain = try? NSRegularExpression(
         pattern: #"(?i)(?<![@/:\p{L}\p{N}_-])(?:www\.)?(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?(?::[0-9]{1,5})?(?:/[^\s<>\"']*)?"#)
 
-    private static let reservedTopLevelDomains: Set<String> = ["example", "invalid", "test"]
+    private static let reservedTopLevelDomains: Set<String> = [
+        "example", "invalid", "localhost", "test",
+    ]
 
     private static func isIPv6Literal(_ raw: String) -> Bool {
         guard raw.first == "[", let close = raw.firstIndex(of: "]") else { return false }
@@ -279,6 +288,15 @@ enum AnswerLinkScanner {
     private static func trimmedDisplay(_ raw: String) -> String {
         var result = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         while let last = result.last, ".,;:!?".contains(last) { result.removeLast() }
+        var parenthesisBalance = 0
+        for character in result {
+            if character == "(" { parenthesisBalance += 1 }
+            if character == ")" { parenthesisBalance -= 1 }
+        }
+        while result.last == ")", parenthesisBalance < 0 {
+            result.removeLast()
+            parenthesisBalance += 1
+        }
         return result
     }
 }
