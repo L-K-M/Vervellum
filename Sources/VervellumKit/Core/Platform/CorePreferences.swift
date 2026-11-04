@@ -192,7 +192,7 @@ final class CorePreferences {
             // contacts hosts the user did not configure, so it cannot be the downgrade
             // interpretation of a choice this build does not understand.
             pageReading: store.string(for: Key.pageReading).map {
-                PageReadingMode(rawValue: $0) ?? .off
+                PageReadingMode(rawValue: $0) ?? ProviderSettings.failClosedPageReading
             } ?? Default.pageReading,
             readerEndpoint: store.string(for: Key.readerEndpoint) ?? Default.readerEndpoint)
 
