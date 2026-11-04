@@ -126,4 +126,21 @@ final class ProviderSettingsSaverTests: XCTestCase {
         XCTAssertEqual(secrets.events, ["persist"])
         XCTAssertTrue(pending.isEmpty)
     }
+
+    func testTheReaderKeyIsNeverDeletedByProviderCleanup() throws {
+        let secrets = RecordingSecrets()
+        secrets.values[.readerAPIKey] = "kept-reader-key"
+        let settings = ProviderSettings(modelEndpoint: "https://new.example/v1", modelName: "new")
+
+        let pending = try ProviderSettingsSaver.commit(
+            settings: settings,
+            writes: [],
+            deleting: [.readerAPIKey],
+            secrets: secrets,
+            persist: { _ in secrets.events.append("persist") })
+
+        XCTAssertEqual(secrets.values[.readerAPIKey], "kept-reader-key")
+        XCTAssertEqual(secrets.events, ["persist"])
+        XCTAssertTrue(pending.isEmpty)
+    }
 }
