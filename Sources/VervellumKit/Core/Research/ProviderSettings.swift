@@ -1,5 +1,15 @@
 import Foundation
 
+private extension KeyedDecodingContainer {
+    /// A missing value, explicit null, or wrong JSON type all become nil so one damaged
+    /// field cannot discard its whole provider list. Every current caller decodes only a
+    /// UUID, String, or Bool; do not use this to swallow semantic errors from a nested
+    /// custom decoder.
+    func decodeLeniently<T: Decodable>(_ type: T.Type, forKey key: Key) -> T? {
+        (try? decodeIfPresent(type, forKey: key)) ?? nil
+    }
+}
+
 /// How Vervellum reaches a web-search backend.
 ///
 /// Two kinds, because the two are genuinely different protocols and pretending
@@ -140,16 +150,16 @@ struct SearchProfile: Codable, Equatable, Identifiable {
     /// Lenient, for the reason `ModelProfile.init(from:)` is.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let id = ((try? container.decodeIfPresent(UUID.self, forKey: .id)) ?? nil) ?? UUID()
+        let id = container.decodeLeniently(UUID.self, forKey: .id) ?? UUID()
         self.id = id
-        name = ((try? container.decodeIfPresent(String.self, forKey: .name)) ?? nil) ?? ""
+        name = container.decodeLeniently(String.self, forKey: .name) ?? ""
         // An unrecognised kind reads as `.mcp` rather than failing the whole list: that
         // is what a settings file written by a build with more backends looks like, and
         // one unknown entry must not cost the user every other provider.
-        let rawKind = (try? container.decodeIfPresent(String.self, forKey: .kind)) ?? nil
+        let rawKind = container.decodeLeniently(String.self, forKey: .kind)
         kind = rawKind.flatMap { SearchProviderKind(rawValue: $0) } ?? .mcp
-        endpoint = ((try? container.decodeIfPresent(String.self, forKey: .endpoint)) ?? nil) ?? ""
-        keyAccount = ((try? container.decodeIfPresent(String.self, forKey: .keyAccount)) ?? nil)
+        endpoint = container.decodeLeniently(String.self, forKey: .endpoint) ?? ""
+        keyAccount = container.decodeLeniently(String.self, forKey: .keyAccount)
             ?? SecretAccount.derived(from: .searchAPIKey, for: id).rawValue
     }
 }
@@ -253,24 +263,19 @@ struct ModelProfile: Codable, Equatable, Identifiable {
     /// re-pasting every endpoint they had configured.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        // `try?` deliberately surrounds each decode rather than this initializer. A
-        // hand-edited field with the wrong JSON type should cost that field, not every
-        // other provider in the array. The extra `?? nil` flattens decodeIfPresent's
-        // optional so both a missing value and a type mismatch reach the same fallback.
-        let id = ((try? container.decodeIfPresent(UUID.self, forKey: .id)) ?? nil) ?? UUID()
+        let id = container.decodeLeniently(UUID.self, forKey: .id) ?? UUID()
         self.id = id
-        name = ((try? container.decodeIfPresent(String.self, forKey: .name)) ?? nil) ?? ""
-        endpoint = ((try? container.decodeIfPresent(String.self, forKey: .endpoint)) ?? nil) ?? ""
-        model = ((try? container.decodeIfPresent(String.self, forKey: .model)) ?? nil) ?? ""
-        keyAccount = ((try? container.decodeIfPresent(String.self, forKey: .keyAccount)) ?? nil)
+        name = container.decodeLeniently(String.self, forKey: .name) ?? ""
+        endpoint = container.decodeLeniently(String.self, forKey: .endpoint) ?? ""
+        model = container.decodeLeniently(String.self, forKey: .model) ?? ""
+        keyAccount = container.decodeLeniently(String.self, forKey: .keyAccount)
             ?? SecretAccount.derived(from: .modelAPIKey, for: id).rawValue
         // Absent means a settings file written before this existed. Read as "yes": the
         // endpoint either has eyes or answers 400, and `ChatCompletionsClient` turns that
         // 400 into the same turn without the picture plus a notice. An explicit `false`
         // is still honoured and is the right answer for a provider that accepts the part
         // and ignores it.
-        sendsImages = ((try? container.decodeIfPresent(Bool.self, forKey: .sendsImages)) ?? nil)
-            ?? true
+        sendsImages = container.decodeLeniently(Bool.self, forKey: .sendsImages) ?? true
     }
 }
 

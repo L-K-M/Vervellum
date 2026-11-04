@@ -250,6 +250,20 @@ final class ProviderSettingsTests: XCTestCase {
         XCTAssertEqual(decoded[1].name, "Good")
     }
 
+    func testACorruptSiblingFieldKeepsTheProfileIdentity() throws {
+        let id = UUID()
+        let listing = #"[{"id":"\#(id.uuidString)","name":false,"endpoint":"https://kept.example/v1","model":"kept"}]"#
+
+        let decoded = try XCTUnwrap(ProviderSettings.decodeModelProfiles(listing))
+
+        XCTAssertEqual(decoded.count, 1)
+        XCTAssertEqual(decoded[0].id, id)
+        XCTAssertEqual(decoded[0].name, "")
+        XCTAssertEqual(decoded[0].endpoint, "https://kept.example/v1")
+        XCTAssertEqual(decoded[0].keyAccount,
+                       SecretAccount.derived(from: .modelAPIKey, for: id).rawValue)
+    }
+
     /// A profile is never listed as a blank row.
     func testDisplayNameFallsBackThroughTheModelToTheHost() {
         XCTAssertEqual(ModelProfile.new(name: "Named", endpoint: "https://a.example.com", model: "m")
