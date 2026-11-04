@@ -260,6 +260,8 @@ final class ProviderSettingsTests: XCTestCase {
         XCTAssertEqual(decoded[0].id, id)
         XCTAssertEqual(decoded[0].name, "")
         XCTAssertEqual(decoded[0].endpoint, "https://kept.example/v1")
+        XCTAssertEqual(decoded[0].model, "kept")
+        XCTAssertTrue(decoded[0].sendsImages)
         XCTAssertEqual(decoded[0].keyAccount,
                        SecretAccount.derived(from: .modelAPIKey, for: id).rawValue)
     }
