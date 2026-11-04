@@ -181,7 +181,7 @@ enum TurnNotice: String, Codable, Equatable {
     case evidenceTrimmed
     /// The model cited a source number that does not exist.
     case invalidCitation
-    /// The model wrote a literal URL despite being told to cite by number.
+    /// The model wrote a link or bare domain despite being told to cite by number.
     case literalURL
     /// The answer was produced with no web evidence at all.
     case noEvidence
@@ -267,7 +267,7 @@ enum TurnNotice: String, Codable, Equatable {
         case .invalidCitation:
             return "The model referred to a source number that does not exist. Those references were left as plain text."
         case .literalURL:
-            return "The model wrote a link directly instead of citing a source number. Treat any such link as unverified."
+            return "The model wrote a link or domain directly instead of citing a source number. Treat it as unverified."
         case .noEvidence:
             return "Answered without web evidence. Nothing here is source-backed."
         case .uncitedVerdictDropped:

@@ -546,8 +546,8 @@ enum ResearchPrompts {
         run for this turn, so you have no evidence to cite and must not pretend \
         otherwise.
 
-        Write in the language of the question. Do not write URLs or citation markers — \
-        there is nothing to cite. Instead, be \
+        Write in the language of the question. Do not write a URL, a bare domain, a \
+        markdown link, or a citation marker — there is nothing to cite. Instead, be \
         explicit about the basis and the age of what you know: name where your \
         confidence is high, where it is low, and what would need checking against a \
         live source. If the question turns on a fact that changes over time, say that \

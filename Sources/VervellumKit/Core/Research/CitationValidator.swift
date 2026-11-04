@@ -2,11 +2,12 @@ import Foundation
 
 /// Validates and parses the numeric citations in a model's answer.
 ///
-/// Vervellum's answer prompt forbids the model from writing URLs at all: it may
-/// only refer to evidence by the index of a source Vervellum itself fetched, as
-/// `[3]` or `[1, 4]`. That single rule is what makes a fabricated link
-/// *structurally impossible* rather than merely discouraged — there is no syntax in
-/// which the model could express one, and any URL that appears anyway is a prompt
+/// Vervellum's answer prompt forbids the model from writing URLs, bare domains, or
+/// Markdown links at all: it may only refer to evidence by the index of a source
+/// Vervellum itself fetched, as `[3]` or `[1, 4]`. That single rule is what makes a
+/// fabricated link *structurally impossible* rather than merely discouraged — there is
+/// no syntax in which the model could express one, and any destination that appears
+/// anyway is a prompt
 /// violation the validator can flag on sight.
 ///
 /// Checking indices is also cheaper and far more reliable than string-matching URLs:
@@ -34,7 +35,8 @@ enum CitationValidator {
         var citedSourceIndices: [Int]
         /// Citation numbers outside `1...sourceCount` that the model invented.
         var outOfRangeCitations: [Int]
-        /// Literal URLs the model wrote despite being told not to.
+        /// Links or bare domains the model wrote despite being told not to. The old
+        /// property name remains part of the archive-facing notice vocabulary.
         var literalURLs: [String]
 
         var isClean: Bool { outOfRangeCitations.isEmpty && literalURLs.isEmpty }
@@ -57,14 +59,22 @@ enum CitationValidator {
         var spans: [Span] = []
         var cited: Set<Int> = []
         var outOfRange: [Int] = []
+        let code = scope == .document ? codeRanges(in: answer) : inlineCodeRanges(in: answer[...])
+        // Inline validation runs for every rendered Markdown block while an answer is
+        // streaming, and its caller uses only citation spans. Destination policy is a
+        // final-document decision; scanning here would repeat several regex walks on
+        // every token-driven render and discard the result.
+        let forbiddenLinks = scope == .document
+            ? AnswerLinkScanner.forbiddenLinks(in: answer, markdownExclusions: code)
+            : []
 
         guard let regex = citationRegex else {
             return Result(spans: [.text(answer)], citedSourceIndices: [],
-                          outOfRangeCitations: [], literalURLs: SourceHarvester.bareURLs(in: answer))
+                          outOfRangeCitations: [],
+                          literalURLs: forbiddenLinks)
         }
 
         let full = NSRange(answer.startIndex..<answer.endIndex, in: answer)
-        let code = scope == .document ? codeRanges(in: answer) : inlineCodeRanges(in: answer[...])
         var cursor = answer.startIndex
 
         for match in regex.matches(in: answer, range: full) {
@@ -106,7 +116,7 @@ enum CitationValidator {
         return Result(spans: spans,
                       citedSourceIndices: cited.sorted(),
                       outOfRangeCitations: outOfRange,
-                      literalURLs: SourceHarvester.bareURLs(in: answer))
+                      literalURLs: forbiddenLinks)
     }
 
     // MARK: Code

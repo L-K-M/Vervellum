@@ -2208,7 +2208,10 @@ final class ResearchRunnerTests: XCTestCase {
     /// on. So it is checked before it is accepted, and dropped whole.
     func testARevisionThatBreaksTheCitationRuleIsDiscarded() async throws {
         for bad in ["Parallax is measured in arcseconds [7].",
-                    "Parallax is measured in arcseconds, see https://a.example/one."] {
+                    "Parallax is measured in arcseconds, see https://a.example/one.",
+                    "Parallax is measured in arcseconds, see HTTPS://a.example/one.",
+                    "Parallax is measured in arcseconds; read [this](//a.example/one).",
+                    "Parallax is measured in arcseconds according to a.example."] {
             let transport = revisionTransport(
                 verdict: "mixed",
                 answer: ["Parallax is measured in degrees [1]."],

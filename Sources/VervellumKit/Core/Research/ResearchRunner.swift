@@ -2045,7 +2045,7 @@ final class ResearchRunner: ResearchRunning {
             // soft either way, so the only way to know how often that happens is to say
             // which branch it was.
             let broken = !validation.outOfRangeCitations.isEmpty ? "a source number that does not exist"
-                : !validation.literalURLs.isEmpty ? "a URL in the prose"
+                : !validation.literalURLs.isEmpty ? "a forbidden link or domain"
                 : "no citation at all, where the draft had one"
             trace.warn("Revision discarded: \(broken)")
             update { $0.addNotice(.revisionUnavailable) }

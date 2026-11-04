@@ -84,6 +84,84 @@ final class CitationValidatorTests: XCTestCase {
         XCTAssertFalse(result.isClean)
     }
 
+    /// The prompt forbids every syntax by which the model could smuggle a destination
+    /// into its prose, not only the lowercase absolute-URL spelling.
+    func testFlagsSchemesMarkdownLinksAndBareDomains() {
+        let answers = [
+            "See HTTPS://evil.example/path.",
+            "Fetch FTP://evil.example/path or mailto:user@evil.example.",
+            "Fetch gemini://evil.example, ipfs://evil.example, or s3://bucket/key.",
+            "Fetch x://host or abcdefghijklmnopqrstuvwxyzabcdefghi://host.",
+            "See //evil.example/path.",
+            "See //例子.中国/path or //intranet-server/guide.",
+            "See //192.0.2.1/path or 198.51.100.4/details.",
+            "See [2001:db8::1], [::ffff:192.0.2.1], or 例子.中国.",
+            "See [the documentation](//evil.example/path).",
+            "See [the documentation](evil.example/path).",
+            "See [the section](#details).",
+            "See [nested [label]](#details).",
+            "See [arbitrarily [deeply [nested]]](#details).",
+            "See [a label\nwith a soft break](#details).",
+            "See [the `API`](#details).",
+            "See [the documentation][docs].\n[docs]: ./relative-page",
+            "Reference definition only:\n[docs]: ./relative-page",
+            "Contact <user@evil.example>.",
+            "Contact user@evil.com.",
+            "Contact 用户@例子.中国.",
+            "See evil.example or www.other.example/path.",
+            "See www.evil.unlisted or evil.unlisted/path.",
+            "See evil.photography or download.zip.",
+            "See EVIL.COM.",
+            "See com.evil.com, evil.id, EVIL.MD, or com.example.app.",
+        ]
+
+        for answer in answers {
+            let result = CitationValidator.validate(answer: answer, sourceCount: 1)
+            XCTAssertFalse(result.literalURLs.isEmpty, answer)
+            XCTAssertFalse(result.isClean, answer)
+        }
+    }
+
+    /// Dotted identifiers whose final component is not an actual root-zone label are
+    /// not destinations. Values ending in a real TLD are rejected even when they look
+    /// like filenames or reverse-DNS identifiers: allowing that ambiguity would give a
+    /// prompted model a reliable spelling for a fabricated destination.
+    func testDottedIdentifiersAndFilenamesAreNotBareDomains() {
+        let answer = "Use Foundation.URL with os.Logger; edit config.json, "
+            + "config.prod.json and archive.tar.gz for v1.2.3, release v1.2.3.4, "
+            + "ratio [1:2], map [a:b], package tool@1.2.34, or 1.2.3.444. "
+            + "Neither //[1:2] nor [Note]: this is ordinary prose is a link."
+        XCTAssertTrue(CitationValidator.validate(answer: answer, sourceCount: 0).literalURLs.isEmpty)
+    }
+
+    func testManyUnmatchedMarkdownOpenersRemainOrdinaryText() {
+        let answer = String(repeating: "[", count: 10_000) + " ordinary prose"
+        XCTAssertTrue(CitationValidator.validate(answer: answer, sourceCount: 0).literalURLs.isEmpty)
+    }
+
+    /// Bracket and call syntax inside code is not Markdown. Actual destinations in the
+    /// same code remain forbidden by `testURLsInsideCodeRemainForbidden` below.
+    func testMarkdownLikeCodeSyntaxIsNotAForbiddenLink() {
+        let answer = "```swift\n//TODO\nlet value = matrix[row][column]\nhandlers[key](value)\n```"
+        XCTAssertTrue(CitationValidator.validate(answer: answer, sourceCount: 0).literalURLs.isEmpty)
+    }
+
+    /// Code is rendered literally, but it is still model output. Letting a destination
+    /// through there would reintroduce an expressible syntax for a fabricated link.
+    func testURLsInsideCodeRemainForbidden() {
+        let answer = "```sh\ncurl HTTPS://evil.example/path\n```"
+        XCTAssertFalse(CitationValidator.validate(answer: answer, sourceCount: 0).isClean)
+    }
+
+    /// Inline scope exists only for citation masking during streaming; final document
+    /// validation performs the destination scan once.
+    func testInlineScopeDoesNotRepeatDestinationValidation() {
+        let answer = "See evil.example."
+        XCTAssertTrue(CitationValidator.validate(answer: answer, sourceCount: 0,
+                                                 scope: .inline).literalURLs.isEmpty)
+        XCTAssertFalse(CitationValidator.validate(answer: answer, sourceCount: 0).literalURLs.isEmpty)
+    }
+
     /// A markdown link is not a citation marker, and neither is a bracketed aside.
     func testDoesNotMatchMarkdownLinksOrProseBrackets() {
         let markdown = CitationValidator.validate(answer: "[docs](https://example.com)", sourceCount: 3)
