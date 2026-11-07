@@ -32,6 +32,7 @@ final class ComposerCommandTests: XCTestCase {
 
     func testCommandsAreCaseInsensitive() {
         XCTAssertEqual(ComposerCommand.parse("/CLEAR"), .newThread)
+        XCTAssertEqual(ComposerCommand.parse("/NEW"), .newThread)
         XCTAssertEqual(ComposerCommand.parse("/No-Search hi"), .ask("hi", level: .direct))
     }
 
@@ -360,6 +361,7 @@ final class ComposerCommandTests: XCTestCase {
         // Trailing space and case are how a command arrives after `accept` fills it in.
         XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/model "))
         XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/CLEAR"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/NEW"))
         // An alias `parse` knows but the catalogue does not list: no list is on screen,
         // so there is nothing to be in the middle of.
         XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/new"))
