@@ -14,7 +14,7 @@ import SwiftUI
 /// directly could not be shared at all. A view model per platform over one pipeline is
 /// a few dozen lines of forwarding and keeps every rule in one place.
 ///
-/// One session per thread, not one run for the panel: `/new` and `/history` detach the
+/// One session per thread, not one run for the panel: `/clear` and `/history` detach the
 /// session they leave rather than cancel it, so a question asked in one thread keeps
 /// answering — and keeps persisting — while another thread is on screen. The engine
 /// publishes only the active session; the map is what keeps the detached ones alive.
@@ -171,7 +171,7 @@ final class ResearchEngine: ObservableObject {
 
     /// Stops every session, visible or detached.
     ///
-    /// The status item's emergency brake. `/new` detaches a run so it keeps working,
+    /// The status item's emergency brake. `/clear` detaches a run so it keeps working,
     /// which is what the reader asked for at the time — but it keeps spending searches
     /// and model calls until its thread is reopened, and the reader may not remember it
     /// is there. The visible session's waiting questions are handed back to the composer

@@ -80,7 +80,7 @@ final class ResearchLevelTests: XCTestCase {
 
     /// `ComposerCommand.parse` asks the level table *before* its own switch, so a level
     /// command or alias equal to a built-in word would shadow that command permanently
-    /// and silently — `/new` becoming a question asked at some level rather than a fresh
+    /// and silently — `/clear` becoming a question asked at some level rather than a fresh
     /// thread. Nothing in either file makes that collision impossible; this does.
     func testNoLevelWordShadowsABuiltInCommand() {
         for word in ComposerCommand.reservedWords {
@@ -112,7 +112,7 @@ final class ResearchLevelTests: XCTestCase {
     /// `testEveryReservedWordIsStillACommand` proves each entry in the set is still a
     /// command; this catches a command *added* to `parse` without being added to the set,
     /// which is the half the set's own comment admits it cannot see. Not all of it — a
-    /// command that is parsed but never offered (`/clear`, `/models`, `/threads`,
+    /// command that is parsed but never offered (`/new`, `/models`, `/threads`,
     /// `/prefs`, `/?`) is still invisible here, because nothing enumerates those. It
     /// closes the likely half: a new command a reader can find is a new row in the list.
     func testEveryOfferedWordIsReservedOrALevel() throws {

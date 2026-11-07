@@ -231,7 +231,7 @@ final class ResearchEngineTests: XCTestCase {
         XCTAssertEqual(engine.thread.turns.count, 1)
     }
 
-    /// `/new` detaches a session so it keeps working — which also means Stop on the
+    /// `/clear` detaches a session so it keeps working — which also means Stop on the
     /// thread now on screen cannot reach it. `cancelAll` is the status item's brake and
     /// must stop both the visible run and the detached one.
     func testCancelAllStopsADetachedRunToo() {

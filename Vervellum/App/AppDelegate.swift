@@ -384,7 +384,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Keep run state visible when the panel is hidden, without unsolicited sounds.
     ///
-    /// `$isBusy` rather than `$isRunning`: a run detached by `/new` or `/history` keeps
+    /// `$isBusy` rather than `$isRunning`: a run detached by `/clear` or `/history` keeps
     /// working, and the status item is the only place that run is still visible.
     private func observeRunningState() {
         runningObserver = engine.$isBusy
@@ -415,7 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.target = self
             menu.addItem(item)
         }
-        // The emergency brake for runs the panel cannot reach: `/new` and opening
+        // The emergency brake for runs the panel cannot reach: `/clear` and opening
         // another thread detach a session, and it keeps working — and keeps spending
         // searches — until its thread is reopened. Stop means this conversation; this
         // means all of them.
