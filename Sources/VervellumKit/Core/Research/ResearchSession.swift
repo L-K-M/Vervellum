@@ -3,7 +3,7 @@ import Foundation
 /// One research thread's live run: the runner task, the queue of questions typed
 /// while it was working, and the coalescer pacing its snapshots.
 ///
-/// This is the unit `/new` and `/history` used to cancel. The engine and the panel
+/// This is the unit `/clear` and `/history` used to cancel. The engine and the panel
 /// keep one session per open thread; leaving a thread detaches the session, which
 /// keeps running — and keeps reporting — without touching the thread now on screen.
 ///

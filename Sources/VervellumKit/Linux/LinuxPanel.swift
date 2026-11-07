@@ -51,7 +51,7 @@ final class LinuxPanel {
     /// research control behind a hover a keyboard never performs.
     private let levelSummary: GTK.Widget
 
-    /// Every open thread's session, keyed by thread id. `/new` detaches the current
+    /// Every open thread's session, keyed by thread id. `/clear` detaches the current
     /// one rather than cancelling its run: the session keeps working in the map —
     /// and keeps persisting its thread — while the new one is on screen. The macOS
     /// `ResearchEngine` holds the same map; there is no `/history` here yet, so a

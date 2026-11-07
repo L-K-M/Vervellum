@@ -20,8 +20,8 @@ final class ComposerCommandTests: XCTestCase {
     }
 
     func testParsesKnownCommands() {
-        XCTAssertEqual(ComposerCommand.parse("/new"), .newThread)
         XCTAssertEqual(ComposerCommand.parse("/clear"), .newThread)
+        XCTAssertEqual(ComposerCommand.parse("/new"), .newThread)
         XCTAssertEqual(ComposerCommand.parse("/history"), .openHistory)
         XCTAssertEqual(ComposerCommand.parse("/settings"), .openSettings)
         XCTAssertEqual(ComposerCommand.parse("/copy"), .copyLastAnswer)
@@ -31,7 +31,7 @@ final class ComposerCommandTests: XCTestCase {
     }
 
     func testCommandsAreCaseInsensitive() {
-        XCTAssertEqual(ComposerCommand.parse("/NEW"), .newThread)
+        XCTAssertEqual(ComposerCommand.parse("/CLEAR"), .newThread)
         XCTAssertEqual(ComposerCommand.parse("/No-Search hi"), .ask("hi", level: .direct))
     }
 
@@ -78,6 +78,16 @@ final class ComposerCommandTests: XCTestCase {
                 XCTAssertFalse(listed.contains(alias), "an alias must not take a row: \(alias)")
             }
         }
+    }
+
+    /// `/clear` is the name the list offers for a fresh thread; `/new` is the alias
+    /// that stays in muscle memory. One row for the command — the same "canonical
+    /// word only" rule the level aliases above already follow.
+    func testClearIsTheOfferedNameAndNewItsAlias() {
+        let listed = Set(ComposerCommand.catalogue.map(\.name))
+        XCTAssertTrue(listed.contains("clear"))
+        XCTAssertFalse(listed.contains("new"), "an alias must not take a row")
+        XCTAssertEqual(ComposerCommand.parse("/new"), .newThread)
     }
 
     /// Each level is offered in the list, so Return must be able to submit it — the
@@ -345,14 +355,14 @@ final class ComposerCommandTests: XCTestCase {
 
     /// An exact command still submits, or the list would break every command it lists.
     func testACompleteCommandIsNotWithheld() {
-        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/new"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/clear"))
         XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/history"))
         // Trailing space and case are how a command arrives after `accept` fills it in.
         XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/model "))
-        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/NEW"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/CLEAR"))
         // An alias `parse` knows but the catalogue does not list: no list is on screen,
         // so there is nothing to be in the middle of.
-        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/clear"))
+        XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/new"))
         // `/direct` alone is already withheld by `parse` returning nil, and must not be
         // withheld twice — the composer's own note explains what it wants.
         XCTAssertFalse(ComposerCommand.isHalfTypedCommand("/direct"))
@@ -430,9 +440,9 @@ final class ComposerCommandTests: XCTestCase {
             XCTAssertTrue(ComposerCommand.isHalfTypedCommand(unfinished),
                           "\(unfinished) would be left without an offer")
         }
-        // And a command already typed in full is not offered anything: `/new` and Return
-        // starts a thread, exactly as it did before the list highlighted anything.
-        for finished in ["/new", "/help", "/model", "/history", "/copy"] {
+        // And a command already typed in full is not offered anything: `/clear` and
+        // Return starts a thread, exactly as it did before the list highlighted anything.
+        for finished in ["/clear", "/help", "/model", "/history", "/copy"] {
             XCTAssertFalse(ComposerCommand.isHalfTypedCommand(finished),
                            "\(finished) would be completed instead of run")
         }
@@ -473,17 +483,17 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: true,
                                                      draft: "/h", completions: rows),
                      "leaving the list has to stay left, or the exit is invisible")
-        // `rows`, not the completions for "/new". This function treats the list as
-        // opaque, and the assertion is about the *word* — passing "/new"'s own list
+        // `rows`, not the completions for "/clear". This function treats the list as
+        // opaque, and the assertion is about the *word* — passing "/clear"'s own list
         // would let the test pass through the empty-list guard if `completions(for:)`
         // ever stopped answering for a finished command, which is the one branch this
         // line exists to hold.
         XCTAssertNil(ComposerCommand.offeredRowIndex(explicit: nil, isDismissed: false,
-                                                     draft: "/new", completions: rows),
+                                                     draft: "/clear", completions: rows),
                      "offering a row under a finished command would fill the field "
                         + "instead of starting a thread")
         // A different leg of the same guard, and the one nothing else here reaches.
-        // `/new` is refused for being a *complete* command — it passes
+        // `/clear` is refused for being a *complete* command — it passes
         // `isBareCommandWord`, has completions, and falls at `parse`. `/model deep` is
         // refused one step earlier, for not being a bare word at all. Only this case
         // holds that step: a change to how the word is found could let an
@@ -504,10 +514,10 @@ final class ComposerCommandTests: XCTestCase {
     /// choice, not a filter over one.
     func testAChosenRowSurvivesEveryConditionOnTheOffer() {
         XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: 0, isDismissed: false,
-                                                       draft: "/new",
-                                                       completions: ComposerCommand.completions(for: "/new")),
+                                                       draft: "/clear",
+                                                       completions: ComposerCommand.completions(for: "/clear")),
                        0,
-                       "arrowing onto the row under a finished /new is a gesture that "
+                       "arrowing onto the row under a finished /clear is a gesture that "
                         + "deserves its own answer, even though the offer declines to "
                         + "make it unasked")
         XCTAssertEqual(ComposerCommand.offeredRowIndex(explicit: 1, isDismissed: true,

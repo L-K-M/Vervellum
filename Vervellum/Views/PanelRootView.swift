@@ -842,7 +842,7 @@ struct PanelRootView: View {
                     .accessibilityAddTraits(index == selected ? .isSelected : [])
                     // Says what activation actually does. Several of these commands take
                     // an argument, so a row fills the field rather than running it —
-                    // which is not what "button named /new" would lead you to expect if
+                    // which is not what "button named /clear" would lead you to expect if
                     // you could not see the trailing space appear.
                     .accessibilityHint("Fills the composer with this command")
                     // Claims only. A row that clears on exit can wipe the highlight the

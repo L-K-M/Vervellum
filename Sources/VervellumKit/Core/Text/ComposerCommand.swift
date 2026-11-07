@@ -56,15 +56,16 @@ enum ComposerCommand: Equatable {
     /// the same four things, and a summary written twice is a summary that disagrees
     /// with itself after the first edit.
     ///
-    /// Only the canonical command word gets a row. `/direct`, `/deep-research` and
-    /// `/agent-research` still work — `parse` knows them — but listing them would put
-    /// seven rows in front of a reader looking for four levels, which is the confusion
+    /// Only the canonical command word gets a row. `/direct`, `/deep-research`,
+    /// `/agent-research` and `/new` still work — `parse` knows them — but listing
+    /// them would put seven rows in front of a reader looking for four levels, and a
+    /// second name under the one command that starts a thread, which is the confusion
     /// this whole change exists to remove.
     static let catalogue: [Entry] = ResearchLevel.ordered.map {
         Entry(name: $0.command, summary: $0.summary)
     } + [
         Entry(name: "model", summary: "List the configured models, or switch to one by name"),
-        Entry(name: "new", summary: "Start a fresh thread"),
+        Entry(name: "clear", summary: "Start a fresh thread"),
         Entry(name: "history", summary: "Search earlier threads"),
         Entry(name: "settings", summary: "Open Vervellum Settings"),
         Entry(name: "copy", summary: "Copy the last answer with its sources"),
@@ -112,7 +113,7 @@ enum ComposerCommand: Equatable {
         case "model", "models":
             // Unlike "/direct", a bare "/model" is a complete request: list them.
             return .selectModel(rest)
-        case "new", "clear":
+        case "clear", "new":
             return .newThread
         case "history", "threads":
             return .openHistory
@@ -192,7 +193,7 @@ enum ComposerCommand: Equatable {
     ///   state it both accepts and returns. Whether a list *offers* a row unasked is
     ///   `offeredRowIndex`'s question, not this one — and the answer there is the same
     ///   rule read from the other end, since Return accepts a highlighted row and
-    ///   preselecting under a finished `/new` would fill the field instead of starting
+    ///   preselecting under a finished `/clear` would fill the field instead of starting
     ///   a thread.
     /// * **↓ enters at the top, ↑ enters at the bottom**, the way a menu opened upward
     ///   behaves.
@@ -243,7 +244,7 @@ enum ComposerCommand: Equatable {
     /// So Return declines instead, which is what `/direct` with no argument already
     /// does — a command that is not finished is not a question, and the composer keeps
     /// the text so the next keystroke continues it. An exact command still submits:
-    /// `parse` recognises `/new`, so this is false for it, and Return starts a thread.
+    /// `parse` recognises `/clear`, so this is false for it, and Return starts a thread.
     ///
     /// What the two answers mean, because only one of them is a decision: `true` means
     /// keep the text and send nothing. `false` means carry on to `parse`, which can
@@ -279,14 +280,14 @@ enum ComposerCommand: Equatable {
     /// the useful answer:
     ///
     /// * **An explicit choice always wins**, finished word or not. A reader who has
-    ///   typed `/new` in full and then arrowed onto the `new` row has asked for the row,
-    ///   and Return fills the field rather than starting a thread — which is the answer
-    ///   to the gesture they actually made. The offer below is what happens in the
+    ///   typed `/clear` in full and then arrowed onto the `clear` row has asked for
+    ///   the row, and Return fills the field rather than starting a thread — which is
+    ///   the answer to the gesture they actually made. The offer below is what happens in the
     ///   *absence* of a choice, never a filter over one.
     /// * **Otherwise row 0 is offered while the word is unfinished.** `/dee` and Return
     ///   finishes the word rather than answering "Finish the command name" — the thing
     ///   that made the list look broken, because it was plainly *showing* the answer.
-    /// * **Never under a finished command.** Offering a row under `/new` would mean
+    /// * **Never under a finished command.** Offering a row under `/clear` would mean
     ///   Return filled the field instead of starting a thread.
     /// * **Never after the reader leaves.** ↑ off the top and Escape are ways out, and
     ///   an offer that re-highlighted row 0 on the way out would make the exit invisible.

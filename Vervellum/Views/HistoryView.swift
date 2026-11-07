@@ -11,7 +11,7 @@ struct HistoryView: View {
     @Environment(\.panelTextScale) private var textScale
 
     @ObservedObject var store: ThreadStore
-    /// Threads with a run still in flight — a session detached by `/new` keeps
+    /// Threads with a run still in flight — a session detached by `/clear` keeps
     /// working, and the badge is how the reader knows the row is still changing.
     var runningIDs: Set<UUID> = []
     var onOpen: (ResearchThread) -> Void

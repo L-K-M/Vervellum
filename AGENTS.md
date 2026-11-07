@@ -174,7 +174,7 @@ VervellumTests/              macOS-only tests (hotkeys, panel geometry, Accessib
 - `Research/` — the pipeline. `ResearchRunner` orchestrates the stages and is
   driven by both front ends; `ResearchSession` is one thread's live run — its task,
   its queue of questions typed mid-run, and the `SnapshotCoalescer` pacing its
-  snapshots — which is the unit `/new` detaches instead of cancelling;
+  snapshots — which is the unit `/clear` detaches instead of cancelling;
   `ChatCompletionsClient` talks to the model over
   `HTTPTransporting` — the seam every outbound call passes through, implemented in
   production by `HTTPTransport` and in `Tests/` by `StubTransport`, which is what lets
