@@ -118,8 +118,13 @@ struct HeaderButton: View {
         }
         .buttonStyle(.plain)
         // The button's frame is now the expanded 26×26, so hit testing, hover and
-        // the tooltip all cover the same area; the inverse padding outside restores
-        // the 20×18 layout footprint so header spacing is unchanged.
+        // the tooltip all cover the same area. The inverse padding below is
+        // load-bearing for layout: it restores the 20×18 footprint in the HStack, so
+        // header spacing is pixel-identical to before — and because the expansion is
+        // half the 6 pt spacing, neighbouring buttons' 26×26 frames still exactly meet
+        // without overlapping. Do not remove the inverse padding (spacing would grow)
+        // and do not move the hit padding outside the Button (the container would
+        // grow, not the button, and taps in the ring would not reach the action).
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .help(help)
