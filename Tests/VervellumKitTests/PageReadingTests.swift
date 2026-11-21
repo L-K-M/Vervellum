@@ -525,6 +525,49 @@ final class PageReadingTests: XCTestCase {
                        "<p>ok</p>")
     }
 
+    /// A declared Windows-1252 page keeps the characters ISO-8859-1 cannot represent:
+    /// the euro (0x80) and the smart quotes (0x93/0x94). Decoding it as Latin-1 turns
+    /// the euro into a C1 control and the quotes into raw control code points, which
+    /// is the mojibake this path used to produce.
+    func testDeclaredWindows1252UsesTheWindowsCodec() {
+        let bytes = Data([0x3C, 0x70, 0x3E, 0x80, 0x93, 0x94, 0x3C, 0x2F, 0x70, 0x3E])
+        XCTAssertEqual(DirectPageReader.decode(bytes, contentType: "text/html; charset=windows-1252"),
+                       "<p>€“”</p>")
+    }
+
+    /// A BOM-less UTF-16 page is valid UTF-8 — every second byte is NUL — so a
+    /// UTF-8-first decode reads it as a NUL-filled string. The declared endianness has
+    /// to be acted on before the generic fallback.
+    func testDeclaredLittleEndianUTF16WithoutBOMIsReadCorrectly() {
+        let text = "<p>ok</p>"
+        let data = text.data(using: .utf16LittleEndian)!
+        // The hazard this guards: the generic decode succeeds, but on NUL-filled text.
+        XCTAssertNotNil(String(data: data, encoding: .utf8))
+        XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16le"), text)
+    }
+
+    func testDeclaredBigEndianUTF16WithoutBOMIsReadCorrectly() {
+        let text = "<p>ok</p>"
+        let data = text.data(using: .utf16BigEndian)!
+        XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16be"), text)
+    }
+
+    /// A server that labels UTF-8 as ISO-8859-1 is common enough that the strict UTF-8
+    /// decode still wins; the declared single-byte codec is the fallback, not the gate.
+    func testUTF8LabelledAsLatin1StillReadsAsUTF8() {
+        let text = "<p>café — 日本語</p>"
+        let data = text.data(using: .utf8)!
+        XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=iso-8859-1"), text)
+    }
+
+    /// An explicit UTF-16 codec keeps a byte-order mark as U+FEFF; the page text should
+    /// not begin with a zero-width character the reader can see in the evidence.
+    func testAByteOrderMarkIsNotLeftInDecodedText() {
+        let text = "<p>ok</p>"
+        let data = text.data(using: .utf16)!
+        XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16"), text)
+    }
+
     // MARK: The reader server's reply
 
     /// The published documentation names the endpoint and the tool but not the argument

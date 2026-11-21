@@ -453,24 +453,77 @@ final class DirectPageReader: PageReading {
 
     /// Decodes a page's bytes, honouring the charset the response declared.
     ///
-    /// UTF-8 first because it is nearly everything, then the declared charset, then
-    /// Latin-1 — which cannot fail, so a page in an encoding nobody declared is read
-    /// with mojibake in the accents rather than dropped entirely.
+    /// The declaration is acted on where it is decisive. A BOM-less UTF-16 page is
+    /// valid UTF-8 — every second byte is NUL — so a UTF-8-first decode reads it as a
+    /// NUL-filled string; an explicit little- or big-endian declaration is honoured
+    /// before the generic fallback. For the single-byte charsets the order is the
+    /// other way: a server that labels UTF-8 as ISO-8859-1 or Windows-1252 is common
+    /// enough that a strict UTF-8 decode wins, and a genuine Windows-1252 page is not
+    /// valid UTF-8, so it falls through to the declared codec — now Windows-1252
+    /// rather than ISO-8859-1, so a euro and the smart quotes survive. Latin-1 is the
+    /// last resort because it cannot fail.
     static func decode(_ data: Data, contentType: String) -> String? {
-        if let text = String(data: data, encoding: .utf8) { return text }
-        if contentType.contains("charset=") {
-            let declared = contentType.components(separatedBy: "charset=").last?
-                .components(separatedBy: ";").first?
-                .trimmingCharacters(in: CharacterSet(charactersIn: " \"'")) ?? ""
-            switch declared.lowercased() {
-            case "iso-8859-1", "latin1", "windows-1252":
-                return String(data: data, encoding: .isoLatin1)
-            case "utf-16", "utf-16le", "utf-16be":
-                return String(data: data, encoding: .utf16)
-            default:
-                break
-            }
+        let text: String?
+        switch declaredEncoding(contentType) {
+        case .utf16LittleEndian:
+            text = String(data: data, encoding: .utf16LittleEndian)
+        case .utf16BigEndian:
+            text = String(data: data, encoding: .utf16BigEndian)
+        case .utf16:
+            // `.utf16` detects a byte-order mark and answers nil without one; the
+            // explicit little-endian codec covers a BOM-less body.
+            text = String(data: data, encoding: .utf16)
+                ?? String(data: data, encoding: .utf16LittleEndian)
+        case .utf8:
+            text = String(data: data, encoding: .utf8)
+        case .windowsCP1252:
+            text = String(data: data, encoding: .utf8)
+                ?? String(data: data, encoding: .windowsCP1252)
+        case .isoLatin1:
+            text = String(data: data, encoding: .utf8)
+                ?? String(data: data, encoding: .isoLatin1)
+        case nil:
+            text = String(data: data, encoding: .utf8)
         }
-        return String(data: data, encoding: .isoLatin1)
+        guard let text else { return String(data: data, encoding: .isoLatin1) }
+        // An explicit UTF-16 codec keeps a byte-order mark as U+FEFF; the extractor
+        // and the model do not want a zero-width character at the top of the page.
+        return text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
+    }
+
+    /// The codec a `Content-Type` declares, or nil when it declares none this build
+    /// recognises. Aliases are included because a server's spelling is not a contract.
+    private enum DeclaredEncoding {
+        case utf8
+        case utf16
+        case utf16LittleEndian
+        case utf16BigEndian
+        case windowsCP1252
+        case isoLatin1
+    }
+
+    private static func declaredEncoding(_ contentType: String) -> DeclaredEncoding? {
+        guard let marker = contentType.range(of: "charset=", options: .caseInsensitive) else {
+            return nil
+        }
+        let declared = contentType[marker.upperBound...]
+            .components(separatedBy: ";").first?
+            .trimmingCharacters(in: CharacterSet(charactersIn: " \"'")) ?? ""
+        switch declared.lowercased() {
+        case "utf-8", "utf8":
+            return .utf8
+        case "utf-16", "utf16", "unicode":
+            return .utf16
+        case "utf-16le", "utf-16-le", "utf16le":
+            return .utf16LittleEndian
+        case "utf-16be", "utf-16-be", "utf16be":
+            return .utf16BigEndian
+        case "windows-1252", "cp1252", "cp-1252", "x-cp1252":
+            return .windowsCP1252
+        case "iso-8859-1", "iso8859-1", "iso_8859-1", "latin1", "latin-1":
+            return .isoLatin1
+        default:
+            return nil
+        }
     }
 }
