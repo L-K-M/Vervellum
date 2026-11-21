@@ -1172,6 +1172,12 @@ struct PanelRootView: View {
     /// gesture the empty state's examples use, offered on finished turns as
     /// "Edit & re-ask".
     private func seedComposer(_ question: String) {
+        guard draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              attachments.isEmpty else {
+            notice = "Send or clear your current draft and attachments before editing an earlier question."
+            announce("Current draft and attachments kept. Send or clear them before editing an earlier question.")
+            return
+        }
         draft = question
         recallIndex = nil
         // Seeding is silent on screen but invisible to a VoiceOver user, so it
