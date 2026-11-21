@@ -45,10 +45,14 @@ struct TurnView: View, Equatable {
     let showsProcessTrail: Bool
     var onRetry: () -> Void
     var onAskFollowup: (String) -> Void
+    /// Reads back one attachment's stored bytes — called only when a preview is
+    /// opened, never per frame: the row itself still shows names alone.
+    var attachmentData: (Attachment) -> Data? = { _ in nil }
 
     @State private var trailExpanded = false
     @State private var sourcesExpanded = false
     @State private var showsAllSources = false
+    @State private var previewedAttachment: Attachment?
     /// The first draft, collapsed. The findings grade it, and the answer above is
     /// the rewrite; opening this is the comparison the notice promises.
     @State private var showsDraft = false
@@ -182,6 +186,21 @@ struct TurnView: View, Equatable {
                                            // are what recover the part it hides.
                                            layout: .singleLine(.byTruncatingMiddle))
                             Spacer(minLength: 0)
+                            // The bytes are still on disk; the name need not be all
+                            // there is to look at. Read lazily inside the popover —
+                            // the row cannot afford a file read per frame.
+                            Button { previewedAttachment = attachment } label: {
+                                Image(systemName: "eye")
+                                    .font(PanelTheme.Font.caption(textScale))
+                                    .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Show the attachment again")
+                            .accessibilityLabel("Show attachment \(attachment.name)")
+                        }
+                        .popover(item: $previewedAttachment, arrowEdge: .top) { attachment in
+                            AttachmentPreview(attachment: attachment,
+                                              data: attachmentData(attachment))
                         }
                         // Named as an attachment, not merely named. The symbol is
                         // decorative to VoiceOver, so this row read out as a bare
