@@ -35,7 +35,7 @@ enum EvidenceExtractor {
 
     private static let titleKeys = ["title", "name", "heading", "page_title"]
     private static let snippetKeys = ["snippet", "content", "summary", "description", "text", "abstract"]
-    private static let dateKeys = ["publish_date", "published_at", "publishedAt", "published", "date", "publishedDate", "datePublished"]
+    private static let dateKeys = ["publish_date", "published_at", "publishedAt", "published", "publishedDate", "datePublished", "date"]
     private static let linkKeys = ["url", "link", "href"]
     private static let ignoredLinkKeys: Set<String> = ["icon", "favicon", "site_icon", "siteicon", "logo"]
 

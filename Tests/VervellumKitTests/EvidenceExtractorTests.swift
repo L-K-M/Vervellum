@@ -25,10 +25,12 @@ final class EvidenceExtractorTests: XCTestCase {
         let atLimit = String(repeating: "é", count: 64)
         let results = [
             ["url": "https://first.example", "date": atLimit],
-            ["url": "https://second.example", "date": atLimit + "x", "datePublished": "2026-11-21"],
+            ["url": "https://second.example", "published_at": atLimit + "x", "datePublished": "2026-11-21",
+             "date": "2026-11-22"],
+            ["url": "https://third.example", "date": "e" + String(repeating: "\u{301}", count: 100)],
         ]
         XCTAssertEqual(EvidenceExtractor.sources(from: results).map(\.publishedAt),
-                       [atLimit, "2026-11-21"])
+                       [atLimit, "2026-11-21", nil])
     }
 
     func testExtractsAndNumbersHits() {
