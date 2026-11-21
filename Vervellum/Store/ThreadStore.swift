@@ -41,16 +41,15 @@ final class ThreadStore: ObservableObject {
         library = archive.library
         // At launch, once, because this is the moment a crash between a delete and its
         // save shows up as bytes nothing refers to. Everything else that can strand an
-        // attachment — a delete, a prune, an erase — sweeps as it happens.
-        //
-        // On the archive's erase having *worked*, which is the same gate the setter and
-        // `deleteAll` use and the one this call was missing. Launching with history off
-        // empties the library in memory and erases the file (ThreadArchive.swift:151,
-        // :161); when that erase fails the file survives with every thread in it, still
-        // naming these bytes — and a sweep against an empty library would take all of
-        // them. The reader fixes the permissions, turns history back on, and gets their
-        // conversations back with every picture gone.
-        if archive.eraseFailure == nil { sweepAttachments() }
+        // attachment — a delete, a prune, an erase — sweeps as it happens. The
+        // writability gate lives in `sweepAttachments` itself: launching with history
+        // off empties the library in memory and erases the file
+        // (ThreadArchive.swift:151, :161), and when that erase fails the file survives
+        // with every thread in it, still naming these bytes — a sweep against the
+        // empty library would take all of them, and the reader who fixes the
+        // permissions and turns history back on would get their conversations back
+        // with every picture gone.
+        sweepAttachments()
         archive.onChange = { [weak self] in
             guard let self else { return }
             // The archive is driven from the main thread by this app, but the callback
@@ -251,6 +250,14 @@ final class ThreadStore: ObservableObject {
         // every attachment while the file — and its `.bak` — still name them. Deleting
         // is the one thing here that cannot be undone.
         guard archive.libraryIsTrustworthy else { return }
+        // Never when the change that prompted the sweep may not reach disk. `delete` and
+        // the `keptThreads` prune drop the thread in memory and schedule a debounced
+        // save; on a read-only archive, or after an erase that failed, the on-disk
+        // threads.json still names the attachments, and sweeping now would resurrect
+        // the thread on the next launch with its pictures gone. `deleteAll` already
+        // gates on the same invariant — this puts it in the one place every caller
+        // shares, and the launch sweep below no longer needs its own.
+        guard !archive.isReadOnly, archive.eraseFailure == nil else { return }
         // `archive.library`, not the published mirror beside it. `onChange` hops to the
         // main thread when it is not on it, so the copy this object publishes can be one
         // delivery behind the archive that a delete has already changed — and a sweep
