@@ -197,6 +197,14 @@ struct PanelRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .vervellumPanelDidShow)) { _ in
             refreshConfiguredState()
         }
+        .onChange(of: showsHistory) { _, shown in
+            // History's search field took first responder while it was open; on
+            // close the composer claims it back through the channel a fresh
+            // summon uses, so typing always lands somewhere sensible.
+            if !shown {
+                NotificationCenter.default.post(name: .vervellumPanelDidShow, object: nil)
+            }
+        }
         // Also on first build: the panel is constructed and shown in the same turn, so
         // without this the very first frame renders the not-configured state even for a
         // configured user.

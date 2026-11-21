@@ -21,6 +21,10 @@ struct HistoryView: View {
     var onClose: () -> Void
 
     @State private var query = ""
+    /// "Open and type" — the Spotlight-shaped flow. The view is inserted fresh
+    /// when History opens, so the freshly-built field can take focus here the
+    /// way the reused composer cannot.
+    @FocusState private var searchFocused: Bool
 
     private var results: [ResearchThread] { store.library.search(query) }
 
@@ -34,6 +38,7 @@ struct HistoryView: View {
                 list
             }
         }
+        .onAppear { searchFocused = true }
     }
 
     private var searchField: some View {
@@ -44,6 +49,7 @@ struct HistoryView: View {
             TextField("Search earlier threads", text: $query)
                 .textFieldStyle(.plain)
                 .font(PanelTheme.Font.body(textScale))
+                .focused($searchFocused)
             if !query.isEmpty {
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill")
