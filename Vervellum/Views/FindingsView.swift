@@ -49,7 +49,7 @@ struct FindingsView: View {
                 .accessibilityLabel(finding.verdict.label)
 
             VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
-                HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
+                FindingCitationLayout(spacing: PanelTheme.Space.small) {
                     Text(finding.verdict.label.uppercased())
                         .font(PanelTheme.Font.label(textScale))
                         .tracking(0.7)
@@ -94,6 +94,47 @@ struct FindingsView: View {
         finding.sourceNumbers.compactMap { number in
             sources.first { $0.number == number }
         }
+    }
+}
+
+/// Source numbers have different widths, and a narrow panel can have more
+/// citations than fit on one line. Measure the native buttons at their ideal
+/// size so each keeps its entire label and hit target.
+struct FindingCitationLayout: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(subviews, width: proposal.width ?? .infinity).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let arrangement = arrange(subviews, width: bounds.width)
+        for (view, origin) in zip(subviews, arrangement.origins) {
+            view.place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
+                       anchor: .topLeading, proposal: .unspecified)
+        }
+    }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> (size: CGSize, origins: [CGPoint]) {
+        var origins: [CGPoint] = []
+        var usedWidth: CGFloat = 0
+        var lineWidth: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var y: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if lineWidth > 0, lineWidth + spacing + size.width > width {
+                y += lineHeight + spacing
+                lineWidth = 0
+                lineHeight = 0
+            }
+            let x = lineWidth == 0 ? 0 : lineWidth + spacing
+            origins.append(CGPoint(x: x, y: y))
+            lineWidth = x + size.width
+            usedWidth = max(usedWidth, lineWidth)
+            lineHeight = max(lineHeight, size.height)
+        }
+        return (CGSize(width: usedWidth, height: y + lineHeight), origins)
     }
 }
 
