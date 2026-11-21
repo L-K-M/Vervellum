@@ -152,7 +152,9 @@ private struct HistoryRow: View {
                 Button("Delete", role: .destructive, action: onDelete)
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("“\(thread.title)” and its attachments are gone for good.")
+                Text(thread.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                     ? "This thread and its attachments are gone for good."
+                     : "“\(thread.title)” and its attachments are gone for good.")
             }
         }
         .padding(.horizontal, PanelTheme.Space.medium)
