@@ -32,6 +32,7 @@ final class TurnViewThemeTests: XCTestCase {
     func testLinkAttributesFollowTheAccent() {
         let ember = AnswerTextView.linkAttributes(accent: PanelTheme.NativePalette.accent)
         let other = PanelPalette.presets.first { $0 != .ember }
+        XCTAssertNotNil(other, "this test needs at least two palette presets")
         guard let other else { return }
         let previous = PanelTheme.palette
         PanelTheme.palette = other
@@ -40,5 +41,15 @@ final class TurnViewThemeTests: XCTestCase {
         XCTAssertNotEqual(ember[.foregroundColor] as? NSColor,
                           rethemed[.foregroundColor] as? NSColor)
         XCTAssertNotNil(rethemed[.cursor])
+    }
+
+    /// `updateNSView` skips the attribute rewrite only when the stored foreground equals
+    /// the current accent, so a colour rebuilt on each read would rewrite attributes on
+    /// every streamed chunk. Pin that one theme's accent is a stable value across reads;
+    /// if this ever fails, the fix belongs in the palette presets (store literal
+    /// colours), not in the comparison.
+    func testAccentIsStableAcrossReadsForOneTheme() {
+        XCTAssertEqual(PanelTheme.NativePalette.accent,
+                       PanelTheme.NativePalette.accent)
     }
 }
