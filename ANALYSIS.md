@@ -105,6 +105,8 @@ design decision and the ambiguous table-delimiter regression tests.
 Historical scores are mean · user/engineer/designer · effort, not new measurements.
 S means local work, M several components, L design work. Estimates are rough.
 
+The 21 November panel and research review produced PRs #198 (history search), #199 (test backup), #208 (draft labels), #209 (regather evidence), and #212 (citation wrapping). Their implemented slices are omitted below. Revisit a slice if its PR closes unmerged.
+
 ## Important
 
 ### A09 · Describe only the searches that actually ran
@@ -206,6 +208,8 @@ erase/flush before changing synchronization.
 Accept: Recovery followed by a failed write must preserve a usable backup. Read-only archives remain untouched. Keep permission-before-content proof. Current writes use queued immutable snapshots; do not reintroduce the obsolete claim that writeNow reads mutable isHistoryEnabled.
 
 Where: Sources/VervellumKit/Core/Store/ThreadArchive.swift:303–337. Earlier effort: M.
+
+Exercise recovery with attachments. ThreadArchive rotates the previous JSON into its backup, while ThreadStore and LinuxEnvironment collect old blobs using the live library. Age a fixture attachment past the collection grace period, prune its thread, flush, damage the primary, and reopen from backup. Decide whether prune promises a recoverable attachment or an explicit missing-file state. Test user-requested deletion and Erase All separately before extending retention.
 
 ### A17 · Make credential acquisition nonblocking and erasure truthful
 
@@ -549,6 +553,8 @@ The stable source-list details work is tracked in the November 21 implementation
 
 D09 proposed an inline first-click preview and a second click to open the page (half-day estimate). Compare the explicit Details and Open controls in #224 with that alternative on a narrow panel before changing primary-click behavior. Verify both actions from the keyboard alongside D01.
 
+Compare SourcePreview at its fixed 300-point width with a screen-bounded width at 100% and 140% text, with long titles and dates in both appearances. Try a neutral document accent for page availability. Verify that a read page with a contradicted claim remains visually distinct from a supported verdict and that the full title remains inspectable.
+
 ### A26 · Verify the remaining narrow-panel layouts
 
 [Claim card wrapping](https://github.com/L-K-M/Vervellum/pull/219) covers the
@@ -558,7 +564,7 @@ strings, RTL and CJK text. Capture the failing layout before changing it. Every
 essential label and action should stay readable and reachable. Historical B87/S20
 estimate for evidence wrapping was half a day.
 
-A second implementation and a rendered 24-source fixture are recorded in the November 21 review above. Check separate VoiceOver actions and that the complete final line scrolls into view.
+The November 21 reviews include a second implementation and a rendered 24-source fixture. The hosted #212 fixture verified wrapping at 360 points, 140% text and both layout directions. Check keyboard traversal across line breaks, separate VoiceOver actions, and scrolling the complete final line into view.
 
 ### A27 · Measured contrast and live accessibility observation
 
@@ -1830,12 +1836,9 @@ Accept: Cover clean revisions of invalid drafts, assessment-only invalid referen
 
 Where: Sources/VervellumKit/Core/Research/ResearchRunner.swift:1664,1680–1687,2036–2058; ResearchModels.swift:633–637. Effort: half a day.
 
-Verify attribution after successive rewrites. A regather adopts findings for the new
-answer. A subsequent revision can keep that answer as the draft. Both native panels
-currently tell assistive technology that findings grade the draft in all cases.
-Use one rule for the disclosure hint, notices and transcript heading. Exercise
-regather alone, revise alone, both in sequence, interrupted adoption and legacy
-records. Preserve uncertainty when an older archive lacks enough information.
+Draft attribution for regather, revision, both in sequence and legacy records is covered by #208. Verify interrupted adoption as part of the provenance fixtures below.
+
+Bind saved draft citations to the evidence available when that draft was generated. TranscriptFormatter can omit a draft-only citation from its bibliography. The macOS and GTK draft renderers can resolve a formerly invalid number against sources added later. Capture the draft-time source bound and which pages were read, define a conservative display for older regather records without that provenance, and use it in both renderers and export. Test a draft-only source, a number introduced on the second pass, and a page promoted from summary to full text. Keep unrelated hits out of the bibliography.
 
 ### S33 · Confirm image fallback before disabling vision
 
@@ -1916,17 +1919,13 @@ Accept: Complete configured names without provider calls or exposing credentials
 
 Where: Sources/VervellumKit/Core/Text/ComposerCommand.swift:136.
 
-### R06 · Profile large-library search before hiding results
+### R06 · Measure history search latency
 
-Performance problems, stuttering, and jank — nice-to-have
+ThreadLibrary scans questions and full answers on each query edit, up to 2,000 threads. The matcher also checks findings, limitations, follow-ups and sources. A missing phrase across 200 one-turn threads with 8,200-character answers took 0.56–1.07 seconds per scan in a local debug build on arm64. [The single-scan change](https://github.com/L-K-M/Vervellum/pull/213) shares the result for the rows and empty state. Compare release-build input latency at the default and maximum library sizes.
 
-ThreadLibrary scans questions and full answers on each query edit, up to 2,000 threads. The matcher also checks findings, limitations, follow-ups and sources. A missing phrase across 200 one-turn threads with 8,200-character answers took 0.56–1.07 seconds per scan in a local debug build on arm64. [The single-scan change](https://github.com/L-K-M/Vervellum/pull/213) shares the result for the rows and empty state. Measure release-build input latency at the default and maximum library sizes before selecting a search strategy.
+The #198 fixture took median times of 730 ms and 5.97 s for an unsuccessful query over 200 and 2,000 threads respectively (one 4.3 KB answer per thread, nine debug scans on a busy Mac). That PR removes full-text scanning from the UI thread. Measure time to first useful result and memory on release builds before adding an index or a roughly 150 ms debounce. Preserve all search fields and newest-first ordering. A questions-only early return would need an explicit scope choice from the reader.
 
-Suggested fix: Profile a roughly 150 ms debounce or an index with correct invalidation. The concurrent review suggested questions-first with an answer fallback only for a small question set; that changes result completeness and needs an explicit scope decision, not a silent optimization.
-
-Accept: Preserve answer matches, ordering and live library changes unless the reader chooses a narrower search scope.
-
-Where: Sources/VervellumKit/Core/Store/ThreadLibrary.swift:118–126; Vervellum/Views/HistoryView.swift:25.
+Where: ThreadLibrary, HistoryView and the macOS history matcher in #198.
 
 A no-match fixture of 2,000 one-turn threads with about 4 KB of answer text each took 1.1–1.9 seconds per scan across three optimized runs on a busy arm64 Mac (3.8–5.6 seconds in Debug). The fixture times ThreadLibrary.search, excluding rendering. Record end-to-end release keystroke latency for early, late and missing matches, then run matching off the UI thread against immutable library snapshots. Cancel obsolete work, key results to both query and library revision, and test deletion or a streamed update during a search. A query-only cache can leave a removed thread on screen.
 
@@ -2004,6 +2003,8 @@ sentence-level alignment.
 
 Accept: No model call; bound work on long answers, retain both complete versions,
 and say which prose the findings assessed.
+
+Prototype a local “Find in assessed answer” action when a finding has one verbatim match. Use the assessment target to select the draft or displayed answer, reveal the passage, and preserve the return position. Suppress the jump for paraphrases and repeated matches. Exercise a regather followed by correction and keyboard focus after disclosure.
 
 ### N01 · Flag a single-domain evidence set
 
@@ -2308,7 +2309,7 @@ field and open the thread at the matching turn. Have ThreadLibrary's existing
 search return the match location as part of its walk. Generate the excerpt only
 where it is displayed. Preserve result ordering, normal unfiltered reopening and
 the session identity of detached live threads. Exercise a claim-only hit in an
-older turn, mixed-script input and a cleared query. Measure together with R06.
+older turn, a source-title-only match, mixed-script input and a cleared query. Announce the matching field and excerpt with the row, and test keyboard opening, a changing answer, and deletion during search. Measure together with R06.
 
 ### H02 · Distinguish retrieved and cited domains in follow-up context
 
