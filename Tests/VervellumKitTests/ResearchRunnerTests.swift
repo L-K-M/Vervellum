@@ -385,6 +385,63 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(Self.stage(of: calls[5]), .assess)
     }
 
+    /// Two citations to one website are not two independent witnesses. The cue is a
+    /// property of the evidence, so it is derived from the sources the answer cited
+    /// and says nothing about whether the answer itself is true.
+    func testAnAnswerCitingOneDomainIsBadged() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
+                switch Self.stage(of: call) {
+                case .plan: return .completion(json: Self.plan("a documented fact"))
+                case .assess: return .completion(json: Self.assessment)
+                default: return .unrouted
+                }
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "https://one.example/a", title: "A"),
+                                           (url: "https://one.example/b", title: "B")]))
+            case .fetch:
+                return .html("<p>Page text.</p>")
+            case .stream:
+                return .stream(["Both sources agree [1, 2]."])
+            default:
+                return .unrouted
+            }
+        }
+
+        let turn = await run("What is the fact?", transport: transport)
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertTrue(turn.notices.contains(.singleDomain), "notices: \(turn.notices)")
+    }
+
+    /// The same answer over two domains is not a monoculture, and the cue must not
+    /// fire on a normal, varied evidence set.
+    func testAnAnswerCitingTwoDomainsIsNotBadged() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
+                switch Self.stage(of: call) {
+                case .plan: return .completion(json: Self.plan("a documented fact"))
+                case .assess: return .completion(json: Self.assessment)
+                default: return .unrouted
+                }
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "https://a.example/one", title: "One"),
+                                           (url: "https://b.example/two", title: "Two")]))
+            case .fetch:
+                return .html("<p>Page text.</p>")
+            case .stream:
+                return .stream(["Both sources agree [1, 2]."])
+            default:
+                return .unrouted
+            }
+        }
+
+        let turn = await run("What is the fact?", transport: transport)
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertFalse(turn.notices.contains(.singleDomain), "notices: \(turn.notices)")
+    }
+
     func testLinkedAssessmentTextIsDiscardedBeforeTheTurnPublishesIt() async throws {
         let linked: [String: Any] = [
             "claim": "A linked claim at example.com",

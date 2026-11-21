@@ -750,7 +750,16 @@ final class ResearchRunner: ResearchRunning {
                                             history: history, today: today,
                                             attachments: attachments)
         recordAnsweringModel(from: chain)
-        update { $0.applyCitationValidation(sourceCount: sources.count) }
+        // The same validation answers two questions: whether the citations are
+        // honest, and whether the evidence is a monoculture. Two citations to one
+        // website are not two independent witnesses, and nothing else on the turn
+        // says so. It is a property of the evidence, not a verdict on the answer.
+        update { turn in
+            let validation = turn.applyCitationValidation(sourceCount: sources.count)
+            if turn.citesSingleDomain(using: validation) {
+                turn.addNotice(.singleDomain)
+            }
+        }
         try Task.checkCancellation()
 
         // 5 — assess.
