@@ -787,7 +787,7 @@ final class ResearchRunner: ResearchRunning {
                followups: assessment.followups,
                question: question, history: history, today: today, chain: chain,
                settings: settings, engines: engines, linked: linked,
-               plannedReads: &plannedReads, pageBudget: pageBudget,
+               firstHarvest: harvested, pageBudget: pageBudget,
                answerPrompt: answerPrompt, answerExtra: answerExtra,
                attachments: attachments, evidenceLimit: evidenceLimit,
                currentAnswer: answer, currentSources: sources,
@@ -1597,7 +1597,7 @@ final class ResearchRunner: ResearchRunning {
                           settings: ProviderSettings,
                           engines: [SearchBackend],
                           linked: [Source],
-                          plannedReads: inout [Int: String],
+                          firstHarvest: [Source],
                           pageBudget: Int,
                           answerPrompt: String,
                           answerExtra: [String: Any],
@@ -1609,8 +1609,15 @@ final class ResearchRunner: ResearchRunning {
                           currentSources: [Source],
                           reading: String,
                           searchState: inout SearchRoundState) async throws -> Regathered? {
+        // Rebuilding from search results loses both planner-requested reads and
+        // pages filled in by rank before the first answer. Keep their texts so
+        // the second round can reuse those requests under the same page budget.
+        var pageTexts: [Int: String] = [:]
+        for source in firstHarvest where source.wasRead {
+            pageTexts[source.number] = source.fullText
+        }
         // A round over a full evidence budget cannot show the answer anything new.
-        let withReads = Self.applyingReads(plannedReads, to: currentSources)
+        let withReads = Self.applyingReads(pageTexts, to: currentSources)
         guard ResearchContext.evidence(from: withReads, limit: evidenceLimit).dropped == 0
         else {
             trace.log("No regather round: the evidence budget is already full")
@@ -1655,14 +1662,14 @@ final class ResearchRunner: ResearchRunning {
         if !roundPlan.readRequests.isEmpty, budget > 0 {
             update { $0.stage = .searching }
             let candidates = Self.applyingReads(
-                plannedReads, to: Self.combined(linked: linked,
+                pageTexts, to: Self.combined(linked: linked,
                                                 results: searchState.rawResults))
             let (texts, spent) = await readPlannedPages(roundPlan.readRequests,
                                                         in: candidates,
                                                         settings: settings, budget: budget)
             budget -= spent
             for (number, text) in texts where !text.isEmpty {
-                plannedReads[number] = text
+                pageTexts[number] = text
             }
         }
         // A reads-only plan is not a stop: pages the round read are new evidence
@@ -1681,13 +1688,13 @@ final class ResearchRunner: ResearchRunning {
                                       mode: .deep, state: &searchState)
         }
         var harvested = Self.applyingReads(
-            plannedReads, to: Self.combined(linked: linked, results: searchState.rawResults))
+            pageTexts, to: Self.combined(linked: linked, results: searchState.rawResults))
         // The same budget the pre-stop reads already spent from; a round that both
         // searches and reads gets one allowance, not two. Only the requests the
         // pre-search pass did not deliver run again — `readableTargets` filters
         // pages the earlier pass made read, but the *budget* would still be charged
         // for a request the round had already satisfied.
-        let pendingReads = roundPlan.readRequests.filter { plannedReads[$0] == nil }
+        let pendingReads = roundPlan.readRequests.filter { pageTexts[$0] == nil }
         if !pendingReads.isEmpty, budget > 0 {
             let (texts, spent) = await readPlannedPages(pendingReads,
                                                         in: harvested,
@@ -1704,12 +1711,15 @@ final class ResearchRunner: ResearchRunning {
         // (itself post-trim): the harvested list can grow past what the budget will
         // show the model, and counting that shadow growth would send the turn back
         // for a second answer over evidence identical to the first.
-        let trimmedCount = ResearchContext.evidence(from: harvested,
-                                                    limit: evidenceLimit).entries.count
-        let newSources = trimmedCount - currentSources.count
-        let newTexts = harvested.filter { source in
-            source.wasRead && currentSources.first(where: { $0.number == source.number })?.wasRead != true
-        }.count
+        let (evidence, _, withheld) = ResearchContext.evidence(from: harvested,
+                                                               limit: evidenceLimit)
+        var sources = Array(harvested.prefix(evidence.count))
+        for index in sources.indices where withheld.contains(sources[index].number) {
+            sources[index].fullText = nil
+        }
+        let newSources = sources.count - currentSources.count
+        let previouslyRead = Set(currentSources.filter(\.wasRead).map(\.number))
+        let newTexts = sources.filter { $0.wasRead && !previouslyRead.contains($0.number) }.count
         guard newSources > 0 || newTexts > 0 else {
             trace.log("Regather round found nothing new; the first answer stands")
             return nil
@@ -1720,12 +1730,6 @@ final class ResearchRunner: ResearchRunning {
         // snapshot is taken after the round's searches were appended on purpose: they
         // did run, and a restore must not pretend they did not.
         let snapshot = current ?? ResearchTurn(question: question)
-        let (evidence, _, withheld) = ResearchContext.evidence(from: harvested,
-                                                               limit: evidenceLimit)
-        var sources = Array(harvested.prefix(evidence.count))
-        for index in sources.indices where withheld.contains(sources[index].number) {
-            sources[index].fullText = nil
-        }
         update { turn in
             turn.sources = sources
             turn.pagesRead = sources.filter { $0.wasRead }.count

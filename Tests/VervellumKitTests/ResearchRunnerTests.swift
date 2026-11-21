@@ -2140,6 +2140,7 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(turn.draftAnswer, "First answer [1].",
                        "the first answer is kept as the draft for comparison")
         XCTAssertEqual(turn.sources.count, 2, "the regather round's hit joined the list")
+        XCTAssertEqual(turn.sources.first?.wasRead, true, "the second answer retains the first pass’s page text")
         XCTAssertTrue(turn.notices.contains(.answerRegathered))
         XCTAssertEqual(turn.findings.first?.verdict, .supported,
                        "the findings are the second check's — they grade what is on screen")
@@ -2149,6 +2150,47 @@ final class ResearchRunnerTests: XCTestCase {
         let assesses = transport.calls.filter { Self.stage(of: $0) == .assess }
         XCTAssertEqual(assesses.count, 2)
         XCTAssertTrue(assesses.last?.userContent?.contains("settle-it.example") == true)
+    }
+
+    func testReadsOnlyRegatherSpendsAnotherAnswerOnlyWhenPageTextFits() async {
+        for tightBudget in [false, true] {
+            // The rank-order read fails. The planner asks to retry that same page
+            // after assessment, and this time the page is available.
+            let firstRead = DispatchSemaphore(value: 1)
+            defer { firstRead.signal() }
+            let transport = StubTransport { call in
+                switch call.kind {
+                case .fetch:
+                    if firstRead.wait(timeout: .now()) == .success {
+                        return .page(status: 404, headers: [:], text: "")
+                    }
+                    return .html("<p>" + String(repeating: "Page evidence. ", count: 400) + "</p>")
+                case .json where call.url.path == "/search":
+                    return .json(Self.searxng([(url: "https://journal.example/report", title: "Study")]))
+                case .json:
+                    switch Self.stage(of: call) {
+                    case .plan: return .completion(json: Self.plan("study"))
+                    case .deepPlan: return .completion(json: ["reading": "Ready", "searches": []])
+                    case .regatherPlan:
+                        return .completion(json: ["reading": "Retry the study", "read": [1], "searches": []])
+                    case .assess:
+                        return .completion(json: Self.assessment(verdict: "insufficient", sources: []))
+                    default: return .unrouted
+                    }
+                case .stream: return .stream(["Answer [1]."])
+                }
+            }
+            // Leave room for the summary and stage metadata but not the retrieved page.
+            let question = tightBudget ? String(repeating: "q", count: ResearchContext.maxCharacters
+                                                   - ResearchContext.answerContextReserve - 3_000) : "What changed?"
+            let turn = await run(question, mode: .deep, transport: transport)
+            XCTAssertEqual(turn.stage, .complete, turn.failure ?? "")
+            XCTAssertEqual(transport.calls.filter { $0.kind == .fetch }.count, 2)
+            XCTAssertEqual(transport.calls.filter { Self.stage(of: $0) == .answer }.count, tightBudget ? 1 : 2)
+            XCTAssertEqual(transport.calls.filter { Self.stage(of: $0) == .assess }.count, tightBudget ? 1 : 2)
+            XCTAssertEqual(turn.sources.first?.wasRead, !tightBudget)
+            XCTAssertEqual(turn.notices.contains(.answerRegathered), !tightBudget)
+        }
     }
 
     /// A regather that cannot finish adopts nothing: the first answer, the first
