@@ -3,21 +3,20 @@ import XCTest
 
 final class AboutViewTests: XCTestCase {
 
-    /// The About pane interpolates the version into a `Text`; an optional there prints
-    /// `Optional("0.3.1")`, so the line must go through `versionText`, which reads the
-    /// raw Info.plist value and never wraps it in Optional.
-    func testVersionTextIsNeverAnOptionalDescription() {
-        let text = AboutView.versionText(Bundle.main)
-        XCTAssertFalse(text.isEmpty)
-        XCTAssertFalse(text.contains("Optional"), "version rendered as \(text)")
+    /// The About pane renders the whole line through `versionLine`; an optional
+    /// interpolated in the view prints `Optional(...)`, so the rendered line must
+    /// never contain that.
+    func testVersionLineIsNeverAnOptionalDescription() {
+        let line = AboutView.versionLine(.main)
+        XCTAssertFalse(line.contains("Optional"), "version line rendered as \(line)")
+        XCTAssertTrue(line.hasPrefix("Version "), "line rendered as \(line)")
+        XCTAssertGreaterThan(line.count, "Version ".count, "line rendered as \(line)")
     }
 
     func testVersionTextFallsBackForABundleWithoutOne() {
-        // A bundle with no CFBundleShortVersionString (the Linux executable's, or a
-        // bare test host) must still produce a readable line, not "Optional(nil)".
-        XCTAssertEqual(AboutView.versionText(Bundle(for: XCTestCase.self)),
-                       Bundle(for: XCTestCase.self)
-                           .object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-                           ?? "unknown")
+        // `Bundle()` is an uninitialized bundle with no Info.plist, so this exercises
+        // the fallback path deterministically — not the test host's own plist.
+        XCTAssertEqual(AboutView.versionText(Bundle()), "unknown")
+        XCTAssertEqual(AboutView.versionLine(Bundle()), "Version unknown")
     }
 }

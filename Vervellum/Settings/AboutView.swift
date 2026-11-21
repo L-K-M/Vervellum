@@ -16,6 +16,12 @@ struct AboutView: View {
         bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
     }
 
+    /// The whole rendered line, routed through the helper so the view cannot drift back
+    /// to interpolating an optional. Pure over the bundle, so testable.
+    static func versionLine(_ bundle: Bundle) -> String {
+        "Version \(versionText(bundle))"
+    }
+
     var body: some View {
         SettingsPane {
             HStack(alignment: .top, spacing: 14) {
@@ -25,7 +31,7 @@ struct AboutView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Vervellum")
                         .font(.system(size: 18, weight: .semibold))
-                    Text("Version \(Self.versionText(Bundle.main))")
+                    Text(Self.versionLine(.main))
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                     Text("A hotkey-summoned research panel for macOS.")
