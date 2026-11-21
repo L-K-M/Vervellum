@@ -101,6 +101,9 @@ final class SourceHarvesterTests: XCTestCase {
         XCTAssertNil(SourceHarvester.openableURL("javascript:alert(1)"))
         XCTAssertNil(SourceHarvester.openableURL("ftp://example.com/a"))
         XCTAssertNil(SourceHarvester.openableURL("https://user:pass@example.com/a"))
+        // Percent-encoded userinfo is still userinfo: `URLComponents` exposes it as a
+        // user, and a click must not carry it either way.
+        XCTAssertNil(SourceHarvester.openableURL("https://user%40x:pass@example.com/a"))
         XCTAssertNil(SourceHarvester.openableURL("https:///a"))
         XCTAssertNil(SourceHarvester.openableURL("example.com"))
         XCTAssertNil(SourceHarvester.openableURL(""))

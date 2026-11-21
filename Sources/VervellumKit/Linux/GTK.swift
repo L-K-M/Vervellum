@@ -538,8 +538,8 @@ enum GTK {
     static func openLink(_ uri: String) -> Bool {
         // The shared predicate, so the GTK reader and the macOS panel open the same set
         // of addresses. See `SourceHarvester.openableURL`.
-        guard SourceHarvester.openableURL(uri) != nil else { return false }
-        g_app_info_launch_default_for_uri(uri, nil, nil)
+        guard let url = SourceHarvester.openableURL(uri) else { return false }
+        g_app_info_launch_default_for_uri(url.absoluteString, nil, nil)
         return true
     }
 }
