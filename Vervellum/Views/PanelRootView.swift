@@ -290,7 +290,9 @@ struct PanelRootView: View {
                 .background(BottomSentinel { pinned in isPinnedToBottom = pinned })
             }
             .overlay(alignment: .bottom) {
-                if !isPinnedToBottom, engine.isRunning {
+                // Not only mid-stream: scrolled up in a long finished thread, the
+                // pill is still the one-tap way back to the newest answer.
+                if !isPinnedToBottom {
                     jumpToLatest(proxy)
                 }
             }
