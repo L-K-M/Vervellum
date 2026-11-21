@@ -1,5 +1,12 @@
 # Vervellum research backlog
 
+Codex (little-platypus) pass 2026-11-21: reviewed against `origin/main` at
+`b3a5bf1`. Three PRs are open — #231 (protected editing chords; A18's policy
+slice), #242 (storage failure reporting and retry; A13's retry slice and A14's
+reporting slice) and #247 (single-domain evidence cue; N01). Their slices are
+annotated in place below; restore an entry if its PR closes unmerged. New
+findings from the pass are A84, A85 and A86, plus additions to A83, C01 and S08.
+
 Codex pass 2026-11-21: reviewed against `origin/main` at `e90efc3`. Four small
 fixes from this pass are open in PRs #233 (range citations, A62), #234
 (image-retry state, S33), #236 (negative attachment size, A80) and #240 (notice
@@ -129,9 +136,14 @@ erase runs when history is off, and deleting a thread discards its session. Two 
 remain: a recorded deletion failure has no retry affordance; and Linux open-session behavior after `deleteAll` still needs an integration test
 and an explicit stored-history-versus-active-session retention policy.
 
-Suggested fix: add a retry action to the erase-failure notice (sanitized errors
-only); make the open-thread behavior after `deleteAll` match that explicit retention
-policy, including late callbacks.
+Open PR #242 implements the first clause: the Settings warning now carries a
+**Try Again** button that re-runs the erase (and any failed write) with sanitized,
+application-authored errors. Remaining: Linux open-session behavior after
+`deleteAll` still needs an integration test and an explicit
+stored-history-versus-active-session retention policy.
+
+Suggested fix: make the open-thread behavior after `deleteAll` match that explicit
+retention policy, including late callbacks.
 
 Accept: denied deletion, queued writes, completion after Delete All, and relaunch
 with history disabled all end with primary and backup gone or a visible error saying
@@ -143,9 +155,15 @@ Earlier effort: M.
 
 Bugs — important
 
-Validated backup rotation exists; the private-directory fence is covered by open #125. Backup removal/copy failures are still suppressed, and concurrent erase/flush behavior needs regression proof.
+Validated backup rotation exists; the private-directory fence is covered by open #125.
+Open PR #242 reports backup removal/copy and 0600-permission failures in
+application-authored terms, rotates through a staging copy so a failed copy
+preserves the previous `.bak`, keeps a failed write's snapshot pending for a real
+retry, and adds a Settings retry action. Remaining: concurrent erase/flush
+behavior needs regression proof.
 
-Suggested fix: Report backup/permission failures in application-authored terms. Test failure during recovery, backup rotation and concurrent erase/flush before changing synchronization.
+Suggested fix: test failure during recovery, backup rotation and concurrent
+erase/flush before changing synchronization.
 
 Accept: Recovery followed by a failed write must preserve a usable backup. Read-only archives remain untouched. Keep permission-before-content proof. Current writes use queued immutable snapshots; do not reintroduce the obsolete claim that writeNow reads mutable isHistoryEnabled.
 
@@ -169,9 +187,15 @@ General issues — important
 
 Keycap rejects Shift-only bindings and several system-owned shortcuts. Common editing
 chords such as Command-C, Command-V and Command-Z still need a policy, as do
-Option-only character chords used for text composition. Make the policy change in
-Keycap, release it there, then update the macOS dependency and test the recorder
-and stored bindings in Vervellum.
+Option-only character chords used for text composition. The policy could live in
+Keycap (release there, then update the dependency) or in Vervellum's own binding.
+
+Open PR #231 implements the policy in `HotkeyBinding` rather than waiting for a
+Keycap release: Command/Shift-Command on A/C/V/X/Z and Option/Option-Shift on a
+non-function key are refused at the registration boundary, with tests for stored
+bindings and the modifier combinations that stay allowed. The recorder itself is
+still Keycap's and accepts such a combo; the Shortcuts pane's warning names the
+reason, which is the honest half-measure until Keycap grows a validation hook.
 
 Suggested fix: reject a documented set of protected editing chords before
 registration, define the Option-only policy explicitly, and test recorder, stored
@@ -1650,6 +1674,72 @@ Suggested fix: evict inactive sessions after they become idle, have no returned 
 questions, and their latest thread snapshot is durable; always retain running, queued,
 and currently active sessions. Rough effort: about half a day.
 
+The returned queue also pins its `PendingAttachment` bytes: a dropped screenshot's
+megabytes are held for the process lifetime because nothing else refers to them.
+
+### A84 · Restore activation when Vervellum is frontmost at summon
+
+Bugs — important
+
+`PanelController.show()` captures the frontmost app only when the panel is closed,
+and stores nil when that app is Vervellum itself; `restoreActivation` then has no
+target and does nothing, so Esc/⌘W leaves Vervellum frontmost with no windows — a
+dead keyboard. Reachable by re-summoning inside the activation handoff, by
+`applicationShouldHandleReopen`, or by pressing the summon hotkey while an alert is
+up. `SettingsWindowController.windowWillClose` has the same shape with no Finder
+fallback. Distinct from A77b, which is a *stale* target; this is no target at all.
+
+Suggested fix: remember the last non-self frontmost app (workspace activation
+notifications) and fall back to it, or to Finder, whenever the panel is dismissed
+with Vervellum frontmost and no window of its own.
+
+Accept: Escape returns focus to a real app on every summon path, with no unrelated
+activation changes.
+
+Where: Vervellum/Panel/PanelController.swift:104–110,338–360;
+Vervellum/Settings/SettingsWindowController.swift:85–96. Effort: S.
+
+### A85 · A provider retry can resurrect the dead provider's partial answer
+
+Bugs — important
+
+`streamAnswer` resets `answer` to empty in `beforeRetry` when the chain moves to the
+next provider. The reset is published through `SnapshotCoalescer`, and a growth
+snapshot from the dying provider can still be waiting in it: the reset's delivery is
+queued on the main queue, while a coalescer flush scheduled earlier can land first,
+restoring the fragment the new provider's chunks then append to — the exact seam the
+reset exists to remove. Reachable when a provider fails within the 100 ms
+coalescing window of its last chunk.
+
+Suggested fix: give the runner a way to flush-and-supersede the coalescer when it
+resets the answer, or have the retry path discard pending snapshots through the
+session.
+
+Accept: a fallback answer never contains text from the provider that failed; the
+ordering guarantees in `SnapshotCoalescer` are unchanged.
+
+Where: Sources/VervellumKit/Core/Research/ResearchRunner.swift:1802–1877;
+Sources/VervellumKit/Core/Research/ResearchSession.swift:336–360. Effort: M.
+
+### A86 · Route source and finding activation through the URL funnel
+
+General issues — nice-to-have
+
+`SourceRow` and the `FindingsView` chip call `NSWorkspace.shared.open` directly,
+while citation chips go through `CitationText.openable`, which refuses every scheme
+but http(s) with a host. Sources are http(s) by construction today, so this is
+defence in depth rather than a live hole — but the funnel exists precisely because a
+view should not trust upstream filtering.
+
+Suggested fix: expose the existing `openable` check and route both call sites
+through it.
+
+Accept: no behaviour change for a real source; a malformed stored URL cannot launch
+another scheme.
+
+Where: Vervellum/Views/SourcesView.swift:140–142; Vervellum/Views/TurnView.swift:93–94;
+Vervellum/Views/MarkdownText.swift:282–293. Effort: S.
+
 ### S07 · Match key hints to the submit preference
 
 Usability: speed, convenience, clarity — nice-to-have
@@ -1667,6 +1757,11 @@ Where: Vervellum/Views/EmptyStateView.swift:39. Effort: 1 hour.
 Bugs — nice-to-have
 
 Dismissing the Settings preview through another panel-hide path can leave the preview toggle on. Runtime reproduction remains open.
+
+The concrete gap: `PanelController.hide()` sets `isPreviewing = false` but does not
+post `.vervellumPanelPreviewChanged`, so dismissing a preview with the summon
+shortcut, Esc or ⌘W leaves the General toggle reading on over a panel that is not
+there. `setPreviewing(false)` also early-returns when the flags already match.
 
 Suggested fix: Clear preview state on panel-hide notification as well as Settings close.
 
@@ -1873,11 +1968,11 @@ and say which prose the findings assessed.
 
 Novel, delightful, or quirky ideas worth trying — nice-to-have
 
-All cited sources can come from one domain without a visible cue.
-
-Suggested fix: Show an accessible monoculture flag from existing source metadata; do not equate domain diversity with truth.
-
-Accept: Use existing data and explicit user actions; no silent model call or privacy expansion.
+Implemented in open PR #247: `ResearchTurn.citesSingleDomain(using:)` derives the
+cue from the same `Source.domain` the harvester's diversity cap uses, and the runner
+adds a `singleDomain` notice when two or more cited sources share one domain. One
+cited source, no citations and a varied set do not fire it; the message is a fact
+about the evidence, not a verdict.
 
 Historical score: 7.3 · 7/7/8 · S.
 
@@ -2206,8 +2301,14 @@ Suggested fix: clear `redactionNote` in `newThread()`. `showsLevelPicker` is res
 by `submit` but not by the header's new-thread button; both entry points should go
 through the same reset.
 
+The same reset gap exists on dismissal: `.vervellumPanelWillHide` resets history,
+notice and recall but not `showsLevelPicker`, so a panel dismissed with the list
+open reopens with it still expanded; `queueFullNote` survives until the next
+submission even after the queue has drained itself.
+
 Accept: `/clear` by command and by the header button both leave no banner; a
-selection-seeded draft still shows its count.
+selection-seeded draft still shows its count; a resummon opens on the thread with
+no stale list or queue warning.
 
 ### C02 · Attaching a file clears whatever notice is showing
 
@@ -2338,6 +2439,11 @@ successful save clears it; no path or foreign error text is shown.
 
 Where: `Sources/VervellumKit/Core/Store/ThreadArchive.swift:391–420`;
 `Vervellum/Store/ThreadStore.swift` (`eraseFailure`). Effort: half a day.
+
+Implemented in open PR #242: `saveFailure` and `backupFailure` are recorded in
+Vervellum's own words, a failed write keeps its snapshot pending for a real retry,
+and Settings shows one storage warning with a **Try Again** button. Restore this
+entry if that PR closes unmerged.
 
 ### V02 · Time `ResearchTrace.stage` with the injected clock
 
