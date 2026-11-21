@@ -101,7 +101,7 @@ final class PanelController {
     /// - Parameter takingFocus: false shows the panel without activating Vervellum or
     ///   making the panel key. Used by the Settings preview, where stealing focus would
     ///   pull the caret out of the very field the user is editing.
-    private func show(takingFocus: Bool) {
+    func show(takingFocus: Bool) {
         let frontmost = NSWorkspace.shared.frontmostApplication
         if !isOpen {
             appToRestoreOnClose = frontmost?.processIdentifier
