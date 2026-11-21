@@ -47,7 +47,7 @@ final class TranscriptFormatterTests: XCTestCase {
                        "a draft identical to the answer adds nothing")
         subject.draftAnswer = "Because of something else [1]."
         let text = TranscriptFormatter.plainText(subject)
-        XCTAssertTrue(text.contains("Draft before correction"), text)
+        XCTAssertTrue(text.contains("Draft before correction\nThe findings assess this draft."), text)
         XCTAssertTrue(text.contains("Because of something else [1]."), text)
         // And after the answer, before the claims it explains.
         let answerAt = try XCTUnwrap(text.range(of: subject.answer)).lowerBound
@@ -55,6 +55,16 @@ final class TranscriptFormatterTests: XCTestCase {
         let claimsAt = try XCTUnwrap(text.range(of: "Claims")).lowerBound
         XCTAssertLessThan(answerAt, draftAt)
         XCTAssertLessThan(draftAt, claimsAt)
+    }
+
+    func testRegatheredTranscriptIdentifiesWhichAnswerWasAssessed() {
+        var subject = turn()
+        subject.notices = [.answerRegathered]
+        subject.draftAnswer = "Earlier answer [1]."
+        let text = TranscriptFormatter.plainText(subject)
+        XCTAssertTrue(text.contains("Draft before additional research\n"
+                                    + DraftComparison.description(for: subject).hint
+                                    + "\nEarlier answer [1]."))
     }
 
     /// A dump of everything the search returned misrepresents what the answer rests on.

@@ -36,7 +36,9 @@ enum TranscriptFormatter {
         if let draft = turn.draftAnswer,
            DraftComparison.isOffered(draft: draft, answer: turn.answer) {
             lines.append("")
-            lines.append(DraftComparison.description(for: turn).heading)
+            let comparison = DraftComparison.description(for: turn)
+            lines.append(comparison.heading)
+            if !turn.findings.isEmpty { lines.append(comparison.hint) }
             lines.append(draft)
         }
 
