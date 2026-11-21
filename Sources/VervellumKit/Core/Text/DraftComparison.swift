@@ -17,7 +17,7 @@ enum DraftComparison {
         }
         if turn.notices.contains(.answerRegathered) {
             return Description(heading: "Draft before additional research",
-                               hint: "The findings assess the answer written after additional research.")
+                               hint: "This draft predates the additional research. The findings assess the displayed answer.")
         }
         return Description(heading: "Earlier draft", hint: "Compare this draft with the displayed answer.")
     }
