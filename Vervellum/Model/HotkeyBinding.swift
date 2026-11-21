@@ -44,10 +44,11 @@ struct HotkeyBinding: Codable, Equatable {
     /// hotkey is registered with Carbon for the whole system rather than for this
     /// app: a chord that an editor treats as ordinary typing would be swallowed
     /// everywhere, not only while the panel is open.
-    var isValid: Bool {
-        enabled && combo.isUsableGlobalHotkey
-            && !isProtectedEditingShortcut && !isOptionOnlyCharacterShortcut
-    }
+    ///
+    /// Derived from `registrationProblem` rather than re-listing the rules, so the
+    /// property that refuses a chord and the sentence the Shortcuts pane shows for
+    /// it cannot drift apart.
+    var isValid: Bool { enabled && registrationProblem == nil }
 
     /// Command (+ optional Shift) on a key every editor binds for editing.
     ///

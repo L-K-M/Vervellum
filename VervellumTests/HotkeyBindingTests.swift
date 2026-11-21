@@ -201,6 +201,9 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertTrue(HotkeyBinding(keyCode: KeyCode.f12, modifiers: option,
                                     keyLabel: "F12", enabled: true).isValid,
                       "⌥F12 does not type a character")
+        XCTAssertFalse(HotkeyBinding(keyCode: KeyCode.leftArrow, modifiers: option,
+                                     keyLabel: "←", enabled: true).isValid,
+                       "⌥← is word-wise navigation, not a command")
         XCTAssertTrue(HotkeyBinding(keyCode: KeyCode.c,
                                     modifiers: option | UInt32(cmdKey),
                                     keyLabel: "C", enabled: true).isValid,
@@ -209,6 +212,27 @@ final class HotkeyBindingTests: XCTestCase {
                                     modifiers: option | UInt32(cmdKey),
                                     keyLabel: "←", enabled: true).isValid,
                       "⌥⌘← is not a typing chord")
+    }
+
+    /// The property that refuses a chord and the sentence the pane shows for it are
+    /// derived from one rule set; this table pins the mirror property in both
+    /// directions across the modifier families and the keys the policy names.
+    func testRegistrationProblemAndValidityAlwaysAgree() {
+        let modifiers: [UInt32] = [
+            UInt32(cmdKey), UInt32(cmdKey | shiftKey),
+            UInt32(optionKey), UInt32(optionKey | shiftKey),
+            UInt32(optionKey | cmdKey), UInt32(controlKey | cmdKey),
+        ]
+        let keys: [UInt32] = [KeyCode.a, KeyCode.c, KeyCode.v, KeyCode.x, KeyCode.z,
+                              KeyCode.f12, KeyCode.leftArrow]
+        for modifier in modifiers {
+            for key in keys {
+                let binding = HotkeyBinding(keyCode: key, modifiers: modifier,
+                                            keyLabel: "X", enabled: true)
+                XCTAssertEqual(binding.isValid, binding.registrationProblem == nil,
+                               "validity and warning disagree for \(modifier)/\(key)")
+            }
+        }
     }
 
     /// A binding saved before this policy existed is still refused on the next
