@@ -547,6 +547,12 @@ final class ThreadArchive {
         }
         do {
             try? fileManager.removeItem(at: staging)
+            // Tighten the primary before staging, so the copy that becomes the
+            // backup inherits owner-only mode rather than the umask default. On
+            // a fresh archive's first save the primary has not been chmod'd yet,
+            // and the backup is the copy most likely to outlive it.
+            try? fileManager.setAttributes([.posixPermissions: 0o600],
+                                          ofItemAtPath: fileURL.path)
             try fileManager.copyItem(at: fileURL, to: staging)
             // Remove the old backup only once the new copy exists, so a
             // failure here leaves the previous recovery copy untouched. The
@@ -574,6 +580,10 @@ final class ThreadArchive {
             return false
         }
         do {
+            // The inherited staging copy predates the write path's chmod; give
+            // it the same owner-only mode before it becomes the backup.
+            try? fileManager.setAttributes([.posixPermissions: 0o600],
+                                          ofItemAtPath: staging.path)
             try? fileManager.removeItem(at: backupURL)
             try fileManager.moveItem(at: staging, to: backupURL)
             pendingBackupStaging = nil

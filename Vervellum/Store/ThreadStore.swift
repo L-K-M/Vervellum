@@ -25,6 +25,14 @@ final class ThreadStore: ObservableObject {
     /// to look and the user is never told "erased" over a directory of screenshots that
     /// are still there.
     private var attachmentEraseFailure: String?
+    /// The last published write/backup failures, main-thread only.
+    ///
+    /// `storageFailure` is read while SwiftUI evaluates a body, and a
+    /// `queue.sync` there would park the main thread behind an in-flight
+    /// debounced write. The snapshot is refreshed by `onFailureChanged`, the
+    /// same hook that republishes, so the render reads a value that is never
+    /// more than one publish behind and never waits for the archive's queue.
+    private var publishedWriteFailures: (save: String?, backup: String?) = (nil, nil)
 
     init(fileURL: URL = ThreadStore.defaultURL,
          fileManager: FileManager = .default,
@@ -57,9 +65,13 @@ final class ThreadStore: ObservableObject {
         archive.onFailureChanged = { [weak self] in
             guard let self else { return }
             if Thread.isMainThread {
+                self.publishedWriteFailures = self.archive.storageFailures()
                 self.objectWillChange.send()
             } else {
-                DispatchQueue.main.async { self.objectWillChange.send() }
+                DispatchQueue.main.async {
+                    self.publishedWriteFailures = self.archive.storageFailures()
+                    self.objectWillChange.send()
+                }
             }
         }
         archive.onChange = { [weak self] in
@@ -72,6 +84,7 @@ final class ThreadStore: ObservableObject {
                 DispatchQueue.main.async { self.library = self.archive.library }
             }
         }
+        publishedWriteFailures = archive.storageFailures()
     }
 
     /// Where this app's attachment bytes go, under the default configuration.
@@ -128,10 +141,9 @@ final class ThreadStore: ObservableObject {
     /// copy, the erase and the attachment sweep. One string because Settings shows
     /// one line; the retry is one action because it re-runs whichever failed.
     var storageFailure: String? {
-        // The write/backup pair is written on the archive's private queue during
-        // debounced saves, so it is read through the synchronized accessor rather
-        // than raced on the main thread. The erase failures are main-thread state.
-        let writeFailures = archive.storageFailures()
+        // The write/backup pair is the main-thread snapshot above; the erase
+        // failures are main-thread state. Nothing here touches the archive queue.
+        let writeFailures = publishedWriteFailures
         let failures = [writeFailures.save, writeFailures.backup,
                         archive.eraseFailure, attachmentEraseFailure]
             .compactMap { $0 }

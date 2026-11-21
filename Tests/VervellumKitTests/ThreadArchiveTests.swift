@@ -684,13 +684,13 @@ final class ThreadArchiveTests: XCTestCase {
         let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
         store.save(thread("recovered"))
         store.flush()
-        XCTAssertNotNil(store.saveFailure)
-        XCTAssertNil(store.backupFailure)
+        XCTAssertNotNil(store.storageFailures().save)
+        XCTAssertNil(store.storageFailures().backup)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
 
         manager.createDirectoryFailures = 0
         store.retrySave()
-        XCTAssertNil(store.saveFailure)
+        XCTAssertNil(store.storageFailures().save)
         XCTAssertEqual(ThreadArchive(fileURL: fileURL, debounce: 0).library.threads.map(\.title),
                        ["recovered"])
     }
@@ -711,14 +711,14 @@ final class ThreadArchiveTests: XCTestCase {
         manager.deniedPaths.insert(backupURL.path)
         store.save(thread("three"))
         store.flush()
-        XCTAssertNil(store.saveFailure, "the primary write itself succeeded")
-        XCTAssertNotNil(store.backupFailure, "a refused backup rotation must be reported")
+        XCTAssertNil(store.storageFailures().save, "the primary write itself succeeded")
+        XCTAssertNotNil(store.storageFailures().backup, "a refused backup rotation must be reported")
         XCTAssertEqual(try Data(contentsOf: backupURL), backupBefore,
                        "the previous backup must survive a failed rotation")
 
         manager.deniedPaths.removeAll()
         store.retrySave()
-        XCTAssertNil(store.backupFailure)
+        XCTAssertNil(store.storageFailures().backup)
         let rotated = ThreadArchive(fileURL: backupURL, debounce: 0)
         XCTAssertEqual(rotated.library.threads.map(\.title), ["two", "one"],
                        "the retry restores the pre-write primary as the backup")
@@ -756,13 +756,13 @@ final class ThreadArchiveTests: XCTestCase {
         manager.deniedPaths.insert(backupURL.path)
         store.save(thread("three"))
         store.flush()
-        XCTAssertNotNil(store.backupFailure)
+        XCTAssertNotNil(store.storageFailures().backup)
         XCTAssertTrue(FileManager.default.fileExists(atPath: stagingURL.path))
 
         try FileManager.default.removeItem(at: stagingURL)
         manager.deniedPaths.removeAll()
         store.retrySave()
-        XCTAssertNil(store.backupFailure)
+        XCTAssertNil(store.storageFailures().backup)
         let rotated = ThreadArchive(fileURL: backupURL, debounce: 0)
         XCTAssertEqual(rotated.library.threads.map(\.title), ["three", "two", "one"],
                        "the fallback rotates the current primary")
@@ -781,10 +781,25 @@ final class ThreadArchiveTests: XCTestCase {
         store.save(thread("three"))
         store.flush()
 
-        XCTAssertNotNil(store.backupFailure)
+        XCTAssertNotNil(store.storageFailures().backup)
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         let mode = try XCTUnwrap(attributes[.posixPermissions] as? Int)
         XCTAssertEqual(mode & 0o777, 0o600, "the file that was written must be owner-only")
+    }
+
+    /// The recovery copy inherits owner-only mode from the first rotation, not
+    /// only after a later write's chmod catches up with it.
+    func testTheFirstBackupIsOwnerOnly() throws {
+        let store = ThreadArchive(fileURL: fileURL, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+        let attributes = try FileManager.default.attributesOfItem(
+            atPath: fileURL.appendingPathExtension("bak").path)
+        let mode = try XCTUnwrap(attributes[.posixPermissions] as? Int)
+        XCTAssertEqual(mode & 0o777, 0o600,
+                       "the backup must be owner-only from the first rotation")
     }
 
     /// A failure publishes once, and a successful retry publishes again — the
@@ -793,20 +808,18 @@ final class ThreadArchiveTests: XCTestCase {
         let manager = FlakyFileManager()
         let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
         let failed = expectation(description: "failure published")
-        failed.assertForOverFulfill = false
         store.onFailureChanged = { failed.fulfill() }
         store.save(thread("one"))
         store.flush()
         wait(for: [failed], timeout: 2)
-        XCTAssertNotNil(store.saveFailure)
+        XCTAssertNotNil(store.storageFailures().save)
 
         manager.createDirectoryFailures = 0
         let cleared = expectation(description: "clearing published")
-        cleared.assertForOverFulfill = false
         store.onFailureChanged = { cleared.fulfill() }
         store.retrySave()
         wait(for: [cleared], timeout: 2)
-        XCTAssertNil(store.saveFailure)
+        XCTAssertNil(store.storageFailures().save)
     }
 
     // MARK: Retention
