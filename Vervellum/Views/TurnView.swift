@@ -250,19 +250,26 @@ struct TurnView: View, Equatable {
 
 /// A blinking caret for the moment between the last search and the first token.
 struct StreamingCaret: View {
-    @State private var isBright = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        Group {
+            if reduceMotion {
+                caret
+            } else {
+                // Removing this subtree also stops an in-flight repeating animation.
+                caret.phaseAnimator([false, true]) { view, bright in
+                    view.opacity(bright ? 1 : 0.25)
+                } animation: { _ in .easeInOut(duration: 0.55) }
+            }
+        }
+        .accessibilityLabel("Writing the answer")
+    }
+
+    private var caret: some View {
         RoundedRectangle(cornerRadius: 1, style: .continuous)
             .fill(PanelTheme.Palette.accent)
             .frame(width: 7, height: 14)
-            .opacity(isBright ? 1 : 0.25)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
-                    isBright = true
-                }
-            }
-            .accessibilityLabel("Writing the answer")
     }
 }
 
