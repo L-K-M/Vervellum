@@ -234,6 +234,23 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertFalse(bare.isValid)
         XCTAssertNotNil(bare.registrationProblem)
 
+        // Ground truth for the named refusal families, independent of the
+        // mirror below: these catch a classification rule regressing, which a
+        // comparison against `registrationProblem` cannot.
+        let groundTruth: [(modifiers: UInt32, key: UInt32, expectedValid: Bool)] = [
+            (UInt32(cmdKey), KeyCode.c, false),              // ⌘C is a system editing chord
+            (UInt32(shiftKey), KeyCode.a, false),            // ⇧A is ordinary typing
+            (UInt32(optionKey), KeyCode.c, false),           // ⌥C types a character
+            (UInt32(controlKey | cmdKey), KeyCode.c, true),  // ⌃⌘C collides with nothing
+            (UInt32(0), KeyCode.f12, true),                  // bare F-key stays registerable
+        ]
+        for (modifier, key, expectedValid) in groundTruth {
+            let binding = HotkeyBinding(keyCode: key, modifiers: modifier,
+                                        keyLabel: "X", enabled: true)
+            XCTAssertEqual(binding.isValid, expectedValid,
+                           "classification changed for modifiers=\(modifier), key=\(key)")
+        }
+
         for enabled in [true, false] {
             for modifier in modifiers {
                 for key in keys {

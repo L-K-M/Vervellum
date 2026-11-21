@@ -52,9 +52,10 @@ struct HotkeyBinding: Codable, Equatable {
 
     /// Command (+ optional Shift) on a key every editor binds for editing.
     ///
-    /// ⌘C/V/X/A/Z and ⇧⌘Z (redo) are the chords a global registration would take
-    /// away from every text field on the Mac. Adding ⌥ or ⌃ makes a different
-    /// chord that no editor binds, so those stay allowed.
+    /// ⌘C/V/X/A/Z and their ⇧ variants (⇧⌘Z redo, ⇧⌘V paste-and-match-style) are
+    /// the chords a global registration would take away from every text field on
+    /// the Mac. Adding ⌥ or ⌃ makes a different chord that no editor binds, so
+    /// those stay allowed.
     private static let protectedEditingKeys: Set<UInt32> = [
         KeyCode.a, KeyCode.c, KeyCode.v, KeyCode.x, KeyCode.z,
     ]
