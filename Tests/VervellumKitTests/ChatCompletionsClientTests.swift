@@ -387,4 +387,30 @@ final class ChatCompletionsClientTests: XCTestCase {
         // the bytes travel inline rather than as an address the provider fetches.
         XCTAssertTrue(part.dataURL.hasPrefix("data:"))
     }
+
+    /// A 400 that is not about the picture — a wrong model name, a dead endpoint — must
+    /// not leave the provider marked as refusing images for the rest of the turn. The
+    /// rejection is recorded only once the retry without the picture has answered.
+    func testAFailedImageRetryDoesNotMarkTheProviderAsRefusingImages() async throws {
+        let transport = StubTransport { _ in .failure(ResearchError.badRequest) }
+        let client = ChatCompletionsClient(url: URL(string: "https://a.example/v1/chat/completions")!,
+                                           model: "m", apiKey: nil, sendsImages: true,
+                                           trace: ResearchTrace(sink: SilentLog()),
+                                           transport: transport)
+        let images = [ChatCompletionsClient.ImagePart(mediaType: "image/png", base64: "AAAA")]
+
+        do {
+            _ = try await client.completeJSON(system: "s", payload: ["question": "q"],
+                                              withoutImages: ["question": "q"],
+                                              label: "Plan", images: images)
+            XCTFail("the retry was scripted to fail")
+        } catch {
+            XCTAssertTrue(error is ResearchError)
+        }
+
+        XCTAssertFalse(client.withheldImages,
+                       "no stage answered without the picture, so nothing was withheld")
+        XCTAssertTrue(client.imagesWillBeSent,
+                      "a failure that was not about the image must not disable pictures")
+    }
 }

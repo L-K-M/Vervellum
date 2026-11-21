@@ -307,12 +307,20 @@ final class ChatCompletionsClient {
             return try await attempt(false)
         } catch let error as ResearchError
             where error == .badRequest && hadImages && sendsImages && imagesAccepted {
-            // Remembered for the rest of the turn: a provider that has said no once will
-            // say it again, and re-learning it in every stage would cost a request each.
+            trace.log("\(label): the provider rejected the images; retrying without them")
+            // The retry is the proof. Recording the rejection before it runs meant a
+            // second failure — a 400 caused by a wrong model name rather than the
+            // picture, a dead endpoint — still marked the provider as refusing images
+            // for the rest of the turn, and a later stage was not offered one it might
+            // have accepted. `withheldImages` is read only after a successful stage, so
+            // it describes a retry that actually answered.
+            let value = try await attempt(true)
+            // Remembered for the rest of the turn: a provider that has said no once
+            // will say it again, and re-learning it in every stage would cost a request
+            // each.
             imagesAccepted = false
             withheldImages = true
-            trace.log("\(label): the provider rejected the images; retrying without them")
-            return try await attempt(true)
+            return value
         }
     }
 
