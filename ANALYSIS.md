@@ -14,6 +14,15 @@ tones, R03); their implemented slices are annotated in place and are not repeate
 here. New findings C01–C07 are appended at the end. Concurrent branches and other
 agents' PRs were not inspected during this review.
 
+Codex pass 2026-11-21 (little-platypus worktree): reviewed against `origin/main` at
+`d4c9c1c`, which is the code `e90efc3` still carries. Four fixes from this pass are
+open in PRs #238 (delete a committed `.orig` test artifact), #243 (one openable-URL
+predicate for every click path, and userinfo rejected at click time as well as at
+harvest time), #249 (redact pasted text; the macOS slice of A63) and #252 (end the
+recall walk when the recalled draft is edited; the recall slice of A23). Their
+implemented slices are annotated in place. New findings V01-V05 are appended at the
+end. Concurrent branches and other agents' PRs were not inspected during this review.
+
 Codex pass 2026-11-21 (second): reviewed against `origin/main` at `9c3e3d7`. Three
 fixes are open in PRs #232 (declared page encodings, A81), #237 (assessment stage
 timing, A82) and #248 (fence marker/length matching and the info string, A29).
@@ -110,6 +119,12 @@ Bugs — important
 EvidenceExtractor can assign overlapping context to adjacent prose result links, making one result appear to support another.
 
 Suggested fix: Partition dense prose into non-overlapping result items; keep each snippet with its own URL.
+
+The partition is still closed at both ends. For link lines at 0 and 2, both results
+include line 1: the earlier item ends at `linkLines[position + 1] - 1` and the later
+one starts at `linkLines[position - 1] + 1`, which are the same line. Assign the line
+between two links to one of them (starting each item at its own link line is the
+simplest form) and pin it with the no-blank-line fixture.
 
 Accept: Results without blank lines, multiple links, distinct pages and permissive extraction must not fabricate source context.
 
@@ -239,6 +254,10 @@ Editing a recalled question must end recall mode; otherwise arrows can replace t
 
 Suggested fix: Make suggestion replacement reversible or explicitly confirm it. End recall after user edits and use undo-cooperative shouldChangeText/didChangeText updates.
 
+Open PR #252 carries the recall slice: the walk records the text it put on screen and
+a draft that no longer equals it ends the walk, so an edited recalled question is not
+replaced by the next arrow press. The suggestion-replacement and undo halves remain.
+
 Accept: Cover multiline drafts, edited recalled text, suggestions during runs, undo, keypad/modified Return and CJK composition. Verify hasMarkedText routing before consuming composition-confirming Return. No unintended send or draft/attachment loss.
 
 Where: Vervellum/Views/PanelRootView.swift:1108–1129,1370–1397; ComposerView.swift:133. Earlier effort: M.
@@ -302,6 +321,11 @@ for.
 Suggested fix: route paste through the same redaction and the same banner as the
 selection path, building on A07 (redact before truncation, before display); keep
 plain prose untouched.
+
+Open PR #249 carries the macOS slice: `ComposerView.route` sends a text paste through
+`SecretRedactor` under the existing preference, inserts the redacted text undoably and
+raises the same banner. The Linux Ctrl-V slice remains; it needs a GTK clipboard-text
+read, which the shim does not expose yet.
 
 Accept: a pasted key is replaced and the banner names the count; redaction is
 visible before Return, never applied silently on send; no false positives beyond
@@ -2416,6 +2440,86 @@ Performance — nice-to-have
 
 These are collected here so a future performance pass has one list; each is
 profiled before it is redesigned.
+
+### V01 · The composer is marked dirty ten times a second while an answer streams
+
+Performance — nice-to-have
+
+`ComposerView.updateNSView` ends with an unconditional `textView.needsDisplay = true`
+(`Vervellum/Views/ComposerView.swift`). The composer representable is rebuilt on every
+publish from `PanelRootView`, and the coalescer publishes at about 10 Hz while an answer
+streams, so the text view is told to redraw itself ten times a second even when its
+text, font and selection have not changed. The two assignments that can actually
+change its contents (`string` and `font`) already invalidate it.
+
+Suggested fix: delete the line, or guard it behind the same "did anything change"
+condition as the text and font writes. Profile a long answer before and after; the win
+is small but it is free, and the composer is on the hottest path in the panel.
+
+Accept: the composer still redraws on text, font, selection and placeholder changes;
+no visible difference.
+
+### V02 · `PLAN.md`'s known limits and the README dependency bullet contradict the code
+
+Documentation — nice-to-have
+
+`PLAN.md` §8 still says "**One provider each.**" and "**No page fetching.** Vervellum
+never retrieves a source's full text." Both are false: the app has multi-provider model
+chains, search fan-out across engines, and page reading is a default-on feature with
+three modes. `README.md` says "no third-party dependencies" in the same bullet that
+names the Updraft and Keycap packages; `AGENTS.md` says those two first-party packages
+are the only exception.
+
+Suggested fix: rewrite §8's stale bullets to match the code and qualify the README
+bullet. State what is implemented, never what is aspirational.
+
+Accept: a reader comparing `PLAN.md` §8 and `README.md` to the code finds no
+contradiction.
+
+### V03 · Attachment text capping re-measures the whole payload per cut
+
+Performance — nice-to-have
+
+`ResearchContext.cappingAttachmentText` calls `measure(capped)` — a full JSON
+serialization of the payload — on every loop iteration, and the loop runs once per
+character removed. A four-file payload at the 60 KB cap is a few hundred serializations.
+It is once per turn, not on a hot path, so this is a note rather than a redesign.
+
+Suggested fix: track the payload's measured size as entries are cut, or compute the cut
+from the entry sizes already known. Keep the visible `\n[…]` marker and the `changed`
+flag.
+
+Accept: the same payloads cap to the same bytes; the `attachmentTrimmed` notice still
+fires exactly when something was cut.
+
+### V04 · A per-turn evidence receipt
+
+Novel, delightful, or quirky — nice-to-have
+
+A short, copyable block per turn: level, searches run, pages read, evidence kept and
+dropped, the assessment model, and wall-clock. Every field is already on the turn, so
+it is a formatter rather than new state, and it makes a turn auditable after the fact —
+the same job `TranscriptFormatter` does for the answer, extended to the run.
+
+Suggested fix: add a `receipt` property beside `transcript` in `TranscriptFormatter`,
+and a Copy-Receipt affordance next to Copy. Keep it plain text; no new prompt surface.
+
+Accept: the receipt names only facts the turn already records; it does not imply a
+check that did not run.
+
+### V05 · Copy a finding's citations from its chip
+
+Novel, delightful, or quirky — nice-to-have
+
+The findings chip already names its sources. Copying `[3, 7]` (or the source titles)
+would let a reader paste the provenance into an email or a notes app without opening the
+panel's Copy, which carries the whole answer.
+
+Suggested fix: a small copy affordance on the chip, or a ⌘-click, writing the citation
+list to the pasteboard. Reuse the existing pasteboard helper; no new format.
+
+Accept: the copied text is exactly the cited numbers; no answer text is copied by
+accident.
 
 ## Codex pass 2026-11-21 (second)
 
