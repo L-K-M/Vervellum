@@ -419,10 +419,12 @@ final class ComposerTextView: NSTextView {
             parent.onAttach(outcome)
         case .insert(let text, let redactions):
             // `insertText`, not `super.paste`: the words that would have been pasted are
-            // not the words the reader is meant to see. `insertText` is undoable, which
-            // a redacted paste has to be — the reader can put the original back if the
-            // safety net fired on an ordinary sentence.
+            // not the words the reader is meant to see. `insertText` is undoable, so a
+            // redacted paste can be backed out — undo removes the insertion entirely; the
+            // original survives on the pasteboard, not here.
             insertText(text, replacementRange: selectedRange())
+            // A long redacted paste can leave the caret below the visible field.
+            scrollRangeToVisible(selectedRange())
             parent.onPastedTextRedacted(redactions)
         case .plain:
             super.paste(sender)
