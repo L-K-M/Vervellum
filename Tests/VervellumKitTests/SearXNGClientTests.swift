@@ -11,6 +11,26 @@ import XCTest
 /// schema it advertises to the planner.
 final class SearXNGClientTests: XCTestCase {
 
+    // MARK: Request budget
+
+    /// A search is one small JSON GET, so it carries the cheap budget on *both* clocks —
+    /// the request's idle timeout and the wall-clock deadline — not the transport's
+    /// ten-minute generation default. A stalled instance must not hold a research turn
+    /// for that long; a test that checked only `timeout` would pin half the promise.
+    func testASearchCarriesTheCheapBudgetOnBothClocks() async throws {
+        let transport = StubTransport { _ in .json(["results": []]) }
+        let client = SearXNGClient(searchURL: URL(string: "https://searx.example.org/search")!,
+                                   apiKey: nil, trace: ResearchTrace(sink: SilentLog()),
+                                   transport: transport)
+        _ = try await client.search(arguments: ["q": "vervellum"])
+
+        let call = try XCTUnwrap(transport.calls.first)
+        XCTAssertEqual(call.timeout, SearXNGClient.searchTimeout)
+        XCTAssertEqual(call.deadline, SearXNGClient.searchTimeout)
+        XCTAssertNotEqual(call.timeout, HTTPTransport.deadline,
+                          "the search must not inherit the generation-sized default")
+    }
+
     // MARK: Instance address
 
     /// Users paste the instance's home page, because that is what a SearXNG instance
