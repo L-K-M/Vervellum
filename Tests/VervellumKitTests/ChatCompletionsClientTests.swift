@@ -412,5 +412,17 @@ final class ChatCompletionsClientTests: XCTestCase {
                        "no stage answered without the picture, so nothing was withheld")
         XCTAssertTrue(client.imagesWillBeSent,
                       "a failure that was not about the image must not disable pictures")
+
+        // The first 400 is retried without the optional parameters, which keeps the
+        // picture; the second is the image retry. Exactly one request goes out without
+        // it, and that is the request whose failure must leave images enabled.
+        let calls = transport.calls
+        let imageCalls = calls.filter { call in
+            let messages = call.body?["messages"] as? [[String: Any]]
+            return (messages?.last?["content"] as? [[String: Any]] ?? [])
+                .contains { $0["type"] as? String == "image_url" }
+        }
+        XCTAssertEqual(imageCalls.count, 2, "the optional-parameter retry keeps the picture")
+        XCTAssertEqual(calls.count - imageCalls.count, 1, "exactly one retry without images")
     }
 }

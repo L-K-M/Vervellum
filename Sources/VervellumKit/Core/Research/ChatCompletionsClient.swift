@@ -307,7 +307,9 @@ final class ChatCompletionsClient {
             return try await attempt(false)
         } catch let error as ResearchError
             where error == .badRequest && hadImages && sendsImages && imagesAccepted {
-            trace.log("\(label): the provider rejected the images; retrying without them")
+            // Factual until the retry answers: the 400 may be about the optional
+            // parameters, the model name or the endpoint rather than the picture.
+            trace.log("\(label): the request with images returned 400; retrying without them")
             // The retry is the proof. Recording the rejection before it runs meant a
             // second failure — a 400 caused by a wrong model name rather than the
             // picture, a dead endpoint — still marked the provider as refusing images
