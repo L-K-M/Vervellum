@@ -21,6 +21,16 @@ final class EvidenceExtractorTests: XCTestCase {
         XCTAssertNil(evidence.entries.first?["published"])
     }
 
+    func testPublicationDateUsesTheFirstUsableAliasWithinTheByteLimit() {
+        let atLimit = String(repeating: "é", count: 64)
+        let results = [
+            ["url": "https://first.example", "date": atLimit],
+            ["url": "https://second.example", "date": atLimit + "x", "datePublished": "2026-11-21"],
+        ]
+        XCTAssertEqual(EvidenceExtractor.sources(from: results).map(\.publishedAt),
+                       [atLimit, "2026-11-21"])
+    }
+
     func testExtractsAndNumbersHits() {
         let payload: [String: Any] = ["results": [
             ["title": "First", "url": "https://a.example.com/1", "snippet": "One."],

@@ -31,9 +31,11 @@ enum EvidenceExtractor {
     /// substitute for reading it, and long ones crowd out real evidence in context.
     static let maxSnippetLength = 600
 
+    private static let maxPublicationDateBytes = 128
+
     private static let titleKeys = ["title", "name", "heading", "page_title"]
     private static let snippetKeys = ["snippet", "content", "summary", "description", "text", "abstract"]
-    private static let dateKeys = ["publish_date", "published_at", "publishedAt", "published", "date", "publishedDate"]
+    private static let dateKeys = ["publish_date", "published_at", "publishedAt", "published", "date", "publishedDate", "datePublished"]
     private static let linkKeys = ["url", "link", "href"]
     private static let ignoredLinkKeys: Set<String> = ["icon", "favicon", "site_icon", "siteicon", "logo"]
 
@@ -281,7 +283,7 @@ enum EvidenceExtractor {
             // Optional metadata shares the evidence budget with every later source.
             // A malformed date must never consume their space. Check bytes before
             // cleaning so a single enormous grapheme cannot bypass the limit.
-            guard let raw = firstString(dictionary, key), raw.utf8.count <= 128 else { return nil }
+            guard let raw = firstString(dictionary, key), raw.utf8.count <= maxPublicationDateBytes else { return nil }
             let label = HostileText.stripped(raw).split(whereSeparator: { $0.isWhitespace })
                 .joined(separator: " ")
             return label.isEmpty ? nil : label
