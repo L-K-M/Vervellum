@@ -243,6 +243,14 @@ struct TurnView: View, Equatable {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
+
+            // When the question was asked. In a reopened thread this is the one
+            // fact that says how stale the evidence might be — `.relative` keeps
+            // itself current, and the hover carries the absolute time.
+            Text(turn.askedAt, style: .relative)
+                .font(PanelTheme.Font.at(10, textScale))
+                .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                .help(turn.askedAt.formatted(date: .complete, time: .shortened))
         }
     }
 
