@@ -582,8 +582,7 @@ final class PageReadingTests: XCTestCase {
 
     /// A bare `utf-16` declaration with a BOM-less body takes the little-endian
     /// fallback, matching WHATWG's label table. This pins the branch the explicit
-    /// endianness tests never reach, and the Foundation behaviour it rests on
-    /// (`.utf16` answers nil without a BOM).
+    /// endianness tests never reach.
     func testDeclaredUTF16WithoutBOMFallsBackToLittleEndian() {
         let text = "<p>ok</p>"
         let data = text.data(using: .utf16LittleEndian)!

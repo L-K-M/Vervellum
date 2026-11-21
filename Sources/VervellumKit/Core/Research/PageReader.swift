@@ -506,7 +506,7 @@ final class DirectPageReader: PageReading {
     /// contract. Decoding the two explicit codecs directly makes the result the
     /// same on both platforms, and a BOM — which the explicit codecs would keep as
     /// U+FEFF — is consumed here.
-    private static func utf16(_ data: Data, defaultingTo endianness: UTF16Endianness) -> String {
+    private static func utf16(_ data: Data, defaultingTo endianness: UTF16Endianness) -> String? {
         let effective: UTF16Endianness
         let body: Data
         if data.count >= 2 {
@@ -526,7 +526,7 @@ final class DirectPageReader: PageReading {
             body = data
         }
         return String(data: body,
-                      encoding: effective == .little ? .utf16LittleEndian : .utf16BigEndian) ?? ""
+                      encoding: effective == .little ? .utf16LittleEndian : .utf16BigEndian)
     }
 
     /// Windows-1252, decoded here rather than through `String(data:encoding:)`.
@@ -550,7 +550,9 @@ final class DirectPageReader: PageReading {
         scalars.reserveCapacity(data.count)
         for byte in data {
             // The bytes undefined in Windows-1252 (0x81, 0x8D, 0x8F, 0x90, 0x9D)
-            // fall back to the code point itself, which is what Latin-1 did.
+            // fall back to the code point itself; WHATWG's decoder emits U+FFFD
+            // there, but keeping the C1 code point preserves the raw byte, which
+            // suits an evidence reader better.
             scalars.append(overrides[byte] ?? Unicode.Scalar(byte))
         }
         return String(scalars)
