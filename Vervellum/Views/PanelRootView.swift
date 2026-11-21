@@ -256,6 +256,7 @@ struct PanelRootView: View {
                     if engine.thread.isEmpty && notice == nil {
                         EmptyStateView(configurationProblems: configurationProblems,
                                        searches: preferences.researchLevel.searches,
+                                       submitOnReturn: preferences.submitOnReturn,
                                        summonShortcut: preferences.summonHotkey.displayString,
                                        onOpenSettings: onOpenSettings,
                                        onSeedComposer: { draft = $0 })
