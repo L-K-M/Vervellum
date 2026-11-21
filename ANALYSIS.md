@@ -34,7 +34,7 @@ open in PRs #238 (delete a committed `.orig` test artifact), #243 (one openable-
 predicate for every click path, and userinfo rejected at click time as well as at
 harvest time), #249 (redact pasted text; the macOS slice of A63) and #252 (end the
 recall walk when the recalled draft is edited; the recall slice of A23). Their
-implemented slices are annotated in place. New findings V01-V05 are appended at the
+implemented slices are annotated in place. New findings L01-L05 are appended at the
 end. Concurrent branches and other agents' PRs were not inspected during this review.
 
 Codex pass 2026-11-21 (second): reviewed against `origin/main` at `9c3e3d7`. Three
@@ -2463,7 +2463,7 @@ Performance — nice-to-have
 These are collected here so a future performance pass has one list; each is
 profiled before it is redesigned.
 
-### V01 · The composer is marked dirty ten times a second while an answer streams
+### L01 · The composer is marked dirty ten times a second while an answer streams
 
 Performance — nice-to-have
 
@@ -2481,7 +2481,7 @@ is small but it is free, and the composer is on the hottest path in the panel.
 Accept: the composer still redraws on text, font, selection and placeholder changes;
 no visible difference.
 
-### V02 · `PLAN.md`'s known limits and the README dependency bullet contradict the code
+### L02 · `PLAN.md`'s known limits and the README dependency bullet contradict the code
 
 Documentation — nice-to-have
 
@@ -2498,7 +2498,7 @@ bullet. State what is implemented, never what is aspirational.
 Accept: a reader comparing `PLAN.md` §8 and `README.md` to the code finds no
 contradiction.
 
-### V03 · Attachment text capping re-measures the whole payload per cut
+### L03 · Attachment text capping re-measures the whole payload per cut
 
 Performance — nice-to-have
 
@@ -2514,7 +2514,7 @@ flag.
 Accept: the same payloads cap to the same bytes; the `attachmentTrimmed` notice still
 fires exactly when something was cut.
 
-### V04 · A per-turn evidence receipt
+### L04 · A per-turn evidence receipt
 
 Novel, delightful, or quirky — nice-to-have
 
@@ -2529,7 +2529,7 @@ and a Copy-Receipt affordance next to Copy. Keep it plain text; no new prompt su
 Accept: the receipt names only facts the turn already records; it does not imply a
 check that did not run.
 
-### V05 · Copy a finding's citations from its chip
+### L05 · Copy a finding's citations from its chip
 
 Novel, delightful, or quirky — nice-to-have
 
