@@ -102,9 +102,12 @@ struct ShortcutsView: View {
     /// binding those rules refuse is never attempted, and the registration state
     /// says nothing about it — without this line the shortcut looks configured and
     /// silently never fires.
+    ///
+    /// `enabled` is stated as well as left to `registrationProblem`: a shortcut the
+    /// reader turned off is not attempting registration, so it earns no warning.
     @ViewBuilder
     private func usabilityWarning(_ binding: HotkeyBinding) -> some View {
-        if let problem = binding.registrationProblem {
+        if binding.enabled, let problem = binding.registrationProblem {
             Label(problem,
                   systemImage: "exclamationmark.triangle.fill")
                 .font(.system(size: 11))

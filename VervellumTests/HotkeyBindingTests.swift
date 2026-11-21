@@ -219,18 +219,31 @@ final class HotkeyBindingTests: XCTestCase {
     /// directions across the modifier families and the keys the policy names.
     func testRegistrationProblemAndValidityAlwaysAgree() {
         let modifiers: [UInt32] = [
-            UInt32(cmdKey), UInt32(cmdKey | shiftKey),
+            UInt32(0), UInt32(cmdKey), UInt32(cmdKey | shiftKey),
             UInt32(optionKey), UInt32(optionKey | shiftKey),
             UInt32(optionKey | cmdKey), UInt32(controlKey | cmdKey),
         ]
         let keys: [UInt32] = [KeyCode.a, KeyCode.c, KeyCode.v, KeyCode.x, KeyCode.z,
                               KeyCode.f12, KeyCode.leftArrow]
-        for modifier in modifiers {
-            for key in keys {
-                let binding = HotkeyBinding(keyCode: key, modifiers: modifier,
-                                            keyLabel: "X", enabled: true)
-                XCTAssertEqual(binding.isValid, binding.registrationProblem == nil,
-                               "validity and warning disagree for \(modifier)/\(key)")
+
+        // A bare key is the one refusal family the mirror alone cannot speak
+        // for: with no modifiers it is ordinary typing, so both properties
+        // must refuse it.
+        let bare = HotkeyBinding(keyCode: KeyCode.a, modifiers: 0,
+                                 keyLabel: "A", enabled: true)
+        XCTAssertFalse(bare.isValid)
+        XCTAssertNotNil(bare.registrationProblem)
+
+        for enabled in [true, false] {
+            for modifier in modifiers {
+                for key in keys {
+                    let binding = HotkeyBinding(keyCode: key, modifiers: modifier,
+                                                keyLabel: "X", enabled: enabled)
+                    XCTAssertEqual(binding.isValid,
+                                   enabled && binding.registrationProblem == nil,
+                                   "validity disagrees for enabled=\(enabled), "
+                                   + "modifiers=\(modifier), key=\(key)")
+                }
             }
         }
     }
