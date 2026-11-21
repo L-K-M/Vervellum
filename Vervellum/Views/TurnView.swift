@@ -250,14 +250,19 @@ struct TurnView: View, Equatable {
 
 /// A blinking caret for the moment between the last search and the first token.
 struct StreamingCaret: View {
+    // The last blinking element in the panel that ignored Reduce Motion. With it
+    // on, the caret holds a steady mid opacity — the answer growing is already
+    // the motion that says "writing".
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isBright = false
 
     var body: some View {
         RoundedRectangle(cornerRadius: 1, style: .continuous)
             .fill(PanelTheme.Palette.accent)
             .frame(width: 7, height: 14)
-            .opacity(isBright ? 1 : 0.25)
+            .opacity(reduceMotion ? 0.6 : (isBright ? 1 : 0.25))
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
                     isBright = true
                 }
