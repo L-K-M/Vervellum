@@ -2,6 +2,20 @@ import XCTest
 @testable import Vervellum
 
 final class HistoryMatcherTests: XCTestCase {
+    func testCancelledQueryStopsBeforeMatchingAnotherThread() async {
+        let worker = HistoryMatcher(needle: "answer")
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await worker.matches(in: ThreadLibrary(threads: [ResearchThread()]))
+        }
+        do {
+            _ = try await task.value
+            XCTFail("A superseded query should release its worker")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+    }
+
     func testSameQueryTracksEditedAndRemovedThreads() async throws {
         let search = HistoryMatcher(needle: "needle")
         var thread = ResearchThread()

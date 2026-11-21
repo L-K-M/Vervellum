@@ -25,6 +25,7 @@ struct HistoryView: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var matchingIDs: Set<UUID>?
     @State private var activeQuery = ""
+    @State private var refreshPending = false
 
     private var needle: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -42,26 +43,42 @@ struct HistoryView: View {
         .onChange(of: query) { search(store.library) }
         .onDisappear {
             searchTask?.cancel()
+            searchTask = nil
+            refreshPending = false
             matcher = nil
         }
     }
 
     private func search(_ library: ThreadLibrary) {
-        searchTask?.cancel()
         let text = needle
         if activeQuery != text {
+            searchTask?.cancel()
+            searchTask = nil
+            refreshPending = false
             activeQuery = text
             matchingIDs = nil
             // A different query cannot reuse previous matches.
             matcher = nil
         }
         guard !text.isEmpty else { return }
+        // Keep at most one refresh waiting. A continuously streaming thread can
+        // publish faster than a complete search, so restarting each pass could
+        // postpone the first results until the stream ends.
+        if searchTask != nil {
+            refreshPending = true
+            return
+        }
         let worker = matcher ?? HistoryMatcher(needle: text)
         matcher = worker
         searchTask = Task { @MainActor in
             guard let matches = try? await worker.matches(in: library),
                   !Task.isCancelled else { return }
-            matchingIDs = matches
+            if matchingIDs != matches { matchingIDs = matches }
+            searchTask = nil
+            if refreshPending {
+                refreshPending = false
+                search(store.library)
+            }
         }
     }
 
