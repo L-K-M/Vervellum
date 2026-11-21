@@ -12,7 +12,7 @@ struct EmptyStateView: View {
 
     let configurationProblems: [String]
     let searches: Bool
-    let submitOnReturn: Bool
+    var submitOnReturn: Bool = true
     let summonShortcut: String
     var onOpenSettings: () -> Void
     /// Loads the composer with the example — seeding, not submitting. The user
@@ -41,12 +41,15 @@ struct EmptyStateView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
-                // Mirror the real keymap: with "Return sends" off, Return makes a
-                // new line and ⌘Return asks. Teaching "Return · ask" to the users
-                // who toggled it off is the one hint that would be wrong.
-                hint(submitOnReturn ? "Return" : "⌘Return",
-                     submitOnReturn ? "ask · Shift-Return for a new line"
-                                    : "ask · Return for a new line")
+                // Mirror the real keymap — keep in step with the composer's
+                // doCommandBy and the panel's performKeyEquivalent: with
+                // "Return sends" off, Return makes a new line and ⌘Return asks.
+                // Teaching "Return · ask" to the users who toggled it off is
+                // the one hint that would be wrong. One pair of keys derives
+                // both strings so the two cannot drift apart.
+                let askKey = submitOnReturn ? "Return" : "⌘Return"
+                let newlineKey = submitOnReturn ? "Shift-Return" : "Return"
+                hint(askKey, "ask · \(newlineKey) for a new line")
                 hint("/", "commands — and the four research levels by name")
                 hint("Esc", "clear the draft, then close")
                 hint(summonShortcut, "summon or dismiss from anywhere")
