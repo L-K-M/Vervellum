@@ -511,10 +511,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .compactMap { $0.turns.last?.question }
         if running.count > 1 {
             busyMenuItem.title = "Researching \(running.count) threads"
-        } else if let question = questions.first {
+        } else if let question = questions.first,
+                  question.contains(where: { !$0.isWhitespace }) {
             // A question can be multi-line and arbitrarily long; the menu gets one
             // line of it.
-            let oneLine = question.replacingOccurrences(of: "\n", with: " ")
+            let oneLine = question.split(whereSeparator: \.isNewline).joined(separator: " ")
             busyMenuItem.title = "Researching: " + String(oneLine.prefix(57))
                 + (oneLine.count > 57 ? "…" : "")
         } else {
