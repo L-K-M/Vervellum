@@ -17,7 +17,7 @@ final class SearXNGClientTests: XCTestCase {
     /// the request's idle timeout and the wall-clock deadline — not the transport's
     /// ten-minute generation default. A stalled instance must not hold a research turn
     /// for that long; a test that checked only `timeout` would pin half the promise.
-    func testASearchCarriesTheCheapBudgetOnBothClocks() async throws {
+    func testSearchCarriesTheCheapBudgetOnBothClocks() async throws {
         let transport = StubTransport { _ in .json(["results": []]) }
         let client = SearXNGClient(searchURL: URL(string: "https://searx.example.org/search")!,
                                    apiKey: nil, trace: ResearchTrace(sink: SilentLog()),
