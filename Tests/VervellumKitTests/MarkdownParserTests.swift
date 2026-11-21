@@ -123,6 +123,26 @@ final class MarkdownParserTests: XCTestCase {
         XCTAssertEqual(blocks[0].kind, .code(language: "swift"))
     }
 
+    /// CommonMark §4.4: a backtick fence's info string may not contain a backtick, so
+    /// a line that begins with three backticks and an inline-code span is paragraph text.
+    func testABacktickInTheInfoStringIsNotAFence() {
+        let blocks = MarkdownParser.parse("``` `lang`\nplain")
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks[0].kind, .paragraph)
+        XCTAssertTrue(blocks[0].text.contains("plain"))
+        // A tilde fence has no such rule, so the same shape is still a code block.
+        let tilde = MarkdownParser.parse("~~~ `lang`\nplain\n~~~")
+        XCTAssertEqual(tilde.count, 1)
+        XCTAssertEqual(tilde[0].kind, .code(language: "`lang`"))
+    }
+
+    /// A closer may be longer than the opening run; it still closes.
+    func testACloserMayBeLongerThanTheOpener() {
+        let blocks = MarkdownParser.parse("````\nx\n`````")
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks[0].text, "x")
+    }
+
     func testParsesHorizontalRules() {
         XCTAssertEqual(MarkdownParser.parse("---").first?.kind, .rule)
         XCTAssertEqual(MarkdownParser.parse("***").first?.kind, .rule)

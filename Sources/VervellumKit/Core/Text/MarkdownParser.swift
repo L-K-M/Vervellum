@@ -210,7 +210,12 @@ enum MarkdownParser {
     private static func fenceOpener(_ line: String) -> (marker: Character, length: Int)? {
         guard let marker = line.first, marker == "`" || marker == "~" else { return nil }
         let length = line.prefix(while: { $0 == marker }).count
-        return length >= 3 ? (marker, length) : nil
+        guard length >= 3 else { return nil }
+        // CommonMark §4.4: the info string of a *backtick* fence may not contain a
+        // backtick, so "```a`b" is paragraph text, not a fence opener. Tilde fences
+        // have no such rule.
+        if marker == "`", line.dropFirst(length).contains("`") { return nil }
+        return (marker, length)
     }
 
     /// Whether `line` closes a fence opened with `fence`: the same marker, at least as
