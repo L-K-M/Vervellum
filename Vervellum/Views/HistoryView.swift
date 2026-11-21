@@ -21,6 +21,12 @@ struct HistoryView: View {
     var onClose: () -> Void
 
     @State private var query = ""
+    @State private var matcher: HistoryMatcher?
+    @State private var searchTask: Task<Void, Never>?
+    @State private var matchingIDs: Set<UUID>?
+    @State private var activeQuery = ""
+
+    private var needle: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +37,31 @@ struct HistoryView: View {
             } else {
                 list
             }
+        }
+        .onReceive(store.$library) { search($0) }
+        .onChange(of: query) { search(store.library) }
+        .onDisappear {
+            searchTask?.cancel()
+            matcher = nil
+        }
+    }
+
+    private func search(_ library: ThreadLibrary) {
+        searchTask?.cancel()
+        let text = needle
+        if activeQuery != text {
+            activeQuery = text
+            matchingIDs = nil
+            // A different query cannot reuse previous matches.
+            matcher = nil
+        }
+        guard !text.isEmpty else { return }
+        let worker = matcher ?? HistoryMatcher(needle: text)
+        matcher = worker
+        searchTask = Task { @MainActor in
+            guard let matches = try? await worker.matches(in: library),
+                  !Task.isCancelled else { return }
+            matchingIDs = matches
         }
     }
 
@@ -72,7 +103,13 @@ struct HistoryView: View {
     }
 
     private var list: some View {
-        let results = store.library.search(query)
+        // Resolve IDs against the live rows. A removed thread cannot be reopened
+        // from a worker snapshot, even during a background refresh.
+        let unfiltered = needle.isEmpty
+        let pending = !unfiltered && (matchingIDs == nil || activeQuery != needle)
+        let results = unfiltered ? store.library.threads : store.library.threads.filter {
+            !pending && matchingIDs?.contains($0.id) == true
+        }
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(results) { thread in
@@ -82,7 +119,7 @@ struct HistoryView: View {
                                onDelete: { onDelete(thread) })
                 }
                 if results.isEmpty {
-                    Text("Nothing matches “\(query)”.")
+                    Text(pending ? "Searching history…" : "Nothing matches “\(query)”.")
                         .font(PanelTheme.Font.caption(textScale))
                         .foregroundStyle(PanelTheme.Palette.tertiaryText)
                         .padding(PanelTheme.Space.large)
