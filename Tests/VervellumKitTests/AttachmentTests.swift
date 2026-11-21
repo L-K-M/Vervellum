@@ -299,6 +299,22 @@ final class AttachmentTests: XCTestCase {
         XCTAssertFalse(decoded.name.isEmpty, "something has to be shown in the panel")
     }
 
+    /// A negative count is a damaged document, not a file. It is clamped rather than
+    /// allowed to reach the chip as "-12 bytes"; the record itself is kept, because a
+    /// turn's history says the file was attached even when its size is unknowable.
+    func testANegativeByteCountIsClampedRatherThanShown() throws {
+        let id = UUID()
+        let json = """
+            {"id":"\(id.uuidString)","kind":"image","name":"shot.png",
+             "mediaType":"image/png","byteCount":-12}
+            """
+        let decoded = try JSONDecoder().decode(Attachment.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded.byteCount, 0)
+        XCTAssertEqual(decoded.sizeDescription, "0 bytes")
+        XCTAssertEqual(decoded.name, "shot.png")
+    }
+
     /// Sanitising a sanitised name changes nothing, which is what lets the decoder run
     /// every name through `displayName` without the one it wrote coming back different.
     ///

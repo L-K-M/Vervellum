@@ -146,7 +146,11 @@ struct Attachment: Codable, Equatable, Identifiable {
         name = Attachment.displayName(for: storedName ?? "attachment")
         mediaType = (try? container.decodeIfPresent(String.self, forKey: .mediaType))
             ?? "application/octet-stream"
-        byteCount = (try? container.decodeIfPresent(Int.self, forKey: .byteCount)) ?? 0
+        // A negative count is a damaged document, not a file. Clamped rather than
+        // shown: the record is what the transcript carries ("asked with this file"),
+        // and a size of "-12 bytes" is not a size. Zero says the size is unknown
+        // without inventing one, and keeps the record the turn's history names.
+        byteCount = max(0, (try? container.decodeIfPresent(Int.self, forKey: .byteCount)) ?? 0)
     }
 
     // MARK: Limits
