@@ -2543,6 +2543,11 @@ logs as well.
 Accept: a fixture clock produces deterministic stage durations; live behaviour is
 unchanged.
 
+Addressed in open PR #237: `ResearchTrace` now uses `ProcessInfo.processInfo.systemUptime`
+rather than `Date()`, so a mid-turn wall-clock adjustment cannot produce a negative or
+inflated duration, and the unused `now:` injection is gone. Restore this entry if that
+PR closes unmerged.
+
 Where: `Sources/VervellumKit/Core/Research/ResearchTrace.swift:33–45`. Effort: under
 one hour.
 
