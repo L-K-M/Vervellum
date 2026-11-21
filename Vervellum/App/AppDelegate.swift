@@ -56,6 +56,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var stopMenuItem: NSMenuItem?
     private var runningObserver: AnyCancellable?
     private var previewObserver: NSObjectProtocol?
+    /// The once-a-second clock behind the status item's elapsed title while a
+    /// run is in flight. A Timer rather than anything smarter: one write a
+    /// second to one button is as cheap as this information gets.
+    private var busyTimer: Timer?
 
     // MARK: Lifecycle
 
@@ -413,7 +417,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     accessibilityDescription: isRunning ? "Vervellum — researching" : "Vervellum")
                 self.statusItem?.button?.image?.isTemplate = true
                 self.stopMenuItem?.isEnabled = isRunning
+                if isRunning {
+                    self.startBusyTimer()
+                } else {
+                    self.stopBusyTimer()
+                }
             }
+    }
+
+    /// "0:42" beside the hourglass: how long the oldest in-flight question has
+    /// been running, so a slow run reads as "still working" rather than "stuck".
+    private func startBusyTimer() {
+        busyTimer?.invalidate()
+        busyTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) {
+            [weak self] _ in self?.updateBusyTitle()
+        }
+        updateBusyTitle()
+    }
+
+    private func stopBusyTimer() {
+        busyTimer?.invalidate()
+        busyTimer = nil
+        statusItem?.button?.title = ""
+    }
+
+    private func updateBusyTitle() {
+        let started = engine.runningThreadIDs
+            .compactMap { id in store.library.threads.first(where: { $0.id == id }) }
+            .compactMap { $0.turns.last?.askedAt }
+            .min()
+        // The library may not know the thread yet on the first tick — the icon
+        // alone still says something is working.
+        guard let started else { statusItem?.button?.title = ""; return }
+        let elapsed = max(0, Int(Date().timeIntervalSince(started)))
+        statusItem?.button?.title = String(format: "%d:%02d", elapsed / 60, elapsed % 60)
     }
 
     private func makeMenu() -> NSMenu {
