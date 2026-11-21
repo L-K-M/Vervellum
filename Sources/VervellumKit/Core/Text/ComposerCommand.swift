@@ -86,16 +86,30 @@ enum ComposerCommand: Equatable {
         "settings", "prefs", "preferences", "copy", "help", "?",
     ]
 
+    /// The one whitespace definition every command-text scan in this type uses.
+    ///
+    /// `parse` used `Character.isWhitespace` for its interior split while `commandWord`
+    /// used `CharacterSet.whitespacesAndNewlines` for its trim and interior test, and the
+    /// two disagree on characters a paste can bring in — U+200B is in the set but is not
+    /// `isWhitespace`. A command word containing one then parsed as one thing and
+    /// completed as nothing, so Return could send a half-typed command to the model as a
+    /// question. One predicate, asked of a `Character` scalar by scalar, so the two paths
+    /// cannot drift again.
+    private static let whitespace = CharacterSet.whitespacesAndNewlines
+    private static func isWhitespace(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy { whitespace.contains($0) }
+    }
+
     /// Parses composer text. Returns nil for input that is only whitespace.
     static func parse(_ input: String) -> ComposerCommand? {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = input.trimmingCharacters(in: Self.whitespace)
         guard !trimmed.isEmpty else { return nil }
         guard trimmed.hasPrefix("/") else { return .ask(trimmed, level: nil) }
 
         let body = trimmed.dropFirst()
-        let split = body.firstIndex(where: { $0.isWhitespace })
+        let split = body.firstIndex(where: Self.isWhitespace)
         let word = String(split.map { body[..<$0] } ?? body).lowercased()
-        let rest = split.map { String(body[$0...]).trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+        let rest = split.map { String(body[$0...]).trimmingCharacters(in: Self.whitespace) } ?? ""
 
         // A level word is argument-wanting: the bare word names a level with no question
         // yet, so the composer keeps the text rather than sending "/deep-rounds" to a
@@ -162,8 +176,10 @@ enum ComposerCommand: Equatable {
     /// character set was named twice a few lines apart — which is the shape of the bug
     /// this predicate was extracted to fix in the first place, at one remove.
     private static func commandWord(of input: String) -> String? {
-        // One set for the edges and the interior alike, so the two cannot disagree about
-        // a character. They did once: trimming `CharacterSet.whitespaces` while testing
+        // The edges and the interior scan ask the one shared set and predicate above —
+        // `parse` splits on `isWhitespace(_:)`, which is defined over that set, so a
+        // character the two ever disagreed about would be a command to one and prose to
+        // the other. They did once: trimming `CharacterSet.whitespaces` while testing
         // `Character.isWhitespace` left `/h\n` failing the interior test where `/h `
         // passed it, so a half-typed command plus Shift-Return closed the list, escaped
         // the withhold, and went to the model as the question "/h". Naming the set twice
@@ -171,10 +187,9 @@ enum ComposerCommand: Equatable {
         // whitespace, agreeing today because Foundation's `Z*` and Unicode's `White_Space`
         // happen to line up on everything a keyboard produces. Asking one set removes the
         // question rather than answering it again for the next character somebody pastes.
-        let whitespace = CharacterSet.whitespacesAndNewlines
         let trimmed = input.trimmingCharacters(in: whitespace)
         guard trimmed.hasPrefix("/"),
-              !trimmed.dropFirst().unicodeScalars.contains(where: { whitespace.contains($0) })
+              !trimmed.dropFirst().contains(where: Self.isWhitespace)
         else { return nil }
         return String(trimmed.dropFirst()).lowercased()
     }

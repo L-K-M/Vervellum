@@ -177,6 +177,28 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertNil(ComposerCommand.completions(for: "/zzz"))
     }
 
+    /// `parse` and the completion-list predicate must agree on what whitespace is.
+    /// They did not: `parse` split on `Character.isWhitespace` while `commandWord`
+    /// used `CharacterSet.whitespacesAndNewlines`, and U+200B is in the set but is not
+    /// `isWhitespace` — so a command word carrying one parsed one way and completed as
+    /// nothing, and Return could send a half-typed command to the model as a question.
+    func testParseAndCommandWordShareOneWhitespaceDefinition() {
+        let zwsp = "\u{200B}"
+        // Interior: the character is a separator for both paths now — `parse` splits the
+        // word there, and the bare-word test rejects the input — so a command carrying
+        // one cannot parse as a command while completing as nothing (or vice versa).
+        XCTAssertEqual(ComposerCommand.parse("/model\(zwsp)gpt-4o"), .selectModel("gpt-4o"))
+        XCTAssertNil(ComposerCommand.completions(for: "/h\(zwsp)x"))
+        XCTAssertFalse(ComposerCommand.isBareCommandWord("/h\(zwsp)x"))
+        // Edge: it trims exactly like a space, so the completion list is the same.
+        XCTAssertEqual(ComposerCommand.completions(for: "/h\(zwsp)")?.map(\.name),
+                       ["history", "help"])
+        XCTAssertTrue(ComposerCommand.isBareCommandWord("/h\(zwsp)"))
+        // An ordinary space behaves the same both ways.
+        XCTAssertEqual(ComposerCommand.parse("/model gpt-4o"), .selectModel("gpt-4o"))
+        XCTAssertEqual(ComposerCommand.completions(for: "/h")?.map(\.name), ["history", "help"])
+    }
+
     func testHelpTextListsEveryCommand() {
         for command in ComposerCommand.catalogue {
             XCTAssertTrue(ComposerCommand.helpText.contains("/\(command.name)"),
