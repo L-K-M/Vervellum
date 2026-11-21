@@ -23,6 +23,11 @@ final class ThreadArchive {
     /// Invoked after any change to `library`, so a platform can republish it.
     var onChange: (() -> Void)?
 
+    /// Invoked when `saveFailure` or `backupFailure` changes, so a front end that
+    /// shows them can republish. Hops to the main queue; `writeNow` runs on the
+    /// archive's private queue.
+    var onFailureChanged: (() -> Void)?
+
     private(set) var library: ThreadLibrary
     // Late runner snapshots retain their IDs. Erasure must outlive those callbacks.
     private var forgottenThreadIDs: Set<UUID> = []
@@ -77,6 +82,18 @@ final class ThreadArchive {
     /// rather than shown a toggle that says off.
     private(set) var eraseFailure: String?
 
+    /// Why the last write could not be completed, in words fit for the interface;
+    /// nil after a successful write. A failed write keeps its snapshot pending, so
+    /// `retrySave()` is a real retry rather than a no-op.
+    private(set) var saveFailure: String?
+
+    /// Why the backup copy could not be replaced, or the file could not be made
+    /// owner-readable, in words fit for the interface; nil after a fully protected
+    /// write. Reported separately from `saveFailure`: the threads themselves may
+    /// have been written, and the missing half is the recovery copy or the privacy
+    /// promise.
+    private(set) var backupFailure: String?
+
     /// When false, nothing is written and nothing is remembered.
     var isHistoryEnabled: Bool {
         didSet {
@@ -107,6 +124,10 @@ final class ThreadArchive {
     // Queue-confined snapshots let continuous streams checkpoint without races.
     private var pendingSave: DispatchWorkItem?
     private var pendingSnapshot: ThreadLibrary?
+    /// A backup staging copy left behind when a rotation failed, holding the
+    /// primary as it was before the write. Queue-confined with the other write
+    /// state; `finishPendingBackupRotation` completes it on a retry.
+    private var pendingBackupStaging: URL?
     /// Whether the primary file is the "previous good copy" the `.bak` rotation
     /// promises: it decoded at launch, or this process has since written it. Set once
     /// in `init` and afterwards only on `queue`, where every write runs.
@@ -316,6 +337,62 @@ final class ThreadArchive {
         }
     }
 
+    /// Re-attempts the erase that recorded `eraseFailure`.
+    ///
+    /// The Settings warning offers this because a refusal that has since been fixed
+    /// — a permission grant, an unlocked file — should not stay a permanent write
+    /// block. A success clears the failure beside the file.
+    func retryErase() {
+        guard eraseFailure != nil else { return }
+        recordingFailure { try eraseEverything() }
+        DispatchQueue.main.async { self.onFailureChanged?() }
+    }
+
+    /// Re-attempts a failed write or backup rotation.
+    ///
+    /// A failed write keeps its snapshot pending, so this rewrites the exact
+    /// document that failed. A backup-only failure re-runs the rotation against
+    /// the current primary, because the next ordinary write may be a long way off
+    /// and the recovery copy is worth having now. A staging copy left by the
+    /// failed rotation is finished first: it holds the pre-write primary, which is
+    /// the recovery copy the backup exists to be.
+    func retrySave() {
+        queue.sync {
+            if pendingSnapshot != nil {
+                pendingSave?.cancel()
+                pendingSave = nil
+                writePending()
+            } else if backupFailure != nil {
+                let directory = fileURL.deletingLastPathComponent()
+                let succeeded = finishPendingBackupRotation() || rotateBackup()
+                let backup = succeeded ? nil
+                    : Self.backupFailureMessage(in: directory, file: fileURL.lastPathComponent)
+                recordFailures(save: nil, backup: backup)
+            }
+        }
+    }
+
+    /// Publishes a pair of failure strings. Both nil clears a previous warning, so
+    /// a successful retry cannot leave a stale one beside the file.
+    private func recordFailures(save: String?, backup: String?) {
+        // Every successful write passes through here; a main-queue hop on each one
+        // would put a block on the queue ten times a second during a stream.
+        guard saveFailure != save || backupFailure != backup else { return }
+        saveFailure = save
+        backupFailure = backup
+        DispatchQueue.main.async { self.onFailureChanged?() }
+    }
+
+    private static func saveFailureMessage(in directory: URL, file: String) -> String {
+        "Could not save \(file) in \(directory.path). The file may be locked or the "
+        + "folder read-only; nothing was written. Earlier threads are unchanged."
+    }
+
+    private static func backupFailureMessage(in directory: URL, file: String) -> String {
+        "Could not keep a backup copy of \(file) in \(directory.path). The threads "
+        + "file itself was saved, but the previous copy was not replaced."
+    }
+
     // MARK: Persistence
 
     private var backupURL: URL { fileURL.appendingPathExtension("bak") }
@@ -345,7 +422,8 @@ final class ThreadArchive {
     private func writePending() {
         pendingSave = nil
         guard let snapshot = pendingSnapshot else { return }
-        pendingSnapshot = nil
+        // `pendingSnapshot` stays until `writeNow` succeeds, so a failed write can
+        // be retried with the same document rather than being silently dropped.
         writeNow(snapshot)
     }
 
@@ -353,6 +431,7 @@ final class ThreadArchive {
         // Belt and braces around `scheduleSave`'s gate: `flush()` reaches `writePending`
         // directly, so the same refusal belongs at the one place every write passes.
         guard !isReadOnly, libraryIsTrustworthy else { return }
+        let directory = fileURL.deletingLastPathComponent()
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -360,7 +439,6 @@ final class ThreadArchive {
             let data = try encoder.encode(snapshot)
 
             // Fence off Foundation's atomic temporary files before any bytes are written.
-            let directory = fileURL.deletingLastPathComponent()
             let privateDirectory: [FileAttributeKey: Any] = [.posixPermissions: 0o700]
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true,
                                             attributes: privateDirectory)
@@ -369,7 +447,11 @@ final class ThreadArchive {
             // dismissal and at termination, and without this each one rotates the
             // previous file into `.bak` — after two flushes the backup is a byte-perfect
             // copy of the live file and has stopped being a recovery copy at all.
-            if currentContents() == data { return }
+            if currentContents() == data {
+                pendingSnapshot = nil
+                recordFailures(save: nil, backup: nil)
+                return
+            }
 
             // Rotate the previous good file, so a failure during the write still leaves
             // one recoverable copy — only now, when the contents really differ, and only
@@ -377,17 +459,91 @@ final class ThreadArchive {
             // `.bak`, the primary is the corrupt one; copying it over the backup before
             // the new write is known to have succeeded would, if that write then failed
             // for the same reason (a full disk, say), leave nothing readable at all.
+            var backupFailure: String?
             if primaryIsTrustworthy, fileManager.fileExists(atPath: fileURL.path) {
-                try? fileManager.removeItem(at: backupURL)
-                try? fileManager.copyItem(at: fileURL, to: backupURL)
+                if !rotateBackup() {
+                    backupFailure = Self.backupFailureMessage(in: directory,
+                                                             file: fileURL.lastPathComponent)
+                }
             }
-            try data.write(to: fileURL, options: [.atomic])
-            primaryIsTrustworthy = true
+            do {
+                try data.write(to: fileURL, options: [.atomic])
+                primaryIsTrustworthy = true
+                // Consumed only now that the bytes are on disk. A failure leaves the
+                // snapshot pending so `retrySave()` can rewrite the same document.
+                pendingSnapshot = nil
+            } catch {
+                recordFailures(save: Self.saveFailureMessage(in: directory,
+                                                             file: fileURL.lastPathComponent),
+                               backup: backupFailure)
+                FileHandle.standardError.write(Data("vervellum warning: could not save threads\n".utf8))
+                return
+            }
             // Research questions are personal. Keep the file owner-only rather than
-            // inheriting the umask.
-            try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+            // inheriting the umask. A failure here does not undo the write, but it
+            // does leave the file readable by others, which is worth saying.
+            if backupFailure == nil {
+                do {
+                    try fileManager.setAttributes([.posixPermissions: 0o600],
+                                                  ofItemAtPath: fileURL.path)
+                } catch {
+                    backupFailure = "Could not make \(fileURL.lastPathComponent) "
+                        + "owner-readable only in \(directory.path). The file was saved, "
+                        + "but it may be readable by others."
+                }
+            }
+            recordFailures(save: nil, backup: backupFailure)
         } catch {
+            recordFailures(save: Self.saveFailureMessage(in: directory,
+                                                         file: fileURL.lastPathComponent),
+                           backup: backupFailure)
             FileHandle.standardError.write(Data("vervellum warning: could not save threads\n".utf8))
+        }
+    }
+
+    /// Copies the current primary over the backup, replacing it only once the new
+    /// copy exists.
+    ///
+    /// The old order — remove `.bak`, then copy the primary into its place — threw
+    /// away the only recovery copy whenever the copy failed: a full disk, a locked
+    /// file, a permission change. Copying to a staging name first means the previous
+    /// backup survives until the replacement is actually there.
+    @discardableResult
+    private func rotateBackup() -> Bool {
+        guard primaryIsTrustworthy, fileManager.fileExists(atPath: fileURL.path) else {
+            return true
+        }
+        let staging = backupURL.appendingPathExtension("tmp")
+        do {
+            try? fileManager.removeItem(at: staging)
+            try fileManager.copyItem(at: fileURL, to: staging)
+            try? fileManager.removeItem(at: backupURL)
+            try fileManager.moveItem(at: staging, to: backupURL)
+            pendingBackupStaging = nil
+            return true
+        } catch {
+            // Keep the staging copy: it is the pre-write primary, and finishing the
+            // rotation later is what turns a failed backup into a recovery copy.
+            pendingBackupStaging = fileManager.fileExists(atPath: staging.path) ? staging : nil
+            return false
+        }
+    }
+
+    /// Completes a rotation whose staging copy survived, if there is one.
+    @discardableResult
+    private func finishPendingBackupRotation() -> Bool {
+        guard let staging = pendingBackupStaging,
+              fileManager.fileExists(atPath: staging.path) else {
+            pendingBackupStaging = nil
+            return false
+        }
+        do {
+            try? fileManager.removeItem(at: backupURL)
+            try fileManager.moveItem(at: staging, to: backupURL)
+            pendingBackupStaging = nil
+            return true
+        } catch {
+            return false
         }
     }
 

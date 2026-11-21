@@ -627,6 +627,35 @@ final class ThreadArchiveTests: XCTestCase {
         }
     }
 
+    /// A file manager that refuses one named removal, standing in for a backup the
+    /// user has locked while the primary is still writable.
+    private final class SelectiveRemoveFileManager: FileManager {
+        var deniedPaths: Set<String> = []
+
+        override func removeItem(at URL: URL) throws {
+            guard deniedPaths.contains(URL.path) else { return try super.removeItem(at: URL) }
+            throw CocoaError(.fileWriteNoPermission)
+        }
+    }
+
+    /// Fails directory creation a fixed number of times, standing in for a folder
+    /// that is momentarily unwritable.
+    private final class FlakyFileManager: FileManager {
+        var createDirectoryFailures = 1
+
+        override func createDirectory(at URL: URL,
+                                      withIntermediateDirectories: Bool,
+                                      attributes: [FileAttributeKey: Any]?) throws {
+            if createDirectoryFailures > 0 {
+                createDirectoryFailures -= 1
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            try super.createDirectory(at: URL,
+                                      withIntermediateDirectories: withIntermediateDirectories,
+                                      attributes: attributes)
+        }
+    }
+
     /// "History off means the bytes are gone" is a promise; when the file system
     /// breaks it, the archive has to say so rather than let the toggle claim success.
     func testAFailedEraseIsReportedNotSwallowed() {
@@ -646,6 +675,70 @@ final class ThreadArchiveTests: XCTestCase {
         // The toggle cannot prove deletion succeeded; keep the warning and write block.
         store.isHistoryEnabled = true
         XCTAssertNotNil(store.eraseFailure)
+    }
+
+    /// A write that fails keeps its snapshot, names the problem in the interface's
+    /// terms, and is rewritten by the retry rather than silently dropped.
+    func testAFailedWriteIsReportedAndRetried() throws {
+        let manager = FlakyFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("recovered"))
+        store.flush()
+        XCTAssertNotNil(store.saveFailure)
+        XCTAssertNil(store.backupFailure)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+
+        manager.createDirectoryFailures = 0
+        store.retrySave()
+        XCTAssertNil(store.saveFailure)
+        XCTAssertEqual(ThreadArchive(fileURL: fileURL, debounce: 0).library.threads.map(\.title),
+                       ["recovered"])
+    }
+
+    /// A backup rotation that cannot replace the old copy must leave the old copy
+    /// alone and say so; the retry then restores the pre-write primary as the
+    /// backup, which is what a recovery copy is for.
+    func testABackupFailureKeepsThePreviousBackupAndRetries() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+        let backupURL = fileURL.appendingPathExtension("bak")
+        let backupBefore = try Data(contentsOf: backupURL)
+
+        manager.deniedPaths.insert(backupURL.path)
+        store.save(thread("three"))
+        store.flush()
+        XCTAssertNil(store.saveFailure, "the primary write itself succeeded")
+        XCTAssertNotNil(store.backupFailure, "a refused backup rotation must be reported")
+        XCTAssertEqual(try Data(contentsOf: backupURL), backupBefore,
+                       "the previous backup must survive a failed rotation")
+
+        manager.deniedPaths.removeAll()
+        store.retrySave()
+        XCTAssertNil(store.backupFailure)
+        let rotated = ThreadArchive(fileURL: backupURL, debounce: 0)
+        XCTAssertEqual(rotated.library.threads.map(\.title), ["two", "one"],
+                       "the retry restores the pre-write primary as the backup")
+    }
+
+    /// The erase warning's retry is the difference between a refusal the reader
+    /// can act on and one they can only report.
+    func testRetryEraseClearsTheFailure() throws {
+        let manager = StubbornFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("stuck"))
+        store.flush()
+        store.deleteAll()
+        XCTAssertNotNil(store.eraseFailure)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+
+        manager.removal = .allowed
+        store.retryErase()
+        XCTAssertNil(store.eraseFailure)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
     }
 
     // MARK: Retention
