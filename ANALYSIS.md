@@ -26,7 +26,7 @@ Codex pass 2026-11-21: reviewed against `origin/main` at `e90efc3`. Four small
 fixes from this pass are open in PRs #233 (range citations, A62), #234
 (image-retry state, S33), #236 (negative attachment size, A80) and #240 (notice
 tones, R03); their implemented slices are annotated in place and are not repeated
-here. New findings C01–C07 are appended at the end. Concurrent branches and other
+here. New findings C01–C07 appear below, with C05 folded into A22. Concurrent branches and other
 agents' PRs were not inspected during this review.
 
 Codex pass 2026-11-21 (little-platypus worktree): reviewed against `origin/main` at
@@ -72,6 +72,10 @@ and the native panel. The implementation PRs cover
 If one closes unmerged, restore its acceptance criteria here. A18a is covered by
 staged credential edits and cleanup-failure reporting. Keycap now owns Escape in
 the recorder, which retires A75c.
+
+The new checks used main at `d4c9c1c`, the repository screenshot, the macOS views and the shared runner, store and tests. A rendered 360-point fixture at 140% text confirmed that 24 citation chips lost their numbers and displaced the heading. The wrapping patch displayed every number across five lines.
+
+The following slices have implementation PRs. If a PR closes without landing, restore its task from the linked patch. [History search evaluation (#201)](https://github.com/L-K-M/Vervellum/pull/201), [composer shortcut hints (#202)](https://github.com/L-K-M/Vervellum/pull/202), [source publication metadata limits (#206)](https://github.com/L-K-M/Vervellum/pull/206), [model discovery credential ownership (#210)](https://github.com/L-K-M/Vervellum/pull/210), [wrapping finding citations (#220)](https://github.com/L-K-M/Vervellum/pull/220) and [stable source details (#224)](https://github.com/L-K-M/Vervellum/pull/224).
 
 The November 4 review was based on `1924f01` and covered changes through #191.
 It verified Sol3 heads independently, excluded uninspected parallel work and
@@ -124,6 +128,10 @@ as successful. Publish stable intermediate evidence and show a compact
 Plan → Search → Answer → Assess timeline.
 
 Historical progress options: 8.3 · 9/7/9 · M; live query counts 8.0 · 8/8/8 · S; stage timeline 5.7 · 5/5/7 · S.
+
+Earlier effort: M.
+
+Exercise both the initial answer payload and the post-assessment regather payload. Track each planned query through all attempted engines. A successful empty response and a query that failed on every engine need distinct outcomes. Cover a query that succeeds on one engine and fails on another before choosing the persisted representation.
 
 Earlier effort: M.
 
@@ -260,6 +268,8 @@ never live providers.
 Cheap-call location: Sources/VervellumKit/Core/Research/SearXNGClient.swift:123–128. Cheap-budget effort: 2 hours (S31).
 
 Earlier effort: M.
+
+C05 adds the buffered JSON path to this fixture. In `HTTPTransport.swift`, `fetch` races the open-and-collect pair against a timer, while `sendJSON` awaits the head before starting its body clock. MCP and cheap JSON use that path. Cover a delayed head within a longer idle allowance (120 seconds in the original example), a slow body and cancellation. Preserve the existing credential-free fetch behavior.
 
 ### A23 · Preserve edited drafts during recall and suggestions
 
@@ -531,31 +541,13 @@ no unintended send, cancellation or unrelated editing-key interception. Quit is 
 
 Earlier effort: M.
 
-### A25 · Evidence card stability and grouped sources
+### A25 · Expose each member of a grouped citation
 
-Visual issues and layout problems — nice-to-have
+A grouped citation such as `[2, 5]` exposes only the first source from the answer. Give each number an individually accessible action that resolves through the turn's own source list. Retain the summary/page-read caveat, title, date and domain. Show the external-open affordance on keyboard focus. Verify each source with keyboard and VoiceOver, check invalid numbers and ensure a single action opens only the chosen page.
 
-The `SourcePreview` popover with its permanent summary/page-read caveat and
-domain/date rows exists. Remaining: revealing a summary still changes row height,
-moving later sources under the pointer and hiding the summary from keyboard users
-(S19; explicit disclosure or a stable-size inspector, with keyboard activation);
-a grouped citation `[2, 5]` opens or exposes only the first source; expose every
-grouped source (one chip per number is the smaller change, B86); opening several
-tabs must never be an implicit group action.
+The stable source-list details work is tracked in the November 21 implementation. Test both entry points at 140% with a long snippet and the panel against either screen edge. After dismissing Details, keyboard focus should return to its button. Earlier group-chip estimate B86, source-row estimate S19 (half a day), historical score 7.7 · 7/7/9 · S.
 
-Suggested fix: fixed-height rows with explicit disclosure; keyboard-activatable
-preview; per-number chips that each resolve to their own source. Show the browser
-glyph on keyboard focus, not only hover. Put the snippet/caveat in the accessibility
-value and a permanent summary/page-read tag beside the number.
-
-Accept: keyboard and screen-reader inspection of every source's domain, date,
-snippet and "Search summary; not the full page" caveat; hover never changes
-transcript height; group citations expose all members; the app-owned numbered-citation
-rule is preserved.
-
-Where: Vervellum/Views/SourcesView.swift:181–197. Effort: half a day (S19). Historical score: 7.7 · 7/7/9 · S.
-
-Earlier effort: M.
+D09 proposed an inline first-click preview and a second click to open the page (half-day estimate). Compare the explicit Details and Open controls in #224 with that alternative on a narrow panel before changing primary-click behavior. Verify both actions from the keyboard alongside D01.
 
 ### A26 · Verify the remaining narrow-panel layouts
 
@@ -565,6 +557,8 @@ displays at minimum width and 140% type, including long model, domain and date
 strings, RTL and CJK text. Capture the failing layout before changing it. Every
 essential label and action should stay readable and reachable. Historical B87/S20
 estimate for evidence wrapping was half a day.
+
+A second implementation and a rendered 24-source fixture are recorded in the November 21 review above. Check separate VoiceOver actions and that the complete final line scrolls into view.
 
 ### A27 · Measured contrast and live accessibility observation
 
@@ -599,6 +593,8 @@ foreground and background colors across the actual panel presets.
 Earlier palette notes: mixed about 2.1:1 and supported about 2.9:1 on light grounds; Linux used #c4630f, #217a4a and #9a6a10 as candidate light-safe hues. Also inspect dark card contrast, a light-mode scrim and an opaque reduced-transparency tint. These are historical estimates/design hypotheses, not fresh measurements.
 
 Earlier effort: M.
+
+For a repeatable contrast fixture, render the same completed turn over neutral light, neutral dark and high-chroma desktops at 360 points and 140% scale. Sample the composited domain label, verdict text and keyboard focus ring, including the Reduce Transparency rendering. Record wallpaper, theme and measurements before tuning the scrim.
 
 ### A29 · Match Markdown fences and complete code-block actions
 
@@ -804,6 +800,8 @@ Accept: Use existing turn data; retain incomplete/failure labels and unambiguous
 
 Earlier effort: S–M.
 
+L04 adds a plain-text Copy Receipt action beside Copy. Use TranscriptFormatter and list the level, successful searches, pages actually seen by the model, evidence kept or dropped, assessment model and elapsed time wherever the turn records them. Omit unavailable fields in older archives. Keep the incomplete state explicit for a turn that stopped before assessment.
+
 ### A36c · Remember the last inspected source
 
 Novel, delightful, or quirky ideas worth trying — nice-to-have
@@ -815,6 +813,8 @@ Suggested fix: Keep a session reading bookmark. Persist scroll offsets only afte
 Accept: Do not let streaming or layout changes override deliberate reading position.
 
 Earlier effort: S–M.
+
+Use the turn ID alongside the citation number for an explicit return to the originating claim. Check repeated source numbers across turns, a revised answer, thread deletion and Reduce Motion. Use only session state and avoid additional provider requests.
 
 ### A36d · Seed a counter-evidence follow-up
 
@@ -1789,18 +1789,6 @@ another scheme.
 Where: Vervellum/Views/SourcesView.swift:140–142; Vervellum/Views/TurnView.swift:93–94;
 Vervellum/Views/MarkdownText.swift:282–293. Effort: S.
 
-### S07 · Match key hints to the submit preference
-
-Usability: speed, convenience, clarity — nice-to-have
-
-Empty-state Return/Shift-Return advice is hard-coded and contradicts the disabled Return-to-send preference. Platform-specific help alone does not resolve preference-sensitive wording.
-
-Suggested fix: Derive empty-state and relevant help hints from the submit preference.
-
-Accept: Check both preference settings and each platform's actual submit chord.
-
-Where: Vervellum/Views/EmptyStateView.swift:39. Effort: 1 hour.
-
 ### S08 · Clear stale preview state
 
 Bugs — nice-to-have
@@ -1939,6 +1927,10 @@ Suggested fix: Profile a roughly 150 ms debounce or an index with correct invali
 Accept: Preserve answer matches, ordering and live library changes unless the reader chooses a narrower search scope.
 
 Where: Sources/VervellumKit/Core/Store/ThreadLibrary.swift:118–126; Vervellum/Views/HistoryView.swift:25.
+
+A no-match fixture of 2,000 one-turn threads with about 4 KB of answer text each took 1.1–1.9 seconds per scan across three optimized runs on a busy arm64 Mac (3.8–5.6 seconds in Debug). The fixture times ThreadLibrary.search, excluding rendering. Record end-to-end release keystroke latency for early, late and missing matches, then run matching off the UI thread against immutable library snapshots. Cancel obsolete work, key results to both query and library revision, and test deletion or a streamed update during a search. A query-only cache can leave a removed thread on screen.
+
+Prototype a bounded excerpt from the first matching field so a URL or finding match explains why an otherwise unrelated title appears. Reuse that scan and render plain text. Test composed characters, a match near the end of a long answer, VoiceOver and clearing the filter.
 
 ### G01 · Let Linux level controls wrap
 
@@ -2096,6 +2088,8 @@ Suggested fix: Plan a String Catalog, locale-aware dates and a portable Core loc
 Accept: Use existing data and explicit user actions; no silent model call or privacy expansion.
 
 Historical score: 2.7 · 3/2/3 · L.
+
+Give the submit chord one localized spoken name shared by the first-use hint and live VoiceOver announcements, with a separate compact visual keycap.
 
 ### N08 · Open cited sources by number key
 
@@ -2415,24 +2409,6 @@ Accept: a 4 × 4 MB attach does not stall the composer; a crash between the writ
 and the save still leaves bytes the sweep collects; a failed write still raises
 `attachmentNotStored`.
 
-### C05 · `sendJSON` has no wall-clock deadline on the response head
-
-General issues — nice-to-have (extends A22)
-
-`HTTPTransport.fetch` races a deadline task against the open+collect pair, but
-`sendJSON` awaits `open` with no timer
-(`Sources/VervellumKit/Core/Research/HTTPTransport.swift`). The request's
-`timeoutInterval` is an idle timeout, so a server that accepts the connection and
-never sends headers holds the call for the full 120 s idle allowance rather than
-the exchange deadline the caller passed. MCP and cheap JSON calls use this path.
-
-Suggested fix: give `sendJSON` the same independent clock as `fetch`, covering the
-head and the body, and cancel the URL task when it fires.
-
-Accept: a head that never arrives fails at the caller's deadline; a slow body
-still fails at the same deadline; cancellation still stops the task; no change to
-`fetch`'s behaviour.
-
 ### C06 · Header buttons have a fixed hit area that ignores the text-size preference
 
 Visual / accessibility — nice-to-have
@@ -2452,21 +2428,11 @@ with centre alignment, and keep the glyph centred.
 Accept: 140 % text shows no clipped glyph; every header control meets the target
 guideline at both ends of the text-size range.
 
-### C07 · Performance smalls
+### C07 · Profile transcript equality alongside rendering
 
-Performance — nice-to-have
+`TurnView.==` compares a growing answer, sources and findings on the coalescer's 10 Hz delivery path. Profile equality separately from MarkdownBody reparsing the whole answer on each publish and ComposerView.height(for:) constructing a fresh TextKit stack (A20/S14). Before narrowing the comparison, test an unchanged-length answer correction, newly arrived evidence, notices and findings. Each can change the visible row without a stage transition.
 
-- `TurnView.==` compares the whole turn, including the growing answer and the
-  source/findings arrays, at the coalescer's 10 Hz. A stage/answer-prefix
-  comparison would be cheaper and equally correct for the render decision.
-- `MarkdownBody` re-parses the whole answer on every publish (A20's remainder);
-  `ComposerView.height(for:)` builds a fresh TextKit stack per call (A20/S14).
-- `ThreadLibrary.search` scans every field of every turn per keystroke with no
-  debounce or index (R06).
-- `ResearchEngine.sessions` is never evicted (A83).
-
-These are collected here so a future performance pass has one list; each is
-profiled before it is redesigned.
+For large-library matching use R06's fixture. For session retention use A83. These measure different costs and need separate before/after measurements.
 
 ### L01 · The composer is marked dirty ten times a second while an answer streams
 
@@ -2518,21 +2484,6 @@ flag.
 
 Accept: the same payloads cap to the same bytes; the `attachmentTrimmed` notice still
 fires exactly when something was cut.
-
-### L04 · A per-turn evidence receipt
-
-Novel, delightful, or quirky — nice-to-have
-
-A short, copyable block per turn: level, searches run, pages read, evidence kept and
-dropped, the assessment model, and wall-clock. Every field is already on the turn, so
-it is a formatter rather than new state, and it makes a turn auditable after the fact —
-the same job `TranscriptFormatter` does for the answer, extended to the run.
-
-Suggested fix: add a `receipt` property beside `transcript` in `TranscriptFormatter`,
-and a Copy-Receipt affordance next to Copy. Keep it plain text; no new prompt surface.
-
-Accept: the receipt names only facts the turn already records; it does not imply a
-check that did not run.
 
 ### L05 · Copy a finding's citations from its chip
 
@@ -2697,21 +2648,11 @@ empty but present.
 Where: `Sources/VervellumKit/Core/Providers/ProviderSettings.swift:650,675`.
 Effort: under one hour.
 
-### A91 · Accept a missing `finish_reason` as a normal completion
+### A91 · Verify a gateway's completion signal before accepting a missing finish reason
 
-Bugs — nice-to-have
+Some local gateways reportedly omit `finish_reason` on successful answers. The earlier proposal to accept nil unconditionally conflicts with the explicit-completion contract in PR-REVIEW.md and the partial-stream fixtures. Capture a content-free fixture for the specific gateway and identify a documented positive completion signal. Evaluate compatibility only for that response shape. Pair the successful fixture with a truncated response ending on the same last content token, an idle disconnect and a length-limited answer. Preserve partial prose and its interruption notice whenever the two outcomes are indistinguishable.
 
-`ChatCompletionsClient.checkFinishReason` (`:409`) treats a missing
-`finish_reason` as interrupted; local gateways that omit it on a valid completion
-cause a good answer to be discarded.
-
-Suggested fix: accept `nil` as normal completion; only an explicit
-`length`/`content_filter` (or equivalent) is a stop.
-
-Accept: a fixture response without `finish_reason` completes normally.
-
-Where: `Sources/VervellumKit/Core/Transport/ChatCompletionsClient.swift:409`.
-Effort: under one hour.
+Where: Sources/VervellumKit/Core/Research/ChatCompletionsClient.swift, checkFinishReason. Earlier estimate for the narrow compatibility change was under one hour.
 
 ### A92 · Reject malformed tool-call arguments
 
@@ -3066,17 +3007,7 @@ back.
 
 Where: findings disclosure in `TurnView`; runner follow-up path. Effort: one day.
 
-### D09 · First tap on a source row expands its snippet inline
-
-Delight — nice-to-have
-
-The source-row snippet is hover-only today; a first tap could expand it inline
-before a second tap opens the page.
-
-Accept: one tap reveals the snippet, another opens the page; keyboard equivalent
-via D01.
-
-Where: source list view. Effort: half a day.
+## Verification gaps
 
 Verification gaps noted by this pass: static review cannot confirm Liquid Glass on
 macOS 26, real VoiceOver order, IME composition, frame times on long threads or
