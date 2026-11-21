@@ -56,6 +56,11 @@ enum MarkdownParser {
         var codeLines: [String]?
         var codeStart = markdown.startIndex
         var codeLanguage = ""
+        /// The marker and run length that opened the current fence. A closer must use
+        /// the same marker and be at least as long; anything else is literal content.
+        /// Without this a ```` ```` ```` opener was closed by a three-backtick line
+        /// sitting inside it, and a tilde fence was closed by backticks.
+        var codeFence: (marker: Character, length: Int)?
         var nextID = 0
 
         func flushParagraph() {
@@ -90,22 +95,28 @@ enum MarkdownParser {
 
             // Inside a fence, everything is literal until the closing fence.
             if codeLines != nil {
-                if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                if let fence = codeFence, Self.closes(trimmed, fence: fence) {
                     append(.code(language: codeLanguage), (codeLines ?? []).joined(separator: "\n"),
                            range: codeStart..<sourceLine.endIndex)
                     codeLines = nil
                     codeLanguage = ""
+                    codeFence = nil
                 } else {
                     codeLines?.append(line)
                 }
                 continue
             }
 
-            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+            if let fence = Self.fenceOpener(trimmed) {
                 flushParagraph()
                 codeLines = []
                 codeStart = sourceLine.startIndex
-                codeLanguage = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                codeFence = fence
+                // Everything after the whole opening run, not after three characters:
+                // ```` ````swift ```` is a Swift block, not one whose language is
+                // "`swift".
+                codeLanguage = trimmed.dropFirst(fence.length)
+                    .trimmingCharacters(in: .whitespaces)
                 continue
             }
 
@@ -192,6 +203,25 @@ enum MarkdownParser {
     }
 
     // MARK: Line classification
+
+    /// The opening marker and run length of a fence, or nil. A fence is at least three
+    /// backticks or tildes; the whole run is carried because a longer opener must be
+    /// closed by a run at least as long.
+    private static func fenceOpener(_ line: String) -> (marker: Character, length: Int)? {
+        guard let marker = line.first, marker == "`" || marker == "~" else { return nil }
+        let length = line.prefix(while: { $0 == marker }).count
+        return length >= 3 ? (marker, length) : nil
+    }
+
+    /// Whether `line` closes a fence opened with `fence`: the same marker, at least as
+    /// long, and nothing but trailing whitespace after it. A shorter run is content, and
+    /// so is a closer carrying a language label.
+    private static func closes(_ line: String,
+                               fence: (marker: Character, length: Int)) -> Bool {
+        let run = line.prefix(while: { $0 == fence.marker })
+        guard run.count >= fence.length else { return false }
+        return line.dropFirst(run.count).allSatisfy(\.isWhitespace)
+    }
 
     private static func heading(_ line: String) -> (Int, String)? {
         var level = 0
