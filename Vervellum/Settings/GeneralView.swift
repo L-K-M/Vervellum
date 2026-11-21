@@ -160,6 +160,15 @@ struct GeneralView: View {
                     Button("Delete all…") { showsEraseConfirmation = true }
                         .disabled(store.library.threads.isEmpty)
                 }
+                // A document that cannot be read is a different problem from a
+                // write that failed: nothing here can retry it, so it gets the
+                // explanation alone rather than a button that would do nothing.
+                if let failure = store.readFailure {
+                    Text(failure)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 // The file is still there, or the write/backup did not complete.
                 // Saying so beats a toggle that reads "off" over questions that are
                 // still on disk, and the retry is the difference between a warning

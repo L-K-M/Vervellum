@@ -119,11 +119,17 @@ final class ThreadStore: ObservableObject {
         return failures.isEmpty ? nil : failures.joined(separator: " ")
     }
 
-    /// Every storage problem the reader can act on: the write, the backup copy, the
-    /// erase and the attachment sweep. One string because Settings shows one line;
-    /// the retry is one action because it re-runs whichever operation failed.
+    /// Why the stored document could not be read. Not retryable from here — the
+    /// reader has to repair the file or its permissions — so it is shown without
+    /// the retry button the actionable failures carry.
+    var readFailure: String? { archive.readFailure }
+
+    /// Every storage problem the retry button can act on: the write, the backup
+    /// copy, the erase and the attachment sweep. One string because Settings shows
+    /// one line; the retry is one action because it re-runs whichever failed.
     var storageFailure: String? {
-        let failures = [archive.saveFailure, archive.backupFailure, eraseFailure]
+        let failures = [archive.saveFailure, archive.backupFailure,
+                        archive.eraseFailure, attachmentEraseFailure]
             .compactMap { $0 }
         return failures.isEmpty ? nil : failures.joined(separator: " ")
     }
