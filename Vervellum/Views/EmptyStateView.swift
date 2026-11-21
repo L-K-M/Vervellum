@@ -41,11 +41,8 @@ struct EmptyStateView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
-                if submitOnReturn {
-                    hint("Return", "ask · Shift-Return for a new line")
-                } else {
-                    hint("⌘Return", "ask · Return for a new line")
-                }
+                let newlineKey = submitOnReturn ? "Shift-Return" : "Return"
+                hint(submitOnReturn ? "Return" : "⌘Return", "ask · \(newlineKey) for a new line")
                 hint("/", "commands — and the four research levels by name")
                 hint("Esc", "clear the draft, then close")
                 hint(summonShortcut, "summon or dismiss from anywhere")
