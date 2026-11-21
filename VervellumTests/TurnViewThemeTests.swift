@@ -44,12 +44,21 @@ final class TurnViewThemeTests: XCTestCase {
     }
 
     /// `updateNSView` skips the attribute rewrite only when the stored foreground equals
-    /// the current accent, so a colour rebuilt on each read would rewrite attributes on
-    /// every streamed chunk. Pin that one theme's accent is a stable value across reads;
-    /// if this ever fails, the fix belongs in the palette presets (store literal
-    /// colours), not in the comparison.
-    func testAccentIsStableAcrossReadsForOneTheme() {
-        XCTAssertEqual(PanelTheme.NativePalette.accent,
-                       PanelTheme.NativePalette.accent)
+    /// the current accent, so the comparison can only fire on a theme change if two
+    /// presets actually produce different accents. Pin that property here; if it ever
+    /// fails, the fix belongs in the palette presets (store distinct literal colours),
+    /// not in the comparison.
+    func testAccentChangesAcrossPresets() {
+        let previous = PanelTheme.palette
+        defer { PanelTheme.palette = previous }
+        PanelTheme.palette = .ember
+        let emberAccent = PanelTheme.NativePalette.accent
+        guard let other = PanelPalette.presets.first(where: { $0 != .ember }) else {
+            XCTFail("this test needs at least two palette presets")
+            return
+        }
+        PanelTheme.palette = other
+        XCTAssertNotEqual(emberAccent, PanelTheme.NativePalette.accent,
+                          "two presets share an accent; updateNSView would never rewrite link attributes when switching to it")
     }
 }
