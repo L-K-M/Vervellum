@@ -1,5 +1,19 @@
 # Vervellum research backlog
 
+Mistral Vibe pass 2026-11-21: reviewed against `origin/main` at `1ed52ba` — a full
+read of the shared core, the store/text layer, the macOS views/settings and the
+composer-command layer, plus three parallel helper deep-reads (full write-up in
+`tmp.md`). Eight PRs are open: #230 (header-button hit areas; also the target-size
+half of C06), #239 (⌘↑/⌘↓ scroll the thread; a slice of A65), #241 (case-insensitive
+URL-scheme redaction; a redactor slice adjacent to A63), #244 (one shared composer
+whitespace definition), #246 (About version without the `Optional` wrapper), #250
+(unbounded citation digits), #251 (hostile characters in the published date and
+linked-page title) and #253 (restyle the open thread when the theme changes). Their
+slices are annotated in place below; restore an entry if its PR closes unmerged.
+New findings from this pass are A87–A99, N15–N24 and the D01–D09 delight ideas,
+appended at the end. Concurrent branches and other agents' PRs were not inspected
+during this review.
+
 Codex (little-platypus) pass 2026-11-21: reviewed against `origin/main` at
 `b3a5bf1`. Three PRs are open — #231 (protected editing chords; A18's policy
 slice), #242 (storage failure reporting and retry; A13's retry slice and A14's
@@ -330,6 +344,9 @@ read, which the shim does not expose yet.
 Accept: a pasted key is replaced and the banner names the count; redaction is
 visible before Return, never applied silently on send; no false positives beyond
 `SecretRedactor`'s documented conservative bias.
+
+Redactor slice implemented in open PR #241 (Mistral Vibe pass): the URL-userinfo
+pattern is now case-insensitive, so `HTTPS://user:pass@host` is redacted too.
 
 Earlier effort: S.
 
@@ -1426,6 +1443,9 @@ visible in both schemes; Escape returns focus to the composer before its usual
 back-out order; find highlights update as the answer streams without restarting
 the search.
 
+Scroll slice implemented in open PR #239 (Mistral Vibe pass): ⌘↑/⌘↓ scroll the
+thread to its top/bottom while the composer holds first responder.
+
 Historical traversal: 6.3 · 8/4/7 · M; find: 5.3 · 6/5/5 · M.
 
 Earlier effort: M.
@@ -2417,7 +2437,9 @@ fixed `frame(width: 20, height: 18)` (`Vervellum/Views/PanelHeaderView.swift`). 
 140 % text the glyph is 14.7 pt in an 18 pt frame and the touch target stays
 20 × 18 pt, well below the 44 pt guideline. The five controls also crowd at the
 right edge with no padding. Open PR #205 fixes the target size; this entry is the
-scaling half — verify against #205 before implementing.
+scaling half — verify against #205 before implementing. PR #230 (Mistral Vibe
+pass) independently grows the hit target to 26×26 via real-frame padding, which
+covers the fixed-size half here as well; the textScale-scaling half remains open.
 
 Suggested fix: scale the frame with `textScale`, or use a minimum 44 pt hit area
 with centre alignment, and keep the glyph centred.
@@ -2566,3 +2588,492 @@ unchanged.
 
 Where: `Sources/VervellumKit/Core/Research/ResearchTrace.swift:33–45`. Effort: under
 one hour.
+
+## Mistral Vibe pass 2026-11-21
+
+Reviewed against `origin/main` at `1ed52ba`. Full write-up with method and the
+"genuinely good" list is in `tmp.md`; three helper deep-reads (core pipeline,
+store/text, macOS views/settings) were merged into it. Findings below were
+cross-checked against the entries above; existing IDs are cited instead of
+duplicating them.
+
+### Implemented in this pass (open PRs; restore the finding if a PR closes unmerged)
+
+- #230 `review/larger-header-hit-areas` — header-button hit target grown from the
+  20×18 glyph frame to 26×26 by padding the button's real frame
+  (pad → `contentShape(Rectangle())` → inverse pad), derived from
+  `PanelTheme.Space.small / 2` so neighbours never overlap; `PanelHeaderViewTests`.
+  Covers the target-size half of C06.
+- #239 `review/thread-scroll-shortcuts` — ⌘↑/⌘↓ scroll the thread to top/bottom
+  while the composer holds first responder (`performKeyEquivalent` → new
+  `PanelCommand.scrollToTop/scrollToBottom`, boxed `ScrollViewReader` proxy, top
+  anchor); help text; `PanelCommandTests`. Slice of A65.
+- #241 `review/redactor-case-insensitive-scheme` — `SecretRedactor.urlUserInfo`
+  scheme class is `(?i)`, so `HTTPS://u:p@host` is redacted. Redactor slice adjacent
+  to A63.
+- #244 `review/composer-whitespace-consistency` — `ComposerCommand.parse` and
+  `commandWord` share one `whitespace` set / `isWhitespace(_:)` (U+200B diverged).
+- #246 `review/about-version-string` — About pane reads
+  `CFBundleShortVersionString` via pure `AboutView.versionText(_:)`; no more
+  `Optional("0.3.1")`.
+- #250 `review/citation-regex-unbounded-digits` — citation pattern is `\d+`, so
+  `[1000]` renders as a chip and is flagged out-of-range instead of passing as
+  plain text.
+- #251 `review/strip-hostile-source-fields` — `HostileText.stripped` applied to
+  `publishedAt` and to `linkTitle` (whose path percent-decodes RLO overrides).
+- #253 `review/theme-restyle-open-thread` — `TurnView` carries and compares the
+  palette, `MarkdownBody` passes font/colour explicitly to every `MarkdownText`,
+  and `AnswerTextView` refreshes `linkTextAttributes` only when the accent moved;
+  the open thread restyles live on a theme change.
+
+### A87 · Re-throw non-parse provider failures in the agent loop
+
+Bugs — important
+
+`ResearchRunner.swift:1229` wraps the follow-up call in `try?`, so a total provider
+outage becomes "no usable sources" and the blame lands on the question. Only parse
+failures should degrade to a skip.
+
+Suggested fix: catch `ResearchError` and re-throw unless it is the parse case;
+keep the soft path for genuinely empty evidence.
+
+Accept: a provider outage surfaces as a provider error, not as
+"the question found nothing".
+
+Where: `Sources/VervellumKit/Core/Research/ResearchRunner.swift:1229`. Effort:
+under one hour.
+
+### A88 · Report `contextTrimmed` on deep follow-up and regather payloads
+
+Bugs — important
+
+The answer-stage `assemble` reports trimming, but the deep follow-up, regather and
+assessment payloads (`ResearchRunner.swift:1030,1225,1636`) can drop history
+without the `contextTrimmed` notice — against the never-truncate-silently rule
+(A07's contract).
+
+Suggested fix: emit the notice after every `assemble`, not just the answer stage.
+
+Accept: any payload that dropped turns carries the notice in the turn/transcript.
+
+Where: `Sources/VervellumKit/Core/Research/ResearchRunner.swift:1030,1225,1636`.
+Effort: under one hour.
+
+### A89 · Measure `fixedContent` per stage, not the empty reading block
+
+Bugs — nice-to-have
+
+`ResearchRunner.swift:585` / `ResearchContext.swift:235`: the answer and assessment
+payloads measure `fixedContent` against reading/`searches_run` blocks that are
+empty at that point, so a long reading can push the assessment past the cap and
+fail soft instead of trimming history first.
+
+Suggested fix: measure the real per-stage blocks (sources actually included).
+
+Accept: a long-reading thread trims history with a notice before the assessment
+fails soft.
+
+Where: `Sources/VervellumKit/Core/Research/ResearchRunner.swift:585`;
+`ResearchContext.swift:235`. Effort: half a day.
+
+### A90 · Treat an empty `searchProfiles` as not ready
+
+Bugs — important
+
+`ProviderSettings.problems` (`ProviderSettings.swift:650,675`) never checks
+`searchProfiles.isEmpty`, so readiness says "ready" while the runner throws "no
+search provider configured".
+
+Suggested fix: add the empty-list case to `problems` with a settings deep-link.
+
+Accept: Settings shows "no search provider" instead of "ready" when the list is
+empty but present.
+
+Where: `Sources/VervellumKit/Core/Providers/ProviderSettings.swift:650,675`.
+Effort: under one hour.
+
+### A91 · Accept a missing `finish_reason` as a normal completion
+
+Bugs — nice-to-have
+
+`ChatCompletionsClient.checkFinishReason` (`:409`) treats a missing
+`finish_reason` as interrupted; local gateways that omit it on a valid completion
+cause a good answer to be discarded.
+
+Suggested fix: accept `nil` as normal completion; only an explicit
+`length`/`content_filter` (or equivalent) is a stop.
+
+Accept: a fixture response without `finish_reason` completes normally.
+
+Where: `Sources/VervellumKit/Core/Transport/ChatCompletionsClient.swift:409`.
+Effort: under one hour.
+
+### A92 · Reject malformed tool-call arguments
+
+Bugs — nice-to-have
+
+`ResponseParsers.swift:72`: a present-but-not-a-dictionary `arguments` value falls
+back to the raw entry instead of failing, so a malformed call can reach the
+planner as garbage.
+
+Suggested fix: throw invalid-plan for a non-dict `arguments`.
+
+Accept: a malformed arguments fixture is rejected, not passed through.
+
+Where: `Sources/VervellumKit/Core/Research/ResponseParsers.swift:72`. Effort:
+under one hour.
+
+### A93 · Never surface foreign error text from the credential commit
+
+Bugs — important (security)
+
+`ProviderCredentialCommit.swift:66`: `secretWriteAfterCommit` appends
+`error.localizedDescription` to the user-facing message. A foreign (OS/keychain)
+error string can carry paths or account details into the UI.
+
+Suggested fix: a fixed sentence naming the account/provider only; details stay in
+logs.
+
+Accept: a forced secret-store failure shows Vervellum's own words only; no
+`localizedDescription` reaches any view.
+
+Where: `Sources/VervellumKit/Core/Providers/ProviderCredentialCommit.swift:66`.
+Effort: under one hour.
+
+### A94 · Guard `eraseEverything` in read-only archives
+
+Bugs — important
+
+`ThreadArchive.swift:261`: `eraseEverything()` has no `isReadOnly` guard, so the
+history toggle can delete a newer-version document and the archive stays read-only
+forever. Overlaps A12/A14 — coordinate with them.
+
+Suggested fix: refuse erase while read-only, with the same sanitized explanation
+A12 proposes for the UI.
+
+Accept: a read-only archive cannot be erased from the panel; the refusal is
+explained in Vervellum's words.
+
+Where: `Sources/VervellumKit/Core/Store/ThreadArchive.swift:261`. Effort: under
+one hour.
+
+### A95 · Don't let the launch trim delete attachments of recoverable threads
+
+Bugs — important (data loss)
+
+`ThreadArchive.swift:206` + `AttachmentStore.swift:194`: lowering the thread limit
+trims in memory only, but the launch sweep deletes the trimmed threads' attachments
+while the threads themselves come back on relaunch — pictures vanish from threads
+that are still shown.
+
+Suggested fix: sweep only attachments of threads that are gone from the archive
+after the trim is persisted, or keep the grace window until the trim is committed.
+
+Accept: lowering the limit never deletes pictures of threads that still exist.
+
+Where: `Sources/VervellumKit/Core/Store/ThreadArchive.swift:206`;
+`AttachmentStore.swift:194`. Effort: half a day.
+
+### A96 · Distinguish an absent provider list from an empty one
+
+Bugs — nice-to-have
+
+`CorePreferences.swift:243`: a present-but-empty provider list decodes as "no
+list", so deleting the last provider resurrects the defaults on relaunch.
+
+Suggested fix: distinguish key absence (defaults) from `[]` (explicitly none).
+
+Accept: an explicitly emptied provider list stays empty across relaunch.
+
+Where: `Sources/VervellumKit/Core/CorePreferences.swift:243`. Effort: under one
+hour.
+
+### A97 · Don't restore activation on Settings close when the app wasn't active
+
+Bugs — nice-to-have
+
+`SettingsWindowController.swift:94`: `windowWillClose` restores activation
+unconditionally; `PanelController` guards with `NSApp.isActive`. Match it (related
+to A77).
+
+Suggested fix: guard the activation restore the same way.
+
+Accept: closing Settings while the app is inactive does not steal activation.
+
+Where: `Vervellum/Settings/SettingsWindowController.swift:94`. Effort: under one
+hour.
+
+### A98 · Don't pin the current appearance when switching Automatic → explicit
+
+Visual — nice-to-have
+
+`AppearanceView.swift:299`: the fallback resolves the semantic colour against the
+*current* appearance and stores it, so ticking Text on in Dark Mode pins white text
+after a later switch to Light.
+
+Suggested fix: store the semantic choice, resolve at render time; or resolve
+against the effective appearance on every change.
+
+Accept: Automatic → explicit never freezes a literal colour that later mode
+switches contradict.
+
+Where: `Vervellum/Settings/AppearanceView.swift:299`. Effort: half a day.
+
+### A99 · Keep the source popover open across streamed replacements
+
+Visual / usability — nice-to-have
+
+`AnswerTextView.swift:101`: the popover closes on every streamed storage swap
+under a resting pointer.
+
+Suggested fix: re-evaluate the chip under the last pointer location after each
+swap instead of closing.
+
+Accept: a streaming answer does not dismiss an open source preview.
+
+Where: `Vervellum/Views/AnswerTextView.swift:101`. Effort: half a day.
+
+### N15 · Give the providers model menu unambiguous identity
+
+Bugs — nice-to-have
+
+`ProvidersView.swift:342`: `ForEach(models, id: \.self)` — duplicate aliases from
+an endpoint make identity ambiguous.
+
+Suggested fix: enumerated ids (`id: \.offset`).
+
+Accept: a model list with duplicate names renders and selects correctly.
+
+Where: `Vervellum/Settings/ProvidersView.swift:342`. Effort: under one hour.
+
+### N16 · Cancel model-list tasks when the pane disappears
+
+Bugs — nice-to-have
+
+`ProvidersView.swift:410`: model-list tasks can write state after the pane is
+gone. Related to A18b (unsaved provider edits).
+
+Suggested fix: cancel on `onDisappear` as well as on replace.
+
+Accept: no state write lands after the pane is gone.
+
+Where: `Vervellum/Settings/ProvidersView.swift:410`. Effort: under one hour.
+
+### N17 · Line-limit the code-block language label
+
+Visual — nice-to-have
+
+`MarkdownText.swift:405`: a long fence info string grows the code-block header.
+
+Suggested fix: `.lineLimit(1)` + truncation.
+
+Accept: a 200-character info string renders one truncated line.
+
+Where: `Vervellum/Views/MarkdownText.swift:405`. Effort: minutes.
+
+### N18 · Rebuild the sources-by-URL index only when sources change
+
+Performance — nice-to-have
+
+`AnswerTextView.swift:69`: `sourcesByURL` is rebuilt on every streamed chunk.
+
+Suggested fix: memoize on `sources` identity/equality.
+
+Accept: streaming publishes no longer rebuild the index per chunk.
+
+Where: `Vervellum/Views/AnswerTextView.swift:69`. Effort: under one hour.
+
+### N19 · Track the citation substitution cursor
+
+Performance — nice-to-have
+
+`MarkdownText.swift:316`: each citation does `range(of:)` from the start of the
+block — O(n·m) over a long answer. Related to A20/C07 (re-parse per chunk).
+
+Suggested fix: scan once, advancing a cursor past each substitution.
+
+Accept: a 50-citation answer substitutes in one pass.
+
+Where: `Vervellum/Views/MarkdownText.swift:316`. Effort: under one hour.
+
+### N20 · Pin and cache the relative-date formatter
+
+General — nice-to-have
+
+`Formatting.swift:44`: `relativeDate` uses an unpinned `DateFormatter` (a
+non-Gregorian locale yields a Buddhist year) and allocates one per row.
+
+Suggested fix: pin locale/calendar, cache behind a lock.
+
+Accept: a non-Gregorian locale renders Gregorian years; no per-row allocation.
+
+Where: `Sources/VervellumKit/Core/Text/Formatting.swift:44` (or the macOS-side
+equivalent). Effort: under one hour.
+
+### N21 · Remove the original filename in the attachment sweep on Linux
+
+Bugs — nice-to-have (Linux)
+
+`AttachmentStore.swift:231`: the sweep parses `UUID(uuidString:)` but removes
+`url(for: id)` (the canonical lowercase form), so uppercase-UUID filenames survive
+on Linux filesystems.
+
+Suggested fix: remove the directory entry's original name.
+
+Accept: an uppercase-UUID attachment file is swept on Linux.
+
+Where: `Sources/VervellumKit/Core/Store/AttachmentStore.swift:231`. Effort:
+under one hour.
+
+### N22 · Reject wrong JSON types in the settings store
+
+Bugs — nice-to-have
+
+`SettingsStore.swift:71,67`: `{"keptThreads": true}` bridges to the number 10 via
+Any bridging.
+
+Suggested fix: type-check before casting; ignore or coerce explicitly.
+
+Accept: a bool where a number is expected is rejected, not bridged to 10.
+
+Where: `Sources/VervellumKit/Core/SettingsStore.swift:67,71`. Effort: under one
+hour.
+
+### N23 · Make `removeAll` delete only attachment files
+
+Bugs — nice-to-have
+
+`AttachmentStore.swift:204`: erase removes anything in the directory, not just
+UUID-named attachment files.
+
+Suggested fix: skip entries that are not attachment filenames.
+
+Accept: a foreign file dropped in the attachments directory survives erase.
+
+Where: `Sources/VervellumKit/Core/Store/AttachmentStore.swift:204`. Effort:
+under one hour.
+
+### N24 · Don't trust launch-time trustworthiness for backup rotation
+
+Bugs — nice-to-have
+
+`ThreadArchive.swift:376`: rotation trusts that the primary was trustworthy at
+launch, so an externally replaced primary is copied over the good `.bak`.
+Overlaps A14.
+
+Suggested fix: re-verify the primary before rotating it into the backup slot.
+
+Accept: a tampered primary never overwrites the last good backup.
+
+Where: `Sources/VervellumKit/Core/Store/ThreadArchive.swift:376`. Effort: half a
+day.
+
+### D01 · Keyboard citation peek with labelled chips
+
+Delight / accessibility — nice-to-have
+
+Tab into the answer, arrows across citation chips, Return presents the same
+`SourcePreview` the pointer gets; chips get accessibility labels ("Source 1, title").
+Closes the VoiceOver gap found in review. Related: N13, A64, A66.
+
+Accept: every citation is reachable and readable without a pointer.
+
+Where: `Vervellum/Views/AnswerTextView.swift`, `MarkdownText.swift` chip view.
+Effort: one day.
+
+### D02 · Cross-highlight citations and source rows
+
+Delight — nice-to-have
+
+Hovering `[7]` underlines source row 7; hovering a row highlights its chips in the
+answer. Pure view state, Reduce-Motion safe.
+
+Accept: both directions highlight; no layout shift.
+
+Where: `Vervellum/Views/AnswerTextView.swift`, source list view. Effort: half a day.
+
+### D03 · Answer-footer micro-metrics
+
+Delight — nice-to-have
+
+Word count, reading time and citation count next to the model name — a pure
+function over `turn.answer`/`turn.sources`, testable in `Formatting`.
+
+Accept: metrics update on stream completion; pure function unit-tested.
+
+Where: `Vervellum/Views/TurnView.swift` footer; `Formatting`. Effort: half a day.
+
+### D04 · Copy-the-question affordance
+
+Delight — nice-to-have
+
+A hover copy button on each question row, complementing Copy-answer. Related: A36.
+
+Accept: one click copies the question; confirmation matches A36's tone.
+
+Where: `Vervellum/Views/TurnView.swift` question row. Effort: under one hour.
+
+### D05 · Status-item pulse when a detached run finishes
+
+Delight — nice-to-have (macOS)
+
+A one-shot status-item pulse when a run finishes while the panel is hidden — the
+macOS half of A36e.
+
+Accept: a detached run's completion is visible from the menu bar once.
+
+Where: `Vervellum/App/` status item + `ResearchPanel` completion hook. Effort:
+half a day.
+
+### D06 · Inline live theme mock in Appearance
+
+Delight — nice-to-have
+
+A small flat-fill panel preview in Appearance animating live with the sliders —
+never nested glass, honouring Reduce Transparency.
+
+Accept: the mock reflects accent/text-size immediately; flat under Reduce
+Transparency.
+
+Where: `Vervellum/Settings/AppearanceView.swift`. Effort: one day.
+
+### D07 · Source provenance chips
+
+Delight — nice-to-have
+
+Show which planned query/round produced each source — the data is already in
+`PlannedSearch`/`Source`.
+
+Accept: each source row names its producing query; pure mapping, testable.
+
+Where: source list view; `Sources/VervellumKit/Core/Research/` plan model.
+Effort: one day.
+
+### D08 · "Not settled" section with one-click re-ask
+
+Delight — nice-to-have
+
+Surface `insufficient` findings as a "Not settled" section with a one-click re-ask
+of that sub-question.
+
+Accept: an insufficient finding is re-askable in one click; the new turn links
+back.
+
+Where: findings disclosure in `TurnView`; runner follow-up path. Effort: one day.
+
+### D09 · First tap on a source row expands its snippet inline
+
+Delight — nice-to-have
+
+The source-row snippet is hover-only today; a first tap could expand it inline
+before a second tap opens the page.
+
+Accept: one tap reveals the snippet, another opens the page; keyboard equivalent
+via D01.
+
+Where: source list view. Effort: half a day.
+
+Verification gaps noted by this pass: static review cannot confirm Liquid Glass on
+macOS 26, real VoiceOver order, IME composition, frame times on long threads or
+full-screen placement; CI (macOS + Linux + automated GLM review) is the gate and GUI
+QA remains manual.
