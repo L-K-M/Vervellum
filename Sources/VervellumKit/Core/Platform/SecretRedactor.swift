@@ -60,10 +60,12 @@ enum SecretRedactor {
             ("google", #"\bAIza[A-Za-z0-9_-]{30,}"#),
             ("aws", #"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"#),
             // A credential embedded in a URL. Also blocked at the endpoint level, but
-            // this catches one pasted as context. The scheme class is case-insensitive:
-            // schemes are case-insensitive per RFC 3986 and `URL(string:)` accepts
-            // `HTTPS://`, so a lowercase-only class would let `HTTPS://u:p@host` through.
-            ("urlUserInfo", #"\b(?i)[a-z][a-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@"#),
+            // this catches one pasted as context. The scheme class spells out both
+            // cases rather than using a whole-pattern `(?i)` flag: schemes are
+            // case-insensitive per RFC 3986 and `URL(string:)` accepts `HTTPS://`, and
+            // an explicit `[A-Za-z]` class also avoids `(?i)`'s Unicode case folding
+            // matching lookalikes such as the Kelvin sign.
+            ("urlUserInfo", #"\b[A-Za-z][A-Za-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@"#),
             // A JSON Web Token: three base64url segments.
             ("jwt", #"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}"#),
         ]
