@@ -275,7 +275,8 @@ struct PanelRootView: View {
                         TurnView(turn: turn,
                                  showsProcessTrail: preferences.showProcessTrail,
                                  onRetry: { engine.retry(turn.id) },
-                                 onAskFollowup: askFollowup)
+                                 onAskFollowup: askFollowup,
+                                 onSeedComposer: seedComposer)
                             .equatable()
                             .id(turn.id)
                     }
@@ -1165,6 +1166,17 @@ struct PanelRootView: View {
             return
         }
         submit(question)
+    }
+
+    /// Loads text into the composer for editing — never submits. The same
+    /// gesture the empty state's examples use, offered on finished turns as
+    /// "Edit & re-ask".
+    private func seedComposer(_ question: String) {
+        draft = question
+        recallIndex = nil
+        // Seeding is silent on screen but invisible to a VoiceOver user, so it
+        // is said out loud — the same reason `askFollowup` announces its load.
+        announce("Question loaded into the composer")
     }
 
     private func newThread() {

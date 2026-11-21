@@ -45,6 +45,9 @@ struct TurnView: View, Equatable {
     let showsProcessTrail: Bool
     var onRetry: () -> Void
     var onAskFollowup: (String) -> Void
+    /// Loads a question back into the composer for editing — seeding, not
+    /// submitting, so a typo can be fixed rather than re-run verbatim.
+    var onSeedComposer: (String) -> Void = { _ in }
 
     @State private var trailExpanded = false
     @State private var sourcesExpanded = false
@@ -234,6 +237,16 @@ struct TurnView: View, Equatable {
                 .buttonStyle(.plain)
                 .foregroundStyle(PanelTheme.Palette.tertiaryText)
                 .help("Research this question again")
+
+                // Distinct from Ask again, which re-runs the question verbatim:
+                // this one goes back into the composer to be changed first.
+                Button { onSeedComposer(turn.question) } label: {
+                    Label("Edit & re-ask", systemImage: "pencil")
+                        .font(PanelTheme.Font.caption(textScale))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                .help("Put this question back in the composer for editing")
             }
 
             if !turn.model.isEmpty {
