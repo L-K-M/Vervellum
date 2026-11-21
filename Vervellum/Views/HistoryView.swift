@@ -104,6 +104,7 @@ private struct HistoryRow: View {
     var onDelete: () -> Void
 
     @State private var isHovering = false
+    @State private var confirmsDelete = false
 
     var body: some View {
         HStack(alignment: .top, spacing: PanelTheme.Space.small) {
@@ -131,7 +132,10 @@ private struct HistoryRow: View {
             .buttonStyle(.plain)
 
             // Always a sibling: hover must not gate keyboard or VoiceOver actions.
-            Button(action: onDelete) {
+            // Deleting is one click for the whole thread — questions, answers,
+            // verdicts and attachments — with no undo, so it asks first, the same
+            // way "Delete All" in Settings does.
+            Button { confirmsDelete = true } label: {
                 // Hover keeps its affordance through the tint rather than through
                 // visibility.
                 Image(systemName: "trash")
@@ -144,6 +148,12 @@ private struct HistoryRow: View {
             .buttonStyle(.plain)
             .help("Delete this thread")
             .accessibilityLabel("Delete thread: \(thread.title)")
+            .confirmationDialog("Delete this thread?", isPresented: $confirmsDelete) {
+                Button("Delete", role: .destructive, action: onDelete)
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("“\(thread.title)” and its attachments are gone for good.")
+            }
         }
         .padding(.horizontal, PanelTheme.Space.medium)
         .padding(.vertical, PanelTheme.Space.small)
