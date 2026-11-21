@@ -22,8 +22,6 @@ struct HistoryView: View {
 
     @State private var query = ""
 
-    private var results: [ResearchThread] { store.library.search(query) }
-
     var body: some View {
         VStack(spacing: 0) {
             searchField
@@ -74,7 +72,8 @@ struct HistoryView: View {
     }
 
     private var list: some View {
-        ScrollView {
+        let results = store.library.search(query)
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(results) { thread in
                     HistoryRow(thread: thread,
