@@ -141,6 +141,16 @@ final class CitationValidatorTests: XCTestCase {
         XCTAssertTrue(result.isClean)
     }
 
+    /// A line break between the dash and the upper bound is still one range. This is
+    /// the only marker shape that exercises `rangeBounds`' whitespace-and-newline
+    /// trimming on both sides of the separator.
+    func testARangeWithInteriorNewlineIsStillARange() {
+        let result = CitationValidator.validate(answer: "A [1-\n3].", sourceCount: 3)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1, 2])
+        XCTAssertTrue(result.invalidCitationGroups.isEmpty)
+        XCTAssertTrue(result.isClean)
+    }
+
     /// An out-of-range number is a fabricated citation. It must be reported, and the
     /// marker must degrade to plain text rather than becoming a chip to nowhere.
     func testFlagsOutOfRangeCitations() {
