@@ -242,14 +242,17 @@ final class PanelController {
 
     private func place(_ panel: ResearchPanel, on screen: NSScreen?, animated: Bool) {
         guard let screen = screen ?? NSScreen.main else { return }
-        let side = preferences.panelSide
-        placedGeometry = (side: side,
-                          width: preferences.panelWidth,
-                          height: preferences.panelHeight)
+        // One snapshot of the placement preferences, so the recorded geometry and the
+        // applied frame can never come from two different reads.
+        let geometry = (side: preferences.panelSide,
+                        width: preferences.panelWidth,
+                        height: preferences.panelHeight)
+        let side = geometry.side
+        placedGeometry = geometry
         let frame = PanelPlacement.frame(in: screen.visibleFrame,
                                          side: side,
-                                         width: preferences.panelWidth,
-                                         height: preferences.panelHeight)
+                                         width: geometry.width,
+                                         height: geometry.height)
         guard animated else {
             panel.setFrame(frame, display: true)
             panel.alphaValue = 1
