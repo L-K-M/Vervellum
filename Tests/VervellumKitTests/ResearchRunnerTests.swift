@@ -2102,15 +2102,22 @@ final class ResearchRunnerTests: XCTestCase {
     }
 
     /// The first assessment's two replies, told apart by which answer they grade.
-    private static func regatherTransport(secondAssessment: StubTransport.Reply)
+    private static func regatherTransport(secondAssessment: StubTransport.Reply, crowded: Bool = false)
         -> StubTransport {
         StubTransport { call in
             switch call.kind {
             case .fetch:
+                if crowded { return .html("<p>" + String(repeating: "Page text. ", count: 260) + "</p>") }
                 return .html("<p>Text for \(call.url.path).</p>")
             case .json where call.url.path == "/search":
                 let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
                     .queryItems?.first { $0.name == "q" }?.value ?? ""
+                if crowded && query == "settle-it" {
+                    return .json(Self.searxng((1...24).map {
+                        (url: "https://site-\($0).example/settle-it.example/hit",
+                         title: String(repeating: "More evidence ", count: 12))
+                    }))
+                }
                 return .json(Self.searxng([(url: "https://\(query).example/hit",
                                             title: "Hit for \(query)")]))
             case .json:
@@ -2173,6 +2180,26 @@ final class ResearchRunnerTests: XCTestCase {
         let assesses = transport.calls.filter { Self.stage(of: $0) == .assess }
         XCTAssertEqual(assesses.count, 2)
         XCTAssertTrue(assesses.last?.userContent?.contains("settle-it.example") == true)
+    }
+
+    func testAdoptedRegatherReportsNewlyDroppedSourcesAndWithheldPages() async {
+        let transport = Self.regatherTransport(secondAssessment: .completion(json: Self.assessment),
+                                               crowded: true)
+        // Leave room for a single full page on the first pass. On regather the
+        // new summaries fill that room, displacing the page and the tail hits.
+        let fixedBytes = ResearchContext.maxCharacters - ResearchContext.answerContextReserve - 4_000
+        let question = String(repeating: "q", count: fixedBytes)
+        let turn = await run(question, mode: .deep, transport: transport)
+        XCTAssertTrue(turn.notices.contains(.answerRegathered))
+        XCTAssertEqual(turn.notices.filter { $0 == .evidenceTrimmed }.count, 1)
+        XCTAssertEqual(turn.notices.filter { $0 == .pageTextTrimmed }.count, 1)
+        XCTAssertGreaterThan(turn.sources.count, 1)
+        XCTAssertLessThan(turn.sources.count, 24)
+        XCTAssertEqual(turn.sources.first?.wasRead, false)
+        let checks = transport.calls.filter { Self.stage(of: $0) == .assess }
+        XCTAssertEqual(checks.count, 2)
+        XCTAssertEqual(checks.first?.userContent?.contains("Page text."), true)
+        XCTAssertEqual(checks.last?.userContent?.contains("Page text."), false)
     }
 
     /// A regather that cannot finish adopts nothing: the first answer, the first
