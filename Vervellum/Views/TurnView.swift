@@ -265,7 +265,10 @@ struct StreamingCaret: View {
             .fill(PanelTheme.Palette.accent)
             .frame(width: 7, height: 14)
             .opacity(Self.opacity(isBright: isBright, reduceMotion: reduceMotion))
-            .onAppear {
+            // `.task(id:)` rather than `.onAppear`: if Reduce Motion is switched off
+            // mid-stream, the blink must start then, not stay frozen at the dim tick
+            // the appear-time guard left behind.
+            .task(id: reduceMotion) {
                 guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
                     isBright = true
