@@ -76,6 +76,11 @@ final class PanelController {
     /// multi-display desk.
     func toggle() {
         guard isOpen, let panel else { show(); return }
+        // A previewing panel is visible but unfocused — the user has never been
+        // *in* it, so "visible" cannot mean "summoned, dismiss it". The summon
+        // gesture on a preview means "let me use this": take focus. `focus` ends
+        // the preview, so Settings closing later will not hide a panel in use.
+        if isPreviewing { focus(panel); return }
         let target = Self.screenUnderPointer()
         if let target, panel.screen !== target {
             place(panel, on: target, animated: true)
@@ -255,6 +260,9 @@ final class PanelController {
     /// claim first responder. See the type's documentation for why this is safe over
     /// a full-screen app.
     private func focus(_ panel: ResearchPanel) {
+        // Taking real focus ends preview ownership: the panel now belongs to the
+        // user, and `setPreviewing(false)` must not hide it from under them.
+        isPreviewing = false
         // Order in BEFORE activating. Activation moves the user to the space holding
         // the app's frontmost ordered-in window; with the all-spaces panel already on
         // the current space, that space is the one they are looking at. (The one way
