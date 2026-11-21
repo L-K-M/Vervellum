@@ -60,6 +60,70 @@ final class CitationValidatorTests: XCTestCase {
         XCTAssertTrue(result.isClean)
     }
 
+    /// A range is one marker naming several sources. It expands in place, so the
+    /// answer cites every source in the range and renders one chip for the group.
+    func testParsesRangeCitations() {
+        let result = CitationValidator.validate(answer: "Sources [1-3] agree.", sourceCount: 3)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1, 2])
+        XCTAssertEqual(result.spans, [
+            .text("Sources "),
+            .citation(sourceIndices: [0, 1, 2], raw: "[1-3]"),
+            .text(" agree."),
+        ])
+        XCTAssertTrue(result.isClean)
+    }
+
+    /// The en dash and em dash spellings are ranges too; a model that copies a range
+    /// out of a source document does not normalise the dash.
+    func testParsesEnDashAndEmDashRanges() {
+        for (answer, expected) in [("A [1–2].", [0, 1]), ("B [2—3].", [1, 2])] {
+            let result = CitationValidator.validate(answer: answer, sourceCount: 3)
+            XCTAssertEqual(result.citedSourceIndices, expected, answer)
+            XCTAssertTrue(result.isClean, answer)
+        }
+    }
+
+    /// A range can be mixed with plain numbers, and an overlapping range must not
+    /// cite a source twice.
+    func testRangeCombinesWithNumbersAndDeduplicates() {
+        let result = CitationValidator.validate(answer: "Both [1, 1-3].", sourceCount: 3)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1, 2])
+        XCTAssertTrue(result.isClean)
+    }
+
+    /// A reversed range is not a range; it is reported rather than guessed at, so the
+    /// turn carries the invalid-citation notice.
+    func testFlagsReversedRange() {
+        let result = CitationValidator.validate(answer: "Wrong [9-2].", sourceCount: 10)
+        XCTAssertEqual(result.invalidCitationGroups, ["9-2"])
+        XCTAssertFalse(result.isClean)
+        XCTAssertEqual(result.spans, [.text("Wrong "), .text("[9-2]"), .text(".")])
+    }
+
+    /// An endpoint past the source list is an invented number, exactly as a bare
+    /// `[99]` is; the in-range part of the range still cites.
+    func testFlagsAnOutOfRangeRangeEndpoint() {
+        let result = CitationValidator.validate(answer: "Mixed [1-5].", sourceCount: 2)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1])
+        XCTAssertEqual(result.outOfRangeCitations, [3, 4, 5])
+        XCTAssertFalse(result.isClean)
+    }
+
+    /// A malformed group with two separators is reported, not expanded.
+    func testFlagsAMalformedRange() {
+        let result = CitationValidator.validate(answer: "Wrong [1-3-5].", sourceCount: 5)
+        XCTAssertEqual(result.invalidCitationGroups, ["1-3-5"])
+        XCTAssertFalse(result.isClean)
+    }
+
+    /// A range inside code is an index, not a citation.
+    func testRangeInsideCodeIsNotACitation() {
+        let answer = "`items[1-3]` then fact [1]."
+        let result = CitationValidator.validate(answer: answer, sourceCount: 1)
+        XCTAssertEqual(result.citedSourceIndices, [0])
+        XCTAssertTrue(result.isClean)
+    }
+
     /// An out-of-range number is a fabricated citation. It must be reported, and the
     /// marker must degrade to plain text rather than becoming a chip to nowhere.
     func testFlagsOutOfRangeCitations() {

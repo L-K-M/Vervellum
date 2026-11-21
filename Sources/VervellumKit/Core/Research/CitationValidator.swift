@@ -34,18 +34,26 @@ enum CitationValidator {
         var citedSourceIndices: [Int]
         /// Citation numbers outside `1...sourceCount` that the model invented.
         var outOfRangeCitations: [Int]
+        /// Bracketed groups that could not be read as a number or a range — a
+        /// reversed range such as `[9-2]`, or a malformed one such as `[1-3-5]`.
+        /// They carry the same `invalidCitation` notice an invented number does.
+        var invalidCitationGroups: [String]
         /// Direct destinations the model wrote despite being told to cite by number.
         /// Populated only for document scope; inline scope exists solely for the
         /// renderer's citation masking and deliberately skips destination scanning.
         var forbiddenLinks: [String]
 
-        var isClean: Bool { outOfRangeCitations.isEmpty && forbiddenLinks.isEmpty }
+        var isClean: Bool {
+            outOfRangeCitations.isEmpty && invalidCitationGroups.isEmpty && forbiddenLinks.isEmpty
+        }
     }
 
-    /// Matches `[3]`, `[3, 4]`, `[3,4 , 12]` — digits and separators only, so an
-    /// ordinary markdown link `[text](url)` or a bracketed aside never matches.
+    /// Matches `[3]`, `[3, 4]`, `[3,4 , 12]` and the range spellings `[1-3]`,
+    /// `[1–3]`, `[2—4]` — digits and separators only, so an ordinary markdown link
+    /// `[text](url)` or a bracketed aside never matches. A range is expanded by the
+    /// parser below; a group that cannot be read as a number or a range is reported.
     private static let citationRegex = try? NSRegularExpression(
-        pattern: #"\[\s*\d{1,3}(?:\s*[,;]\s*\d{1,3})*\s*\]"#)
+        pattern: #"\[\s*\d{1,3}(?:\s*(?:[,;]\s*\d{1,3}|[-–—]\s*\d{1,3}))*\s*\]"#)
 
     /// Parses `answer` against a source list of `sourceCount` entries.
     ///
@@ -59,6 +67,7 @@ enum CitationValidator {
         var spans: [Span] = []
         var cited: Set<Int> = []
         var outOfRange: [Int] = []
+        var malformed: [String] = []
         let code = scope == .document ? codeRanges(in: answer) : inlineCodeRanges(in: answer[...])
         // Inline validation runs for every rendered Markdown block while an answer is
         // streaming, and its caller uses only citation spans. Destination policy is a
@@ -70,7 +79,8 @@ enum CitationValidator {
 
         guard let regex = citationRegex else {
             return Result(spans: [.text(answer)], citedSourceIndices: [],
-                          outOfRangeCitations: [], forbiddenLinks: forbiddenLinks)
+                          outOfRangeCitations: [], invalidCitationGroups: [],
+                          forbiddenLinks: forbiddenLinks)
         }
 
         let full = NSRange(answer.startIndex..<answer.endIndex, in: answer)
@@ -83,20 +93,46 @@ enum CitationValidator {
                 spans.append(.text(String(answer[cursor..<range.lowerBound])))
             }
             let raw = String(answer[range])
-            let numbers = raw
-                .trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
-                .split(whereSeparator: { $0 == "," || $0 == ";" || $0 == " " })
-                .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-
-            var indices: [Int] = []
-            for number in numbers {
+            let inner = raw.trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
+            func record(_ number: Int) {
                 if number >= 1 && number <= sourceCount {
-                    indices.append(number - 1)
                     cited.insert(number - 1)
                 } else {
                     outOfRange.append(number)
                 }
             }
+
+            var indices: [Int] = []
+            for group in inner.split(whereSeparator: { $0 == "," || $0 == ";" }) {
+                let trimmed = group.trimmingCharacters(in: .whitespaces)
+                if let single = Int(trimmed) {
+                    record(single)
+                    if single >= 1, single <= sourceCount { indices.append(single - 1) }
+                } else if let bounds = Self.rangeBounds(in: trimmed) {
+                    if bounds.start > bounds.end {
+                        // A reversed range is reported, not guessed at: forming a
+                        // ClosedRange from the swapped endpoints would trap.
+                        malformed.append(trimmed)
+                        continue
+                    }
+                    // A range is expanded in place, so `[1-3]` cites 1, 2 and 3 and
+                    // renders as one chip naming all three. Endpoints past the source
+                    // list are recorded as invented, exactly as a bare `[99]` is.
+                    for number in bounds.start...bounds.end {
+                        record(number)
+                        if number >= 1, number <= sourceCount { indices.append(number - 1) }
+                    }
+                } else {
+                    // Neither a number nor a range — more than one separator, or a
+                    // non-numeric endpoint. It is reported rather than guessed at: a
+                    // wrong expansion would cite sources the model never named.
+                    malformed.append(trimmed)
+                }
+            }
+            // Ascending and deduplicated: a range can overlap a neighbouring number
+            // (`[1, 1-3]`), and the renderers and the transcript expect one entry per
+            // source in citation order.
+            indices = Array(Set(indices)).sorted()
             // A marker whose every number was invented is kept as plain text rather
             // than rendered as a chip that leads nowhere.
             if indices.isEmpty {
@@ -115,7 +151,22 @@ enum CitationValidator {
         return Result(spans: spans,
                       citedSourceIndices: cited.sorted(),
                       outOfRangeCitations: outOfRange,
+                      invalidCitationGroups: malformed,
                       forbiddenLinks: forbiddenLinks)
+    }
+
+    /// The two endpoints of a `[1-3]`-style group, or nil when the group is not a
+    /// range at all. A group with more than one separator, or a non-numeric endpoint,
+    /// answers nil so the caller reports it rather than guessing an expansion. The
+    /// endpoints are returned unordered: a reversed range is a value the caller reports,
+    /// and forming a `ClosedRange` from it would trap.
+    private static func rangeBounds(in group: String) -> (start: Int, end: Int)? {
+        guard let separator = group.firstIndex(where: { $0 == "-" || $0 == "–" || $0 == "—" })
+        else { return nil }
+        let lower = group[..<separator].trimmingCharacters(in: .whitespaces)
+        let upper = group[group.index(after: separator)...].trimmingCharacters(in: .whitespaces)
+        guard let start = Int(lower), let end = Int(upper) else { return nil }
+        return (start, end)
     }
 
     // MARK: Code

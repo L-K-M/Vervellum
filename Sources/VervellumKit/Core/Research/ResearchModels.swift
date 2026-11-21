@@ -658,7 +658,9 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// invented reference would put a warning on every answer.
     mutating func applyCitationValidation(sourceCount: Int) {
         let validation = CitationValidator.validate(answer: answer, sourceCount: sourceCount)
-        if !validation.outOfRangeCitations.isEmpty { addNotice(.invalidCitation) }
+        if !validation.outOfRangeCitations.isEmpty || !validation.invalidCitationGroups.isEmpty {
+            addNotice(.invalidCitation)
+        }
         if !validation.forbiddenLinks.isEmpty { addNotice(.literalURL) }
     }
 
