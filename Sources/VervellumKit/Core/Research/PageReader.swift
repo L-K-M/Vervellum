@@ -505,7 +505,8 @@ final class DirectPageReader: PageReading {
     /// answers nil, swift-corelibs-foundation assumes big-endian, and neither is a
     /// contract. Decoding the two explicit codecs directly makes the result the
     /// same on both platforms, and a BOM — which the explicit codecs would keep as
-    /// U+FEFF — is consumed here.
+    /// U+FEFF — is consumed here. Returns nil when the body is not valid UTF-16
+    /// (odd byte count or unpaired surrogate); the caller chooses the fallback.
     private static func utf16(_ data: Data, defaultingTo endianness: UTF16Endianness) -> String? {
         let effective: UTF16Endianness
         let body: Data

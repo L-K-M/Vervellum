@@ -596,6 +596,14 @@ final class PageReadingTests: XCTestCase {
         XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16be"), text)
     }
 
+    /// An invalid UTF-16 body is not silently empty: `decode` falls back to its
+    /// Latin-1 last resort, so a truncated page still yields text.
+    func testAnInvalidUTF16BodyFallsBackRatherThanEmpty() {
+        let data = Data([0x00, 0xD8])   // a lone high surrogate
+        XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16le"),
+                       String(data: data, encoding: .isoLatin1))
+    }
+
     // MARK: The reader server's reply
 
     /// The published documentation names the endpoint and the tool but not the argument
