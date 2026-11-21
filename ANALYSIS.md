@@ -20,7 +20,7 @@ slice), #242 (storage failure reporting and retry; A13's retry slice and A14's
 reporting slice) and #247 (single-domain evidence cue; N01). Their slices are
 annotated in place below; restore an entry if its PR closes unmerged. New
 findings from the pass are A84 and A85, plus A86 (since implemented in open PR
-#243) and additions to A83, C01 and S08.
+#255) and additions to A83, C01 and S08.
 
 Codex pass 2026-11-21: reviewed against `origin/main` at `e90efc3`. Four small
 fixes from this pass are open in PRs #233 (range citations, A62), #234
@@ -31,9 +31,9 @@ agents' PRs were not inspected during this review.
 
 Codex pass 2026-11-21 (little-platypus worktree): reviewed against `origin/main` at
 `d4c9c1c`, which is the code `e90efc3` still carries. Four fixes from this pass are
-open in PRs #238 (delete a committed `.orig` test artifact), #243 (one openable-URL
+open in PRs #254 (delete a committed `.orig` test artifact), #255 (one openable-URL
 predicate for every click path, and userinfo rejected at click time as well as at
-harvest time), #249 (redact pasted text; the macOS slice of A63) and #252 (end the
+harvest time), #256 (redact pasted text; the macOS slice of A63) and #257 (end the
 recall walk when the recalled draft is edited; the recall slice of A23). Their
 implemented slices are annotated in place. New findings L01-L05 are appended at the
 end. Concurrent branches and other agents' PRs were not inspected during this review.
@@ -269,7 +269,7 @@ Editing a recalled question must end recall mode; otherwise arrows can replace t
 
 Suggested fix: Make suggestion replacement reversible or explicitly confirm it. End recall after user edits and use undo-cooperative shouldChangeText/didChangeText updates.
 
-Open PR #252 carries the recall slice: the walk records the text it put on screen and
+Open PR #257 carries the recall slice: the walk records the text it put on screen and
 a draft that no longer equals it ends the walk, so an edited recalled question is not
 replaced by the next arrow press. The suggestion-replacement and undo halves remain.
 
@@ -337,7 +337,7 @@ Suggested fix: route paste through the same redaction and the same banner as the
 selection path, building on A07 (redact before truncation, before display); keep
 plain prose untouched.
 
-Open PR #249 carries the macOS slice: `ComposerView.route` sends a text paste through
+Open PR #256 carries the macOS slice: `ComposerView.route` sends a text paste through
 `SecretRedactor` under the existing preference, inserts the redacted text undoably and
 raises the same banner. The Linux Ctrl-V slice remains; it needs a GTK clipboard-text
 read, which the shim does not expose yet.
@@ -1779,7 +1779,7 @@ view should not trust upstream filtering.
 Suggested fix: expose the existing `openable` check and route both call sites
 through it.
 
-Implemented in open PR #243: one openable-URL predicate is shared by the citation
+Implemented in open PR #255: one openable-URL predicate is shared by the citation
 chip, the source row and the finding chip, and userinfo is refused at click time as
 well as at harvest time. Restore this entry if that PR closes unmerged.
 
