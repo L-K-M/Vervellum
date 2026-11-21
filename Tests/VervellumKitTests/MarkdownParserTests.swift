@@ -129,6 +129,7 @@ final class MarkdownParserTests: XCTestCase {
         let blocks = MarkdownParser.parse("``` `lang`\nplain")
         XCTAssertEqual(blocks.count, 1)
         XCTAssertEqual(blocks[0].kind, .paragraph)
+        XCTAssertTrue(blocks[0].text.contains("``` `lang`"))
         XCTAssertTrue(blocks[0].text.contains("plain"))
         // A tilde fence has no such rule, so the same shape is still a code block.
         let tilde = MarkdownParser.parse("~~~ `lang`\nplain\n~~~")
