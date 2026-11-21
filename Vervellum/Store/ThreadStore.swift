@@ -256,7 +256,9 @@ final class ThreadStore: ObservableObject {
         // threads.json still names the attachments, and sweeping now would resurrect
         // the thread on the next launch with its pictures gone. `deleteAll` already
         // gates on the same invariant — this puts it in the one place every caller
-        // shares, and the launch sweep below no longer needs its own.
+        // shares, and the launch sweep above (in `init`) no longer needs its own.
+        // The `isReadOnly` half is belt-and-braces: a newer-version document already
+        // fails `libraryIsTrustworthy` above, so the sweep never reached here for it.
         guard !archive.isReadOnly, archive.eraseFailure == nil else { return }
         // `archive.library`, not the published mirror beside it. `onChange` hops to the
         // main thread when it is not on it, so the copy this object publishes can be one
