@@ -60,6 +60,81 @@ final class CitationValidatorTests: XCTestCase {
         XCTAssertTrue(result.isClean)
     }
 
+    // MARK: Ranges
+
+    /// A range is a citation of every source it spans, so `[1-3]` is not three
+    /// literal markers the renderer has to guess at.
+    func testParsesHyphenRangeCitations() {
+        let result = CitationValidator.validate(answer: "The whole span [1-3].", sourceCount: 5)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1, 2])
+        XCTAssertTrue(result.outOfRangeCitations.isEmpty)
+        XCTAssertEqual(result.spans, [.text("The whole span "),
+                                      .citation(sourceIndices: [0, 1, 2], raw: "[1-3]"),
+                                      .text(".")])
+    }
+
+    func testParsesEnDashAndEmDashRanges() {
+        for (marker, expected) in [("[1–3]", [0, 1, 2]), ("[2—4]", [1, 2, 3])] {
+            let result = CitationValidator.validate(answer: "Span \(marker).", sourceCount: 5)
+            XCTAssertEqual(result.citedSourceIndices, expected, marker)
+            XCTAssertTrue(result.outOfRangeCitations.isEmpty, marker)
+        }
+    }
+
+    func testRangeMayBeCombinedWithSingleNumbers() {
+        let result = CitationValidator.validate(answer: "Mixed [1, 3-4].", sourceCount: 5)
+        XCTAssertEqual(result.citedSourceIndices, [0, 2, 3])
+        XCTAssertTrue(result.outOfRangeCitations.isEmpty)
+    }
+
+    func testRangeAllowsSpacesAroundTheDash() {
+        let result = CitationValidator.validate(answer: "Spaced [1 - 3].", sourceCount: 5)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1, 2])
+        XCTAssertTrue(result.outOfRangeCitations.isEmpty)
+    }
+
+    /// A reversed range is not a range. It must be flagged and must not cite: a chip
+    /// over nothing is the failure the numeric rule exists to prevent.
+    func testReversedRangeIsFlaggedAndCitesNothing() {
+        let result = CitationValidator.validate(answer: "Backwards [9-2].", sourceCount: 9)
+        XCTAssertEqual(result.citedSourceIndices, [])
+        XCTAssertEqual(result.outOfRangeCitations, [9, 2])
+        XCTAssertEqual(result.spans, [.text("Backwards "), .text("[9-2]"), .text(".")])
+    }
+
+    /// A range that reaches past the list cites the part that exists and says which
+    /// bound did not, rather than reporting every number in between.
+    func testRangePastTheSourceCountIsFlaggedAtTheBound() {
+        let result = CitationValidator.validate(answer: "Too far [1-300].", sourceCount: 5)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1, 2, 3, 4])
+        XCTAssertEqual(result.outOfRangeCitations, [300])
+    }
+
+    func testRangeBelowOneIsFlaggedAtTheBound() {
+        let result = CitationValidator.validate(answer: "From zero [0-2].", sourceCount: 2)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1])
+        XCTAssertEqual(result.outOfRangeCitations, [0])
+    }
+
+    func testRangeWithNoSourcesIsFlagged() {
+        let result = CitationValidator.validate(answer: "Nothing [1-2].", sourceCount: 0)
+        XCTAssertEqual(result.citedSourceIndices, [])
+        XCTAssertEqual(result.outOfRangeCitations, [2])
+    }
+
+    func testRangeInsideCodeIsNotACitation() {
+        let result = CitationValidator.validate(answer: "`items[1-3]` and [1].", sourceCount: 3)
+        XCTAssertEqual(result.citedSourceIndices, [0])
+        XCTAssertTrue(result.outOfRangeCitations.isEmpty)
+    }
+
+    /// A second dash is not a range spelling the way accepts.
+    func testMalformedRangeIsNotAMarker() {
+        let result = CitationValidator.validate(answer: "Not a marker [1-3-5].", sourceCount: 5)
+        XCTAssertEqual(result.citedSourceIndices, [])
+        XCTAssertTrue(result.outOfRangeCitations.isEmpty)
+    }
+
     /// An out-of-range number is a fabricated citation. It must be reported, and the
     /// marker must degrade to plain text rather than becoming a chip to nowhere.
     func testFlagsOutOfRangeCitations() {

@@ -42,10 +42,45 @@ enum CitationValidator {
         var isClean: Bool { outOfRangeCitations.isEmpty && forbiddenLinks.isEmpty }
     }
 
-    /// Matches `[3]`, `[3, 4]`, `[3,4 , 12]` — digits and separators only, so an
-    /// ordinary markdown link `[text](url)` or a bracketed aside never matches.
+    /// Matches `[3]`, `[3, 4]`, `[3,4 , 12]` and the range spellings `[1-3]`,
+    /// `[1–3]` and `[2—4]` — digits and separators only, so an ordinary markdown link
+    /// `[text](url)` or a bracketed aside never matches.
+    ///
+    /// A range is one element among the comma/semicolon-separated others, so
+    /// `[1-3, 5]` is a valid marker. The dash set is the three a model actually
+    /// reaches for; a hyphen first in the class so it is literal.
     private static let citationRegex = try? NSRegularExpression(
-        pattern: #"\[\s*\d{1,3}(?:\s*[,;]\s*\d{1,3})*\s*\]"#)
+        pattern: #"\[\s*\d{1,3}(?:\s*[-–—]\s*\d{1,3})?(?:\s*[,;]\s*\d{1,3}(?:\s*[-–—]\s*\d{1,3})?)*\s*\]"#)
+
+    /// One element of a citation marker: a single number, or an inclusive range.
+    ///
+    /// A value rather than two parallel arrays so a caller cannot read a range's
+    /// bounds as two unrelated numbers.
+    private enum CitationElement {
+        case single(Int)
+        case range(low: Int, high: Int)
+    }
+
+    /// Splits a marker's body into its elements.
+    ///
+    /// The regular expression has already established the shape, so this is a
+    /// structural read rather than a second validation pass; an element that still
+    /// fails to parse is dropped, which cannot happen for text the regex matched.
+    private static func elements(in raw: String) -> [CitationElement] {
+        raw.trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
+            .split(whereSeparator: { $0 == "," || $0 == ";" })
+            .compactMap { element in
+                let text = element.trimmingCharacters(in: .whitespaces)
+                guard !text.isEmpty else { return nil }
+                if let separator = text.range(of: #"\s*[-–—]\s*"#, options: .regularExpression) {
+                    guard let low = Int(text[..<separator.lowerBound]),
+                          let high = Int(text[separator.upperBound...]) else { return nil }
+                    return .range(low: low, high: high)
+                }
+                guard let number = Int(text) else { return nil }
+                return .single(number)
+            }
+    }
 
     /// Parses `answer` against a source list of `sourceCount` entries.
     ///
@@ -83,18 +118,39 @@ enum CitationValidator {
                 spans.append(.text(String(answer[cursor..<range.lowerBound])))
             }
             let raw = String(answer[range])
-            let numbers = raw
-                .trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
-                .split(whereSeparator: { $0 == "," || $0 == ";" || $0 == " " })
-                .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
 
             var indices: [Int] = []
-            for number in numbers {
-                if number >= 1 && number <= sourceCount {
-                    indices.append(number - 1)
-                    cited.insert(number - 1)
-                } else {
-                    outOfRange.append(number)
+            for element in Self.elements(in: raw) {
+                switch element {
+                case .single(let number):
+                    if number >= 1, number <= sourceCount {
+                        indices.append(number - 1)
+                        cited.insert(number - 1)
+                    } else {
+                        outOfRange.append(number)
+                    }
+                case .range(let low, let high):
+                    // A reversed range is not a range; both bounds are reported so
+                    // the reader can see which end was wrong.
+                    guard low <= high else {
+                        outOfRange.append(low)
+                        outOfRange.append(high)
+                        continue
+                    }
+                    // The valid part is still cited. A range that reaches past the
+                    // source list is flagged at the bound that did, rather than
+                    // reporting every number in between: `[1-300]` over 24 sources
+                    // cites 1…24 and says 300 does not exist.
+                    if low < 1 { outOfRange.append(low) }
+                    if high > sourceCount { outOfRange.append(high) }
+                    let first = max(low, 1)
+                    let last = min(high, sourceCount)
+                    if first <= last {
+                        for number in first...last {
+                            indices.append(number - 1)
+                            cited.insert(number - 1)
+                        }
+                    }
                 }
             }
             // A marker whose every number was invented is kept as plain text rather

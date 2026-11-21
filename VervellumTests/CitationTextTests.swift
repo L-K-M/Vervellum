@@ -22,4 +22,14 @@ final class CitationTextTests: XCTestCase {
         XCTAssertTrue(String(text.characters).contains("then [1]"))
         XCTAssertEqual(text.runs.compactMap(\.link).count, 2)
     }
+
+    func testRangeCitationRendersEveryMember() {
+        let rangeSources = (1...3).map {
+            Source(number: $0, url: "https://retrieved.example/\($0)", title: "Source \($0)", snippet: "")
+        }
+        let text = CitationText.render("Span [1-3].", sources: rangeSources)
+        XCTAssertEqual(String(text.characters), "Span [1,2,3].")
+        // A grouped chip is one link, to its first source; the rest are in the list.
+        XCTAssertEqual(text.runs.compactMap(\.link), [URL(string: "https://retrieved.example/1")!])
+    }
 }
