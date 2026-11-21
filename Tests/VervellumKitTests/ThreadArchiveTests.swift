@@ -636,6 +636,22 @@ final class ThreadArchiveTests: XCTestCase {
             guard deniedPaths.contains(URL.path) else { return try super.removeItem(at: URL) }
             throw CocoaError(.fileWriteNoPermission)
         }
+
+        /// Rotation replaces the backup rather than removing it, so the denial
+        /// has to cover both operations.
+        override func replaceItem(at originalItemURL: URL,
+                                  withItemAt newItemURL: URL,
+                                  backupItemName: String?,
+                                  options: FileManager.ItemReplacementOptions,
+                                  resultingItemURL: AutoreleasingUnsafeMutablePointer<NSURL?>?) throws {
+            guard deniedPaths.contains(originalItemURL.path) else {
+                return try super.replaceItem(at: originalItemURL, withItemAt: newItemURL,
+                                             backupItemName: backupItemName,
+                                             options: options,
+                                             resultingItemURL: resultingItemURL)
+            }
+            throw CocoaError(.fileWriteNoPermission)
+        }
     }
 
     /// Fails directory creation a fixed number of times, standing in for a folder
@@ -739,6 +755,74 @@ final class ThreadArchiveTests: XCTestCase {
         store.retryErase()
         XCTAssertNil(store.eraseFailure)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    /// When no staging copy survived, the retry falls back to rotating the current
+    /// primary afresh rather than reporting a failure it could still resolve.
+    func testABackupRetryWithoutStagingRotatesTheCurrentPrimary() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+        let backupURL = fileURL.appendingPathExtension("bak")
+        let stagingURL = backupURL.appendingPathExtension("tmp")
+
+        manager.deniedPaths.insert(backupURL.path)
+        store.save(thread("three"))
+        store.flush()
+        XCTAssertNotNil(store.backupFailure)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stagingURL.path))
+
+        try FileManager.default.removeItem(at: stagingURL)
+        manager.deniedPaths.removeAll()
+        store.retrySave()
+        XCTAssertNil(store.backupFailure)
+        let rotated = ThreadArchive(fileURL: backupURL, debounce: 0)
+        XCTAssertEqual(rotated.library.threads.map(\.title), ["three", "two", "one"],
+                       "the fallback rotates the current primary")
+    }
+
+    /// The owner-only permission promise is independent of the backup: a failed
+    /// rotation must not silently leave the freshly written file group-readable.
+    func testTheOwnerOnlyPermissionIsAppliedEvenWhenTheBackupFails() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+        manager.deniedPaths.insert(fileURL.appendingPathExtension("bak").path)
+        store.save(thread("three"))
+        store.flush()
+
+        XCTAssertNotNil(store.backupFailure)
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let mode = try XCTUnwrap(attributes[.posixPermissions] as? Int)
+        XCTAssertEqual(mode & 0o777, 0o600, "the file that was written must be owner-only")
+    }
+
+    /// A failure publishes once, and a successful retry publishes again — the
+    /// Settings warning is driven by this hook, not by a render.
+    func testFailureChangesArePublished() {
+        let manager = FlakyFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        let failed = expectation(description: "failure published")
+        failed.assertForOverFulfill = false
+        store.onFailureChanged = { failed.fulfill() }
+        store.save(thread("one"))
+        store.flush()
+        wait(for: [failed], timeout: 2)
+        XCTAssertNotNil(store.saveFailure)
+
+        manager.createDirectoryFailures = 0
+        let cleared = expectation(description: "clearing published")
+        cleared.assertForOverFulfill = false
+        store.onFailureChanged = { cleared.fulfill() }
+        store.retrySave()
+        wait(for: [cleared], timeout: 2)
+        XCTAssertNil(store.saveFailure)
     }
 
     // MARK: Retention

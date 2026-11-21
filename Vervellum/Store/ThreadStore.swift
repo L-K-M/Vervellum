@@ -128,7 +128,11 @@ final class ThreadStore: ObservableObject {
     /// copy, the erase and the attachment sweep. One string because Settings shows
     /// one line; the retry is one action because it re-runs whichever failed.
     var storageFailure: String? {
-        let failures = [archive.saveFailure, archive.backupFailure,
+        // The write/backup pair is written on the archive's private queue during
+        // debounced saves, so it is read through the synchronized accessor rather
+        // than raced on the main thread. The erase failures are main-thread state.
+        let writeFailures = archive.storageFailures()
+        let failures = [writeFailures.save, writeFailures.backup,
                         archive.eraseFailure, attachmentEraseFailure]
             .compactMap { $0 }
         return failures.isEmpty ? nil : failures.joined(separator: " ")
@@ -146,7 +150,8 @@ final class ThreadStore: ObservableObject {
         } else if attachmentEraseFailure != nil {
             eraseAttachments()
         }
-        if archive.saveFailure != nil || archive.backupFailure != nil {
+        let writeFailures = archive.storageFailures()
+        if writeFailures.save != nil || writeFailures.backup != nil {
             archive.retrySave()
         }
     }

@@ -344,8 +344,13 @@ final class ThreadArchive {
     /// block. A success clears the failure beside the file.
     func retryErase() {
         guard eraseFailure != nil else { return }
+        let failureBefore = eraseFailure
         recordingFailure { try eraseEverything() }
-        DispatchQueue.main.async { self.onFailureChanged?() }
+        // Only republish on an actual change, matching `recordFailures`. A retry
+        // that fails again for the same reason leaves the same warning standing.
+        if eraseFailure != failureBefore {
+            DispatchQueue.main.async { self.onFailureChanged?() }
+        }
     }
 
     /// Re-attempts a failed write or backup rotation.
@@ -381,6 +386,17 @@ final class ThreadArchive {
         saveFailure = save
         backupFailure = backup
         DispatchQueue.main.async { self.onFailureChanged?() }
+    }
+
+    /// The write/backup failure strings, safe to read from any thread.
+    ///
+    /// The stored properties are confined to `queue`, because `writeNow` runs
+    /// there during debounced streaming saves. A reader on the main thread —
+    /// SwiftUI evaluating `ThreadStore.storageFailure`, or a retry button — goes
+    /// through here rather than racing the write. Never call this from code
+    /// already on `queue`: `queue.sync` would deadlock.
+    func storageFailures() -> (save: String?, backup: String?) {
+        queue.sync { (saveFailure, backupFailure) }
     }
 
     private static func saveFailureMessage(in directory: URL, file: String) -> String {
@@ -485,15 +501,20 @@ final class ThreadArchive {
             // Research questions are personal. Keep the file owner-only rather than
             // inheriting the umask. A failure here does not undo the write, but it
             // does leave the file readable by others, which is worth saying.
-            if backupFailure == nil {
-                do {
-                    try fileManager.setAttributes([.posixPermissions: 0o600],
-                                                  ofItemAtPath: fileURL.path)
-                } catch {
-                    backupFailure = "Could not make \(fileURL.lastPathComponent) "
-                        + "owner-readable only in \(directory.path). The file was saved, "
-                        + "but it may be readable by others."
-                }
+            //
+            // Run regardless of the rotation result: a failed backup must not also
+            // silently drop the owner-only promise for the file that did get
+            // written. Both failures are kept, because they send the reader to two
+            // different places.
+            do {
+                try fileManager.setAttributes([.posixPermissions: 0o600],
+                                              ofItemAtPath: fileURL.path)
+            } catch {
+                let permission = "Could not make \(fileURL.lastPathComponent) "
+                    + "owner-readable only in \(directory.path). The file was saved, "
+                    + "but it may be readable by others."
+                backupFailure = [backupFailure, permission]
+                    .compactMap { $0 }.joined(separator: " ")
             }
             recordFailures(save: nil, backup: backupFailure)
         } catch {
@@ -517,11 +538,25 @@ final class ThreadArchive {
             return true
         }
         let staging = backupURL.appendingPathExtension("tmp")
+        // A staging copy inherited from a failed rotation holds the pre-write
+        // primary — the recovery copy this rotation exists to make. Finish that
+        // rotation rather than staging a new copy over it. Returning false keeps
+        // the failure reported and the staging copy alive for the next attempt.
+        if pendingBackupStaging == staging {
+            return finishPendingBackupRotation()
+        }
         do {
             try? fileManager.removeItem(at: staging)
             try fileManager.copyItem(at: fileURL, to: staging)
-            try? fileManager.removeItem(at: backupURL)
-            try fileManager.moveItem(at: staging, to: backupURL)
+            // `replaceItemAt` swaps in one step, so the old backup is never
+            // absent: a crash mid-rotation still leaves a `.bak` on disk. The
+            // first rotation has no backup yet, and `replaceItemAt` requires a
+            // destination, so that one is a plain move.
+            if fileManager.fileExists(atPath: backupURL.path) {
+                try fileManager.replaceItemAt(backupURL, withItemAt: staging)
+            } else {
+                try fileManager.moveItem(at: staging, to: backupURL)
+            }
             pendingBackupStaging = nil
             return true
         } catch {
@@ -541,8 +576,11 @@ final class ThreadArchive {
             return false
         }
         do {
-            try? fileManager.removeItem(at: backupURL)
-            try fileManager.moveItem(at: staging, to: backupURL)
+            if fileManager.fileExists(atPath: backupURL.path) {
+                try fileManager.replaceItemAt(backupURL, withItemAt: staging)
+            } else {
+                try fileManager.moveItem(at: staging, to: backupURL)
+            }
             pendingBackupStaging = nil
             return true
         } catch {
