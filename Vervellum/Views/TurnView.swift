@@ -250,14 +250,23 @@ struct TurnView: View, Equatable {
 
 /// A blinking caret for the moment between the last search and the first token.
 struct StreamingCaret: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isBright = false
+
+    /// The caret's opacity for a brightness tick, held still under Reduce Motion —
+    /// the same rule SourcesView and ProcessTrailView apply to their animations. Pure
+    /// so the contract is pinned by a test rather than by eyeballing a blink.
+    static func opacity(isBright: Bool, reduceMotion: Bool) -> Double {
+        reduceMotion ? 0.6 : (isBright ? 1 : 0.25)
+    }
 
     var body: some View {
         RoundedRectangle(cornerRadius: 1, style: .continuous)
             .fill(PanelTheme.Palette.accent)
             .frame(width: 7, height: 14)
-            .opacity(isBright ? 1 : 0.25)
+            .opacity(Self.opacity(isBright: isBright, reduceMotion: reduceMotion))
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
                     isBright = true
                 }
