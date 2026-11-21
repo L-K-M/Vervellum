@@ -754,6 +754,11 @@ final class ResearchRunner: ResearchRunning {
         // honest, and whether the evidence is a monoculture. Two citations to one
         // website are not two independent witnesses, and nothing else on the turn
         // says so. It is a property of the evidence, not a verdict on the answer.
+        //
+        // Here rather than inside `applyCitationValidation`, which also runs at
+        // load (`finishInterruptedTurns`) and on a cancelled partial answer: those
+        // paths would stamp the cue onto a stored turn on every launch, or onto a
+        // answer the reader stopped mid-sentence.
         update { turn in
             let validation = turn.applyCitationValidation(sourceCount: sources.count)
             if turn.citesSingleDomain(using: validation) {

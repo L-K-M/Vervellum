@@ -388,6 +388,11 @@ final class ResearchRunnerTests: XCTestCase {
     /// Two citations to one website are not two independent witnesses. The cue is a
     /// property of the evidence, so it is derived from the sources the answer cited
     /// and says nothing about whether the answer itself is true.
+    ///
+    /// Fixture note: `/search` is stubbed with two same-domain results. When the
+    /// harvester's diversity cap makes that unlikely in a live run, the badge's
+    /// common trigger is a mono-domain cited subset of a diverse harvest — covered
+    /// at the model level in `ResearchModelTests`.
     func testAnAnswerCitingOneDomainIsBadged() async throws {
         let transport = StubTransport { call in
             switch call.kind {

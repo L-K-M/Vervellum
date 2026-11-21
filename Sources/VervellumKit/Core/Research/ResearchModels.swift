@@ -689,7 +689,10 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// is not a monoculture, and no citation is not either.
     func citesSingleDomain(using validation: CitationValidator.Result) -> Bool {
         let cited = citedSources(using: validation)
-        guard cited.count >= 2 else { return false }
+        // Distinct numbers, not markers: `[1, 1]` is one witness cited twice, and
+        // the validator's indices are already deduplicated — this states the
+        // requirement rather than relying on that.
+        guard Set(cited.map(\.number)).count >= 2 else { return false }
         return Set(cited.map(\.domain)).count == 1
     }
 

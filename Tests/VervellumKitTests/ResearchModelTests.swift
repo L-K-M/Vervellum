@@ -642,6 +642,13 @@ final class ResearchModelTests: XCTestCase {
                                        urls: ["https://one.example/a", "https://two.example/b"])))
         XCTAssertFalse(citesSingle(turn(answer: "No citations here.",
                                        urls: ["https://one.example/a", "https://one.example/b"])))
+        XCTAssertFalse(citesSingle(turn(answer: "Citing one witness twice [1, 1].",
+                                       urls: ["https://one.example/a", "https://two.example/b"])),
+                       "one source cited twice is still one witness")
+        XCTAssertTrue(citesSingle(turn(answer: "The third source is beside the point [1, 2].",
+                                      urls: ["https://one.example/a", "https://one.example/b",
+                                             "https://two.example/c"])),
+                     "a mono-domain subset of a diverse set is still a monoculture")
     }
 
     func testDurationFormatting() {
