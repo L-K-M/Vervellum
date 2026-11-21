@@ -1,7 +1,9 @@
 import SwiftUI
 
 /// Keeps the verdict and citation buttons at reading size, sharing a baseline
-/// on each line. SwiftUI mirrors the placements for right-to-left interfaces.
+/// on each line. Each view can wrap within the full proposed width. A fixed
+/// item wider than the proposal takes a line of its own at its intrinsic width.
+/// SwiftUI mirrors the placements for right-to-left interfaces.
 struct BaselineFlowLayout: Layout {
     var spacing: CGFloat
     var lineSpacing: CGFloat
