@@ -267,6 +267,10 @@ struct StreamingCaret: View {
                     isBright = true
                 }
             }
+            // Rebuilt when the setting flips mid-stream: onAppear is a once-only
+            // hook, so a caret that appeared under Reduce Motion would otherwise
+            // stay dark and animation-less forever after it was switched off.
+            .id(reduceMotion)
             .accessibilityLabel("Writing the answer")
     }
 }
