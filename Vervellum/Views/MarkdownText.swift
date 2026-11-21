@@ -262,34 +262,9 @@ enum CitationText {
             // grouped marker names is still in the list under the answer, which is
             // where the rest of them are read.
             return MaskedCitation(label: cited.map { String($0.number) }.joined(separator: ","),
-                                  url: cited.first.flatMap { Self.openable($0.url) })
+                                  url: cited.first?.browserURL)
         }
         return (mask.text, citations)
-    }
-
-    /// A citation's address, but only when it is one a click may follow.
-    ///
-    /// `NSTextView` opens a `.link` run through `NSWorkspace`, which will launch *any*
-    /// scheme a URL carries — `file:`, and whatever a third-party app has registered.
-    /// A source address is harvested from the web, so it is not this panel's to trust:
-    /// the GTK front end already refuses everything but http(s) in `GTK.openLink`, for
-    /// the same reason and in the same words, and a chip that behaved differently on one
-    /// platform would be the harder half to remember.
-    ///
-    /// A refused address still renders as a chip — the number, the face, the colour —
-    /// and simply does not open. The source list under the answer is where its address
-    /// is read either way.
-    private static func openable(_ address: String) -> URL? {
-        // A host as well as the scheme. `URL(string:)` will build `https:` — a scheme
-        // and nothing else — and that passes a check that asks only what it starts
-        // with. Nothing is opened by it, but this is the funnel that decides what a
-        // click may reach, and a funnel that admits what it cannot describe is one
-        // nobody can reason about later.
-        guard let url = URL(string: address),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              url.host?.isEmpty == false else { return nil }
-        return url
     }
 
     // MARK: Inline parsing

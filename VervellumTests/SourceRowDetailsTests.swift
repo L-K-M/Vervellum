@@ -47,7 +47,7 @@ final class SourceRowDetailsTests: XCTestCase {
         try click(at: body, in: window)
         XCTAssertEqual(opened.value, 1,
                        "the row body must open the page; recompute the fixture if the layout changed")
-        XCTAssertTrue(window.childWindows?.isEmpty != false,
+        XCTAssertTrue(window.childWindows?.isEmpty ?? true,
                       "the browser action must not present the details card")
     }
 
@@ -113,14 +113,10 @@ final class SourceRowDetailsTests: XCTestCase {
     /// The popover is a child window of the row's window, presented a run loop or
     /// two after the click.
     private func waitForPopover(in window: NSWindow) -> NSWindow? {
-        var popover: NSWindow?
-        for _ in 0..<12 where popover == nil {
-            let tick = expectation(description: "Popover presented")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { tick.fulfill() }
-            wait(for: [tick], timeout: 3)
-            popover = window.childWindows?.first
-        }
-        return popover
+        let presented = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in window.childWindows?.first != nil }, object: nil)
+        guard XCTWaiter.wait(for: [presented], timeout: 3) == .completed else { return nil }
+        return window.childWindows?.first
     }
 
     private func settle() {

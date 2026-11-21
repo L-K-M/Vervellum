@@ -136,12 +136,14 @@ struct SourcesView: View {
 struct SourceRow: View {
     @Environment(\.panelTextScale) private var textScale
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let source: Source
     var isCited: Bool
     /// What the row's click does. Injected for the same reason `FindingsView`'s
     /// action is: a hosted test cannot let a real click reach `NSWorkspace`.
     var onOpen: (Source) -> Void = { source in
-        guard let url = URL(string: source.url) else { return }
+        guard let url = source.browserURL else { return }
         NSWorkspace.shared.open(url)
     }
 
@@ -216,6 +218,7 @@ struct SourceRow: View {
         }
         .buttonStyle(.plain)
         .focused($focus, equals: .open)
+        .animation(PanelTheme.Motion.disclosureAnimation(reduceMotion), value: isHovering || focus == .open)
         .onHover { isHovering = $0 }
         .help(source.url)
         .accessibilityLabel("Source \(source.number), \(source.title), \(source.domain)"
@@ -247,6 +250,7 @@ struct SourceRow: View {
         }
         .buttonStyle(.plain)
         .focused($focus, equals: .details)
+        .animation(PanelTheme.Motion.disclosureAnimation(reduceMotion), value: detailsAfforded)
         .onHover { detailsHovering = $0 }
         .padding(.top, PanelTheme.Space.tight)
         .help("Show the source's summary")
