@@ -535,6 +535,18 @@ final class PageReadingTests: XCTestCase {
                        "<p>€“”</p>")
     }
 
+    /// The `iso-8859-1` and `latin1` labels are decoded as Windows-1252, the way the
+    /// WHATWG Encoding Standard and every browser treat them. The codecs agree outside
+    /// 0x80...0x9F, so the euro and the smart quotes survive instead of becoming C1
+    /// controls.
+    func testDeclaredLatin1LabelUsesTheWindowsCodec() {
+        let bytes = Data([0x3C, 0x70, 0x3E, 0x80, 0x93, 0x94, 0x3C, 0x2F, 0x70, 0x3E])
+        XCTAssertEqual(DirectPageReader.decode(bytes, contentType: "text/html; charset=iso-8859-1"),
+                       "<p>€“”</p>")
+        XCTAssertEqual(DirectPageReader.decode(bytes, contentType: "text/html; charset=latin1"),
+                       "<p>€“”</p>")
+    }
+
     /// A BOM-less UTF-16 page is valid UTF-8 — every second byte is NUL — so a
     /// UTF-8-first decode reads it as a NUL-filled string. The declared endianness has
     /// to be acted on before the generic fallback.
@@ -566,6 +578,23 @@ final class PageReadingTests: XCTestCase {
         let text = "<p>ok</p>"
         let data = text.data(using: .utf16)!
         XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16"), text)
+    }
+
+    /// A bare `utf-16` declaration with a BOM-less body takes the little-endian
+    /// fallback, matching WHATWG's label table. This pins the branch the explicit
+    /// endianness tests never reach, and the Foundation behaviour it rests on
+    /// (`.utf16` answers nil without a BOM).
+    func testDeclaredUTF16WithoutBOMFallsBackToLittleEndian() {
+        let text = "<p>ok</p>"
+        let data = text.data(using: .utf16LittleEndian)!
+        XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16"), text)
+    }
+
+    /// A byte-order mark overrides a contradicting declaration, as it does in a browser.
+    func testABOMOverridesTheDeclaredEndianness() {
+        let text = "<p>ok</p>"
+        let data = Data([0xFF, 0xFE]) + text.data(using: .utf16LittleEndian)!
+        XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16be"), text)
     }
 
     // MARK: The reader server's reply

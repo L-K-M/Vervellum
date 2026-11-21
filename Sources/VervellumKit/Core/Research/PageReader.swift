@@ -459,28 +459,30 @@ final class DirectPageReader: PageReading {
     /// before the generic fallback. For the single-byte charsets the order is the
     /// other way: a server that labels UTF-8 as ISO-8859-1 or Windows-1252 is common
     /// enough that a strict UTF-8 decode wins, and a genuine Windows-1252 page is not
-    /// valid UTF-8, so it falls through to the declared codec — now Windows-1252
-    /// rather than ISO-8859-1, so a euro and the smart quotes survive. Latin-1 is the
-    /// last resort because it cannot fail.
+    /// valid UTF-8, so it falls through to the declared codec. The `iso-8859-1` and
+    /// `latin1` labels are decoded as Windows-1252 as well, because that is what the
+    /// WHATWG Encoding Standard — and every browser — does with those labels; the
+    /// codecs agree outside `0x80...0x9F`, where a real page carries the euro and the
+    /// smart quotes rather than C1 controls. Latin-1 is the last resort for a page
+    /// that declared nothing, because it cannot fail.
     static func decode(_ data: Data, contentType: String) -> String? {
         let text: String?
         switch declaredEncoding(contentType) {
         case .utf16LittleEndian:
-            text = String(data: data, encoding: .utf16LittleEndian)
+            text = Self.utf16(data, defaultingTo: .little)
         case .utf16BigEndian:
-            text = String(data: data, encoding: .utf16BigEndian)
+            text = Self.utf16(data, defaultingTo: .big)
         case .utf16:
-            // `.utf16` detects a byte-order mark and answers nil without one; the
-            // explicit little-endian codec covers a BOM-less body.
-            text = String(data: data, encoding: .utf16)
-                ?? String(data: data, encoding: .utf16LittleEndian)
+            // WHATWG maps the bare `utf-16` label to little-endian (RFC 2781 would
+            // default to big-endian; browsers do not). A byte-order mark still wins.
+            text = Self.utf16(data, defaultingTo: .little)
         case .utf8:
             text = String(data: data, encoding: .utf8)
         case .windowsCP1252:
             text = String(data: data, encoding: .utf8) ?? Self.windowsCP1252(data)
         case .isoLatin1:
-            text = String(data: data, encoding: .utf8)
-                ?? String(data: data, encoding: .isoLatin1)
+            // The label is decoded as Windows-1252, per WHATWG; see the type comment.
+            text = String(data: data, encoding: .utf8) ?? Self.windowsCP1252(data)
         case nil:
             text = String(data: data, encoding: .utf8)
         }
@@ -488,6 +490,43 @@ final class DirectPageReader: PageReading {
         // An explicit UTF-16 codec keeps a byte-order mark as U+FEFF; the extractor
         // and the model do not want a zero-width character at the top of the page.
         return text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
+    }
+
+    /// Which endianness a UTF-16 body decodes as when it carries no byte-order mark.
+    private enum UTF16Endianness {
+        case little
+        case big
+    }
+
+    /// Decodes a UTF-16 body, honouring a byte-order mark and otherwise using
+    /// `defaultingTo`.
+    ///
+    /// Foundation's `.utf16` is deliberately not used for a BOM-less body: Darwin
+    /// answers nil, swift-corelibs-foundation assumes big-endian, and neither is a
+    /// contract. Decoding the two explicit codecs directly makes the result the
+    /// same on both platforms, and a BOM — which the explicit codecs would keep as
+    /// U+FEFF — is consumed here.
+    private static func utf16(_ data: Data, defaultingTo endianness: UTF16Endianness) -> String {
+        let effective: UTF16Endianness
+        let body: Data
+        if data.count >= 2 {
+            let first = data[data.startIndex], second = data[data.startIndex + 1]
+            if first == 0xFF, second == 0xFE {
+                effective = .little
+                body = Data(data.dropFirst(2))
+            } else if first == 0xFE, second == 0xFF {
+                effective = .big
+                body = Data(data.dropFirst(2))
+            } else {
+                effective = endianness
+                body = data
+            }
+        } else {
+            effective = endianness
+            body = data
+        }
+        return String(data: body,
+                      encoding: effective == .little ? .utf16LittleEndian : .utf16BigEndian) ?? ""
     }
 
     /// Windows-1252, decoded here rather than through `String(data:encoding:)`.
