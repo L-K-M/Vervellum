@@ -7,6 +7,8 @@ extension Notification.Name {
     /// summon. The hosting view is reused between summons and SwiftUI's `.onAppear`
     /// does not reliably re-fire for a view that never left the hierarchy.
     static let vervellumPanelDidShow = Notification.Name("VervellumPanelDidShowNotification")
+    /// History closed while the panel is still visible; the composer takes focus back.
+    static let vervellumComposerShouldClaimFocus = Notification.Name("VervellumComposerShouldClaimFocusNotification")
     /// Posted when the panel is about to hide, so views can drop transient state.
     static let vervellumPanelWillHide = Notification.Name("VervellumPanelWillHideNotification")
 }

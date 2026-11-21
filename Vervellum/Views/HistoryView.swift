@@ -38,7 +38,10 @@ struct HistoryView: View {
                 list
             }
         }
-        .onAppear { searchFocused = true }
+        .onAppear {
+            // The newly inserted NSTextField joins the responder chain next turn.
+            DispatchQueue.main.async { searchFocused = true }
+        }
     }
 
     private var searchField: some View {
