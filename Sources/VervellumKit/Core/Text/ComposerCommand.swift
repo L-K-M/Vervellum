@@ -90,12 +90,15 @@ enum ComposerCommand: Equatable {
     ///
     /// `parse` used `Character.isWhitespace` for its interior split while `commandWord`
     /// used `CharacterSet.whitespacesAndNewlines` for its trim and interior test, and the
-    /// two disagree on characters a paste can bring in — U+200B is in the set but is not
-    /// `isWhitespace`. A command word containing one then parsed as one thing and
-    /// completed as nothing, so Return could send a half-typed command to the model as a
-    /// question. One predicate, asked of a `Character` scalar by scalar, so the two paths
-    /// cannot drift again.
+    /// two disagree on pasted format characters depending on platform: U+200B is in
+    /// Darwin's set but is not `isWhitespace`, and is absent from the Linux set — so a
+    /// command word carrying one could parse one way and complete another, and Return
+    /// could send a half-typed command to the model as a question. The invisible format
+    /// characters (ZWSP, ZWNJ, ZWJ, word joiner, BOM) are unioned in explicitly so the
+    /// shared set means the same thing on every platform, and one predicate asked of a
+    /// `Character` scalar by scalar keeps the paths from drifting again.
     private static let whitespace = CharacterSet.whitespacesAndNewlines
+        .union(CharacterSet(charactersIn: "\u{200B}\u{200C}\u{200D}\u{2060}\u{FEFF}"))
     private static func isWhitespace(_ character: Character) -> Bool {
         character.unicodeScalars.allSatisfy { whitespace.contains($0) }
     }

@@ -177,11 +177,12 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertNil(ComposerCommand.completions(for: "/zzz"))
     }
 
-    /// `parse` and the completion-list predicate must agree on what whitespace is.
-    /// They did not: `parse` split on `Character.isWhitespace` while `commandWord`
-    /// used `CharacterSet.whitespacesAndNewlines`, and U+200B is in the set but is not
-    /// `isWhitespace` — so a command word carrying one parsed one way and completed as
-    /// nothing, and Return could send a half-typed command to the model as a question.
+    /// `parse` and the completion-list predicate must agree on what whitespace is, on
+    /// every platform. The historical definitions disagreed on U+200B (in Darwin's
+    /// `whitespacesAndNewlines`, absent from the Linux set, and never `isWhitespace`),
+    /// so this test pins the explicit union of invisible format characters into the
+    /// shared set: a pasted ZWSP separates the command word for `parse`, `commandWord`
+    /// and the trim alike, on macOS and Linux.
     func testParseAndCommandWordShareOneWhitespaceDefinition() {
         let zwsp = "\u{200B}"
         // Interior: the character is a separator for both paths now — `parse` splits the
