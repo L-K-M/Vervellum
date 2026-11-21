@@ -52,8 +52,7 @@ struct AnswerTextView: NSViewRepresentable {
         // over the run's own attributes for a link, so leaving it at the default would
         // repaint every citation in the system link style — and the font is left out on
         // purpose, so the run's monospaced face survives.
-        view.linkTextAttributes = [.foregroundColor: PanelTheme.NativePalette.accent,
-                                   .cursor: NSCursor.pointingHand]
+        view.linkTextAttributes = Self.linkAttributes(accent: PanelTheme.NativePalette.accent)
         // The text view must not fight the height SwiftUI gives it, and must not stretch
         // the panel to fit an unbreakable line.
         view.setContentHuggingPriority(.defaultHigh, for: .vertical)
@@ -100,10 +99,21 @@ struct AnswerTextView: NSViewRepresentable {
             // there is nothing showing and nothing pending.
             DispatchQueue.main.async { view.schedule(nil) }
         }
-        // `linkTextAttributes` is set once in `makeNSView`: it is a constant, nothing
-        // resets it, and replacing the storage does not touch it. Assigning it again per
-        // streamed chunk was work on the hottest path in the panel, and it implied to a
-        // reader that the value can change.
+        // `linkTextAttributes` follows the accent, but only when the accent actually
+        // moved: it wins over the run's own colour for a link, so a theme change has to
+        // rewrite it or the chips keep the old accent — while assigning it again on every
+        // streamed chunk is hot-path work for nothing. The comparison makes the write
+        // happen exactly on theme changes.
+        let accent = PanelTheme.NativePalette.accent
+        if (view.linkTextAttributes?[.foregroundColor] as? NSColor) != accent {
+            view.linkTextAttributes = Self.linkAttributes(accent: accent)
+        }
+    }
+
+    /// The attributes a citation chip is drawn with: accent-coloured and a pointing hand.
+    /// Pure over the accent so the refresh decision in `updateNSView` is testable.
+    static func linkAttributes(accent: NSColor) -> [NSAttributedString.Key: Any] {
+        [.foregroundColor: accent, .cursor: NSCursor.pointingHand]
     }
 
     /// Sources by address, keyed the way the lookup will ask for them.

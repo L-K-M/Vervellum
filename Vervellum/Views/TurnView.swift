@@ -37,12 +37,19 @@ struct TurnView: View, Equatable {
 
     static func == (lhs: TurnView, rhs: TurnView) -> Bool {
         lhs.turn == rhs.turn && lhs.showsProcessTrail == rhs.showsProcessTrail
+            && lhs.palette == rhs.palette
     }
 
     @Environment(\.panelTextScale) private var textScale
 
     let turn: ResearchTurn
     let showsProcessTrail: Bool
+    /// The palette the row was last rendered with. Part of `==` because the theme is a
+    /// global (`PanelTheme.palette`), not an input any parent passes down: without this,
+    /// a theme change re-renders the panel chrome but every `TurnView` compares equal to
+    /// its predecessor and the rendered answer, findings and sources keep the old colours
+    /// until their text changes. A value captured here makes the change an input.
+    let palette: PanelPalette
     var onRetry: () -> Void
     var onAskFollowup: (String) -> Void
 
