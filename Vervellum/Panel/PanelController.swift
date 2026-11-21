@@ -34,6 +34,7 @@ final class PanelController {
     private var panel: ResearchPanel?
     private var keyMonitor: Any?
     private var resignObserver: NSObjectProtocol?
+    private var becomeKeyObserver: NSObjectProtocol?
     private weak var appToRestoreOnClose: NSRunningApplication?
     /// Whether `show()` captured an app to restore. Distinguishes "the captured app
     /// quit while the panel was open" (restore is nil but this is true → fall back to
@@ -126,6 +127,7 @@ final class PanelController {
         if !isOpen {
             installKeyMonitor()
             installResignObserver(for: panel)
+            installBecomeKeyObserver(for: panel)
             isOpen = true
         }
     }
@@ -260,9 +262,6 @@ final class PanelController {
     /// claim first responder. See the type's documentation for why this is safe over
     /// a full-screen app.
     private func focus(_ panel: ResearchPanel) {
-        // Taking real focus ends preview ownership: the panel now belongs to the
-        // user, and `setPreviewing(false)` must not hide it from under them.
-        isPreviewing = false
         // Order in BEFORE activating. Activation moves the user to the space holding
         // the app's frontmost ordered-in window; with the all-spaces panel already on
         // the current space, that space is the one they are looking at. (The one way
@@ -274,6 +273,9 @@ final class PanelController {
         // without this the composer would show a caret and receive nothing.
         NSApp.activate()
         panel.makeKey()
+        // `setPreviewing(false)` would hide the panel. Only transfer ownership
+        // after it really became key; the observer covers a later key transition.
+        if panel.isKeyWindow { isPreviewing = false }
         NotificationCenter.default.post(name: .vervellumPanelDidShow, object: nil)
     }
 
@@ -311,6 +313,16 @@ final class PanelController {
         }
     }
 
+    /// A preview can become key by clicking it as well as through the summon key.
+    /// Either action makes it the user's panel, so Settings closing cannot take it away.
+    private func installBecomeKeyObserver(for panel: ResearchPanel) {
+        becomeKeyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main
+        ) { [weak self] _ in
+            self?.isPreviewing = false
+        }
+    }
+
     /// Escape, and the shortcuts that only make sense while the panel is up.
     ///
     /// A local monitor rather than SwiftUI key handling: the panel hosts a text view,
@@ -340,6 +352,10 @@ final class PanelController {
         if let resignObserver {
             NotificationCenter.default.removeObserver(resignObserver)
             self.resignObserver = nil
+        }
+        if let becomeKeyObserver {
+            NotificationCenter.default.removeObserver(becomeKeyObserver)
+            self.becomeKeyObserver = nil
         }
     }
 

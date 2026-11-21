@@ -141,6 +141,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store: store,
             updateChecker: updateChecker,
             onShortcutsChanged: { [weak self] in self?.registerHotkeys() })
+        self.settingsWindow?.shouldRestoreActivation = { [weak panelController] in
+            // Closing Settings must not take focus from a preview the user summoned.
+            panelController?.isOpen != true
+        }
 
         observePanelPreview()
 
