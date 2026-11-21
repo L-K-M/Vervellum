@@ -3400,3 +3400,27 @@ ResearchModels.swift, ResearchRunner.swift:2039-2110. Effort: M.
 Delight — nice-to-have
 
 Currently only the chip or a typed command. Effort: S.
+
+### N38 · Surface the load-time prune in the app, not only on stderr
+
+UX and accessibility — nice-to-have
+
+Lowering `keptThreads` between launches trims the in-memory library and explains the
+recovery path only through `FileHandle.standardError` (ThreadArchive.swift:214) —
+a Dock-launched app has no terminal, so "where did my threads go" is unanswerable in
+the app, on the one destructive path with no user gesture behind it. Suggested fix:
+carry a `trimmedOnLoadCount` on the archive and show it beside the History/Settings
+thread counter with the "raise the limit and relaunch" guidance. Adjacent A12.
+Effort: S.
+
+### D13 · Warn on a duplicate question and offer the earlier answer
+
+Delight — nice-to-have
+
+Before spending a run, a normalized exact/near-exact question match against
+`ThreadLibrary` could offer "You asked this on <date> — reopen, or compare" instead of
+producing two slightly different answers to the same question. Suggested fix:
+match on a case/whitespace/punctuation-folded question across threads; on a hit show
+a non-blocking Reopen / Ask anyway / Compare prompt. Never auto-send or silently
+substitute the old answer. Where: ThreadLibrary.swift:118, ResearchEngine ask path.
+Effort: M.
