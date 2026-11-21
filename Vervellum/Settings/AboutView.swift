@@ -13,7 +13,10 @@ struct AboutView: View {
     /// optional prints `Optional("0.3.1")`, so read the raw Info.plist value and fall
     /// back to "unknown" for a bundle without one. Pure over the bundle, so testable.
     static func versionText(_ bundle: Bundle) -> String {
-        bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        // An empty string (a misconfigured export pipeline ships those) is as
+        // unreadable as a missing key, so it falls back too.
+        (bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
     }
 
     /// The whole rendered line, routed through the helper so the view cannot drift back

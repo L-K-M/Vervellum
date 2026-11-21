@@ -23,4 +23,20 @@ final class AboutViewTests: XCTestCase {
         XCTAssertEqual(AboutView.versionText(Bundle()), "unknown")
         XCTAssertEqual(AboutView.versionLine(Bundle()), "Version unknown")
     }
+
+    func testVersionTextFallsBackForAnEmptyVersionString() {
+        // A bundle that ships CFBundleShortVersionString = "" must read as "unknown",
+        // not render "Version " with nothing after it.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AboutViewTests-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try? (["CFBundleShortVersionString": ""] as NSDictionary)
+            .write(to: dir.appendingPathComponent("Info.plist"), atomically: true)
+        guard let bundle = Bundle(path: dir.path) else {
+            XCTFail("could not load the fixture bundle")
+            return
+        }
+        XCTAssertEqual(AboutView.versionText(bundle), "unknown")
+    }
 }
