@@ -29,6 +29,18 @@ final class EvidenceExtractorTests: XCTestCase {
         XCTAssertEqual(EvidenceExtractor.sources(from: [payload]).first?.url, planet)
     }
 
+    /// The published date is displayed beside the title in the source list and the
+    /// citation preview, so a hostile value in it (a bidi override, a C0 control) must be
+    /// stripped exactly like the url, title and snippet are.
+    func testStripsHostileCharactersFromThePublishedDate() {
+        let payload: [String: Any] = ["results": [[
+            "title": "X", "url": "https://a.example.com/1",
+            "publishedDate": "2026\u{202E}-01\u{0002}-02",
+        ]]]
+        XCTAssertEqual(EvidenceExtractor.sources(from: [payload]).first?.publishedAt,
+                       "2026-01-02")
+    }
+
     /// Two searches routinely surface the same page; giving it two citation numbers
     /// would make the source list lie about how much evidence there is.
     func testCollapsesDuplicateURLs() {

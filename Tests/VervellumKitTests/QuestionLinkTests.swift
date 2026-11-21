@@ -183,6 +183,10 @@ final class QuestionLinkTests: XCTestCase {
         // rule removes on every other turn. Pinned so it stays a decision.
         XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/a?utm_source=news"),
                        "example.com/a")
+        // `URLComponents.path` percent-decodes, so %E2%80%AE (a bidi RLO) arrives as a real
+        // override character — stripped like every other displayed field.
+        XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/%E2%80%AE/admin"),
+                       "example.com//admin")
         XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/a#results"),
                        "example.com/a")
         XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com:8443/a"),

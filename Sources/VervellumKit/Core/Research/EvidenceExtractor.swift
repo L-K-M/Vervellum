@@ -65,7 +65,10 @@ enum EvidenceExtractor {
                    url: HostileText.stripped(hit.url),
                    title: HostileText.stripped(hit.title),
                    snippet: HostileText.stripped(hit.snippet),
-                   publishedAt: hit.date)
+                   // The date is displayed beside the title in the source list and the
+                   // citation preview, so it gets the same stripping as the other fields —
+                   // a search engine's result is untrusted input like the rest.
+                   publishedAt: hit.date.map { HostileText.stripped($0) })
         }
     }
 
