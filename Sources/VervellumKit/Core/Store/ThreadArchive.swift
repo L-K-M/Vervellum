@@ -449,7 +449,10 @@ final class ThreadArchive {
             // copy of the live file and has stopped being a recovery copy at all.
             if currentContents() == data {
                 pendingSnapshot = nil
-                recordFailures(save: nil, backup: nil)
+                // The intended bytes are already there, so a failed *write* is
+                // resolved — but a failed backup is not: no rotation happened, and
+                // the recovery copy is still the stale one.
+                recordFailures(save: nil, backup: backupFailure)
                 return
             }
 
