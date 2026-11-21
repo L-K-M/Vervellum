@@ -19,7 +19,8 @@ Codex (little-platypus) pass 2026-11-21: reviewed against `origin/main` at
 slice), #242 (storage failure reporting and retry; A13's retry slice and A14's
 reporting slice) and #247 (single-domain evidence cue; N01). Their slices are
 annotated in place below; restore an entry if its PR closes unmerged. New
-findings from the pass are A84, A85 and A86, plus additions to A83, C01 and S08.
+findings from the pass are A84 and A85, plus A86 (since implemented in open PR
+#243) and additions to A83, C01 and S08.
 
 Codex pass 2026-11-21: reviewed against `origin/main` at `e90efc3`. Four small
 fixes from this pass are open in PRs #233 (range citations, A62), #234
@@ -1777,6 +1778,10 @@ view should not trust upstream filtering.
 
 Suggested fix: expose the existing `openable` check and route both call sites
 through it.
+
+Implemented in open PR #243: one openable-URL predicate is shared by the citation
+chip, the source row and the finding chip, and userinfo is refused at click time as
+well as at harvest time. Restore this entry if that PR closes unmerged.
 
 Accept: no behaviour change for a real source; a malformed stored URL cannot launch
 another scheme.
