@@ -97,15 +97,15 @@ struct ShortcutsView: View {
 
     /// Why a stored shortcut is not registered even though the system would take it.
     ///
-    /// `HotkeyBinding.isValid` applies Keycap's usability rule, so a binding this
-    /// app refuses (an OS-reserved chord, or a bare key that is not a function
-    /// key) is never attempted and the registration state says nothing about it.
-    /// Without this line the shortcut looks configured and silently never fires.
+    /// `HotkeyBinding.registrationProblem` names every rule this app applies,
+    /// including the editing and Option-typing chords Keycap's rule allows. A
+    /// binding those rules refuse is never attempted, and the registration state
+    /// says nothing about it — without this line the shortcut looks configured and
+    /// silently never fires.
     @ViewBuilder
     private func usabilityWarning(_ binding: HotkeyBinding) -> some View {
-        if binding.enabled && !binding.combo.isUsableGlobalHotkey {
-            Label("\(binding.displayString) can't be used as a global shortcut, so Vervellum "
-                  + "doesn't register it. Record a new one.",
+        if let problem = binding.registrationProblem {
+            Label(problem,
                   systemImage: "exclamationmark.triangle.fill")
                 .font(.system(size: 11))
                 .foregroundStyle(.orange)

@@ -40,7 +40,68 @@ struct HotkeyBinding: Codable, Equatable {
     /// rule refuses the OS-owned ⌘Q/W/H/M/Space/Tab (and ⇧⌘3–6) so a registration
     /// cannot swallow them, and accepts bare F1–F20 because function keys do not
     /// collide with typing. A Shift-only chord is still ordinary text.
-    var isValid: Bool { enabled && combo.isUsableGlobalHotkey }
+    /// Vervellum adds two rules of its own on top of Keycap's, because a global
+    /// hotkey is registered with Carbon for the whole system rather than for this
+    /// app: a chord that an editor treats as ordinary typing would be swallowed
+    /// everywhere, not only while the panel is open.
+    var isValid: Bool {
+        enabled && combo.isUsableGlobalHotkey
+            && !isProtectedEditingShortcut && !isOptionOnlyCharacterShortcut
+    }
+
+    /// Command (+ optional Shift) on a key every editor binds for editing.
+    ///
+    /// ⌘C/V/X/A/Z and ⇧⌘Z (redo) are the chords a global registration would take
+    /// away from every text field on the Mac. Adding ⌥ or ⌃ makes a different
+    /// chord that no editor binds, so those stay allowed.
+    private static let protectedEditingKeys: Set<UInt32> = [
+        KeyCode.a, KeyCode.c, KeyCode.v, KeyCode.x, KeyCode.z,
+    ]
+
+    /// Whether this binding is a global version of a system editing command.
+    var isProtectedEditingShortcut: Bool {
+        let modifiers = combo.modifiers
+        guard modifiers.contains(.command),
+              modifiers.intersection([.option, .control]).isEmpty
+        else { return false }
+        return Self.protectedEditingKeys.contains(keyCode)
+    }
+
+    /// Whether this is Option, alone or with Shift, on a non-function key.
+    ///
+    /// Option is a *typing* modifier: ⌥← and ⌥C are text composition and
+    /// deletion, not commands. Capturing one globally would quietly eat those
+    /// keys in every app, and ⌥⇧ letters are accented characters on many
+    /// layouts. Option with Command or Control, or on a function key, does not
+    /// collide with typing and stays allowed.
+    var isOptionOnlyCharacterShortcut: Bool {
+        let modifiers = combo.modifiers
+        guard modifiers.contains(.option),
+              modifiers.intersection([.command, .control]).isEmpty
+        else { return false }
+        return !KeyCode.isFunctionKey(keyCode)
+    }
+
+    /// Why this binding cannot be registered, in words the Shortcuts pane can
+    /// show; nil when it can be registered. The recorder is Keycap's, so it
+    /// accepts a combo this property refuses — the warning beside it is what
+    /// keeps that honest, and `isValid` is what keeps the chord off the system.
+    var registrationProblem: String? {
+        guard enabled else { return nil }
+        if isProtectedEditingShortcut {
+            return "\(displayString) is a system editing shortcut, so Vervellum doesn't "
+                + "register it globally. Record a different one."
+        }
+        if isOptionOnlyCharacterShortcut {
+            return "\(displayString) types a character with the Option key, so Vervellum "
+                + "doesn't register it globally. Record a different one."
+        }
+        if !combo.isUsableGlobalHotkey {
+            return "\(displayString) can't be used as a global shortcut, so Vervellum "
+                + "doesn't register it. Record a new one."
+        }
+        return nil
+    }
 
     /// The modifier glyphs in canonical macOS order (⌃⌥⇧⌘).
     var modifierSymbols: String { combo.modifiers.symbols }

@@ -161,4 +161,64 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertFalse(modifiers.contains(.control))
         XCTAssertFalse(modifiers.contains(.option))
     }
+
+    /// A global ⌘C would swallow Copy in every app on the Mac, and ⇧⌘Z is
+    /// redo. Vervellum refuses the editing family even though Keycap's own
+    /// rule accepts it; adding ⌥ or ⌃ makes a chord no editor binds.
+    func testEditingChordsAreRefused() {
+        let command = UInt32(cmdKey)
+        for keyCode in [KeyCode.a, KeyCode.c, KeyCode.v, KeyCode.x, KeyCode.z] {
+            for modifiers in [command, command | UInt32(shiftKey)] {
+                let binding = HotkeyBinding(keyCode: keyCode, modifiers: modifiers,
+                                            keyLabel: "X", enabled: true)
+                XCTAssertFalse(binding.isValid, "\(modifiers) \(keyCode) should be refused")
+                XCTAssertTrue(binding.isProtectedEditingShortcut)
+                XCTAssertNotNil(binding.registrationProblem)
+            }
+            XCTAssertTrue(HotkeyBinding(keyCode: keyCode,
+                                        modifiers: command | UInt32(optionKey),
+                                        keyLabel: "X", enabled: true).isValid,
+                          "⌥⌘\(keyCode) is not an editing chord")
+            XCTAssertTrue(HotkeyBinding(keyCode: keyCode,
+                                        modifiers: command | UInt32(controlKey),
+                                        keyLabel: "X", enabled: true).isValid,
+                          "⌃⌘\(keyCode) is not an editing chord")
+        }
+    }
+
+    /// Option and Option-Shift are how accented and alternate characters are
+    /// typed, so a global registration on them would eat text composition
+    /// everywhere. Function keys and Command/Control combinations are safe.
+    func testOptionOnlyCharacterChordsAreRefused() {
+        let option = UInt32(optionKey)
+        for modifiers in [option, option | UInt32(shiftKey)] {
+            let binding = HotkeyBinding(keyCode: KeyCode.c, modifiers: modifiers,
+                                        keyLabel: "C", enabled: true)
+            XCTAssertFalse(binding.isValid)
+            XCTAssertTrue(binding.isOptionOnlyCharacterShortcut)
+            XCTAssertNotNil(binding.registrationProblem)
+        }
+        XCTAssertTrue(HotkeyBinding(keyCode: KeyCode.f12, modifiers: option,
+                                    keyLabel: "F12", enabled: true).isValid,
+                      "⌥F12 does not type a character")
+        XCTAssertTrue(HotkeyBinding(keyCode: KeyCode.c,
+                                    modifiers: option | UInt32(cmdKey),
+                                    keyLabel: "C", enabled: true).isValid,
+                      "⌥⌘C is not a typing chord")
+        XCTAssertTrue(HotkeyBinding(keyCode: KeyCode.leftArrow,
+                                    modifiers: option | UInt32(cmdKey),
+                                    keyLabel: "←", enabled: true).isValid,
+                      "⌥⌘← is not a typing chord")
+    }
+
+    /// A binding saved before this policy existed is still refused on the next
+    /// launch, and the pane's warning names the reason rather than silently
+    /// reporting success.
+    func testAStoredEditingChordStaysRefused() {
+        let stored = HotkeyBinding(keyCode: KeyCode.c, modifiers: UInt32(cmdKey),
+                                   keyLabel: "C", enabled: true)
+        let decoded = HotkeyBinding.decode(stored.jsonString, fallback: .defaultSummon)
+        XCTAssertFalse(decoded.isValid)
+        XCTAssertTrue(decoded.registrationProblem?.contains("editing shortcut") ?? false)
+    }
 }
