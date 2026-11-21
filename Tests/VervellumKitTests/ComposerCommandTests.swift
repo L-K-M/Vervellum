@@ -202,9 +202,16 @@ final class ComposerCommandTests: XCTestCase {
 
     func testTheMacOSHelpStillNamesEveryShortcut() {
         let help = ComposerCommand.helpText(legend: .macOS)
-        for key in ["⌘N", "⌘Y", "⌘.", "⌘,", "⌘W", "⌘Return"] {
+        for key in ["⌘N", "⌘Y", "⌘.", "⌘,", "⌘W", "⌘Return", "⌘↑", "⌘↓"] {
             XCTAssertTrue(help.contains(key), "macOS help is missing \(key)")
         }
+    }
+
+    /// The transcript scroll keys are macOS-only: the Linux window has no panel commands
+    /// behind them, so its help must not teach them (the legend's nil keeps every "⌘" out).
+    func testTheLinuxHelpHasNoTranscriptScrollKeys() {
+        let help = ComposerCommand.helpText(legend: .linux)
+        XCTAssertFalse(help.contains("top / bottom of the thread"))
     }
 
     // MARK: /model

@@ -117,6 +117,17 @@ final class ResearchPanel: NSPanel {
             post(.submit)
             return true
         }
+        // Command-Arrow jumps the thread to its top or bottom. The composer always holds
+        // first responder, so ↑/↓ alone reach it, not the thread's scroll view — without
+        // these a long transcript can only be scrolled with the pointer.
+        if event.keyCode == UInt16(KeyCode.upArrow) {
+            post(.scrollToTop)
+            return true
+        }
+        if event.keyCode == UInt16(KeyCode.downArrow) {
+            post(.scrollToBottom)
+            return true
+        }
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "w":
             onClose?()
@@ -149,6 +160,10 @@ enum PanelCommand: String {
     case toggleHistory
     case openSettings
     case stop
+    /// ⌘↑ — scroll the thread to its first turn.
+    case scrollToTop
+    /// ⌘↓ — scroll the thread to its latest content.
+    case scrollToBottom
 }
 
 extension Notification.Name {
