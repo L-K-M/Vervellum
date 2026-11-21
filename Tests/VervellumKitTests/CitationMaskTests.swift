@@ -43,4 +43,10 @@ final class CitationMaskTests: XCTestCase {
         XCTAssertEqual(mask.text, "Backwards [9-2].")
         XCTAssertTrue(mask.sourceIndices.isEmpty)
     }
+
+    func testARangeOverlappingASingleNumberKeepsOneEntry() {
+        let mask = CitationMask("Overlap [1-3, 2].", sourceCount: 3)
+        XCTAssertEqual(mask.text, "Overlap \(CitationMask.placeholder).")
+        XCTAssertEqual(mask.sourceIndices, [[0, 1, 2]])
+    }
 }

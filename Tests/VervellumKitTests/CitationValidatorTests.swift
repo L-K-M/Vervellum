@@ -135,6 +135,16 @@ final class CitationValidatorTests: XCTestCase {
         XCTAssertTrue(result.outOfRangeCitations.isEmpty)
     }
 
+    /// A marker may name a source twice, and the chip is drawn from the rendered
+    /// list — so a repeat would show `[1,2,3,2]`.
+    func testARepeatedSourceInsideAMarkerIsCitedOnce() {
+        let result = CitationValidator.validate(answer: "Overlap [1-3, 2].", sourceCount: 3)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1, 2])
+        XCTAssertEqual(result.spans, [.text("Overlap "),
+                                      .citation(sourceIndices: [0, 1, 2], raw: "[1-3, 2]"),
+                                      .text(".")])
+    }
+
     /// An out-of-range number is a fabricated citation. It must be reported, and the
     /// marker must degrade to plain text rather than becoming a chip to nowhere.
     func testFlagsOutOfRangeCitations() {

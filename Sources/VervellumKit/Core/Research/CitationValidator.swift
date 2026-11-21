@@ -120,12 +120,19 @@ enum CitationValidator {
             let raw = String(answer[range])
 
             var indices: [Int] = []
+            // A marker may name a source twice — `[1-3, 2]` — and the chip is drawn
+            // from this list, so a repeated index would render `[1,2,3,2]`. `cited`
+            // already deduplicated the set; this keeps the rendered order free of
+            // repeats too, in first-named order.
+            var seen = Set<Int>()
             for element in Self.elements(in: raw) {
                 switch element {
                 case .single(let number):
                     if number >= 1, number <= sourceCount {
-                        indices.append(number - 1)
-                        cited.insert(number - 1)
+                        if seen.insert(number - 1).inserted {
+                            indices.append(number - 1)
+                            cited.insert(number - 1)
+                        }
                     } else {
                         outOfRange.append(number)
                     }
@@ -147,8 +154,10 @@ enum CitationValidator {
                     let last = min(high, sourceCount)
                     if first <= last {
                         for number in first...last {
-                            indices.append(number - 1)
-                            cited.insert(number - 1)
+                            if seen.insert(number - 1).inserted {
+                                indices.append(number - 1)
+                                cited.insert(number - 1)
+                            }
                         }
                     }
                 }
