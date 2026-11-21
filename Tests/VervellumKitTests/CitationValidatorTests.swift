@@ -124,6 +124,23 @@ final class CitationValidatorTests: XCTestCase {
         XCTAssertTrue(result.isClean)
     }
 
+    /// A citation that wraps across a line is still one citation. The regex's `\s*`
+    /// admits the newline; the parser must trim it rather than flag the fragment as
+    /// malformed.
+    func testAMultiLineCitationIsStillOneCitation() {
+        let result = CitationValidator.validate(answer: "A [1,\n2].", sourceCount: 2)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1])
+        XCTAssertTrue(result.invalidCitationGroups.isEmpty)
+        XCTAssertTrue(result.isClean)
+    }
+
+    func testAMultiLineRangeIsStillARange() {
+        let result = CitationValidator.validate(answer: "A [1-3\n].", sourceCount: 3)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1, 2])
+        XCTAssertTrue(result.invalidCitationGroups.isEmpty)
+        XCTAssertTrue(result.isClean)
+    }
+
     /// An out-of-range number is a fabricated citation. It must be reported, and the
     /// marker must degrade to plain text rather than becoming a chip to nowhere.
     func testFlagsOutOfRangeCitations() {

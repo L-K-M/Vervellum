@@ -32,7 +32,10 @@ enum CitationValidator {
         var spans: [Span]
         /// Zero-based source indices actually cited, ascending.
         var citedSourceIndices: [Int]
-        /// Citation numbers outside `1...sourceCount` that the model invented.
+        /// Citation numbers outside `1...sourceCount` that the model invented. May
+        /// contain duplicates: a range that repeats or overlaps an invented endpoint
+        /// (`[3-5, 3-5]`) records each occurrence. Consumers gate on `isEmpty`; no
+        /// surface shows the raw array.
         var outOfRangeCitations: [Int]
         /// Bracketed groups that could not be read as a number or a range — a
         /// reversed range such as `[9-2]`, or a malformed one such as `[1-3-5]`.
@@ -52,8 +55,12 @@ enum CitationValidator {
     /// `[1–3]`, `[2—4]` — digits and separators only, so an ordinary markdown link
     /// `[text](url)` or a bracketed aside never matches. A range is expanded by the
     /// parser below; a group that cannot be read as a number or a range is reported.
+    /// The whitespace runs are possessive (`\s*+`) so a long run of spaces and digits
+    /// with no closing bracket cannot make the engine partition the whitespace every
+    /// which way. The pattern is matched against model-written text on every rendered
+    /// block while an answer streams, so a degenerate marker must not stall that path.
     private static let citationRegex = try? NSRegularExpression(
-        pattern: #"\[\s*\d{1,3}(?:\s*(?:[,;]\s*\d{1,3}|[-–—]\s*\d{1,3}))*\s*\]"#)
+        pattern: #"\[\s*+\d{1,3}(?:\s*+(?:[,;]\s*+\d{1,3}|[-–—]\s*+\d{1,3}))*\s*+\]"#)
 
     /// Parses `answer` against a source list of `sourceCount` entries.
     ///
@@ -104,7 +111,10 @@ enum CitationValidator {
 
             var indices: [Int] = []
             for group in inner.split(whereSeparator: { $0 == "," || $0 == ";" }) {
-                let trimmed = group.trimmingCharacters(in: .whitespaces)
+                // Newlines as well as spaces: the regex's `\s*` admits a marker that
+                // wraps across a line, and a wrapped `[1,\n2]` is still one citation.
+                // Trimming only spaces would leave `"\n2"` and flag it as malformed.
+                let trimmed = group.trimmingCharacters(in: .whitespacesAndNewlines)
                 if let single = Int(trimmed) {
                     record(single)
                     if single >= 1, single <= sourceCount { indices.append(single - 1) }
@@ -165,8 +175,9 @@ enum CitationValidator {
     private static func rangeBounds(in group: String) -> (start: Int, end: Int)? {
         guard let separator = group.firstIndex(where: { $0 == "-" || $0 == "–" || $0 == "—" })
         else { return nil }
-        let lower = group[..<separator].trimmingCharacters(in: .whitespaces)
-        let upper = group[group.index(after: separator)...].trimmingCharacters(in: .whitespaces)
+        let lower = group[..<separator].trimmingCharacters(in: .whitespacesAndNewlines)
+        let upper = group[group.index(after: separator)...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard let start = Int(lower), let end = Int(upper) else { return nil }
         return (start, end)
     }
