@@ -43,6 +43,10 @@ struct EmptyStateView: View {
                 hint("Return", "ask · Shift-Return for a new line")
                 hint("/", "commands — and the four research levels by name")
                 hint("Esc", "clear the draft, then close")
+                // The feature nobody finds: dropped files and pasted images go
+                // with the question, and the empty state is the one place that
+                // can say so before it is needed.
+                hint("Drop", "a file or paste an image to attach it")
                 hint(summonShortcut, "summon or dismiss from anywhere")
             }
             .padding(.top, PanelTheme.Space.small)
