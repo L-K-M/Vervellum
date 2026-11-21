@@ -599,7 +599,18 @@ final class PageReadingTests: XCTestCase {
     /// An invalid UTF-16 body is not silently empty: `decode` falls back to its
     /// Latin-1 last resort, so a truncated page still yields text.
     func testAnInvalidUTF16BodyFallsBackRatherThanEmpty() {
-        let data = Data([0x00, 0xD8])   // a lone high surrogate
+        // 0x80 is the distinguisher: it decodes to U+0080 under Latin-1 and to the
+        // euro under Windows-1252, so this pins the documented last-resort codec.
+        // With 0xD8 it is also code unit 0xD880, an unpaired high surrogate.
+        let data = Data([0x80, 0xD8])
+        XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16le"),
+                       String(data: data, encoding: .isoLatin1))
+    }
+
+    /// An odd byte count is invalid UTF-16 too; the Latin-1 fallback must still
+    /// decode every byte, including the dangling one.
+    func testAnOddLengthUTF16BodyFallsBackIncludingTheDanglingByte() {
+        let data = Data([0x00, 0xD8, 0x41])
         XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16le"),
                        String(data: data, encoding: .isoLatin1))
     }
