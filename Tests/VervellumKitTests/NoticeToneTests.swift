@@ -34,8 +34,10 @@ final class NoticeToneTests: XCTestCase {
     }
 
     func testEveryToneNamesASymbol() {
-        for tone in NoticeTone.allCases {
-            XCTAssertFalse(tone.symbolName.isEmpty, tone.rawValue)
-        }
+        // Exact names, not merely non-empty: a typo here is a notice drawn with a
+        // fallback glyph, and nothing else in the panel would fail.
+        XCTAssertEqual(NoticeTone.informational.symbolName, "info.circle")
+        XCTAssertEqual(NoticeTone.caution.symbolName, "exclamationmark.triangle")
+        XCTAssertEqual(NoticeTone.critical.symbolName, "exclamationmark.octagon")
     }
 }
