@@ -146,7 +146,10 @@ struct Attachment: Codable, Equatable, Identifiable {
         name = Attachment.displayName(for: storedName ?? "attachment")
         mediaType = (try? container.decodeIfPresent(String.self, forKey: .mediaType))
             ?? "application/octet-stream"
-        byteCount = (try? container.decodeIfPresent(Int.self, forKey: .byteCount)) ?? 0
+        // A negative value is not a size. A damaged document could otherwise put
+        // "-5 bytes" in a chip and corrupt any accounting built on the field; zero is
+        // the honest reading of a value this build cannot trust.
+        byteCount = max(0, (try? container.decodeIfPresent(Int.self, forKey: .byteCount)) ?? 0)
     }
 
     // MARK: Limits
