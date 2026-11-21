@@ -44,8 +44,14 @@ enum CitationValidator {
 
     /// Matches `[3]`, `[3, 4]`, `[3,4 , 12]` — digits and separators only, so an
     /// ordinary markdown link `[text](url)` or a bracketed aside never matches.
+    ///
+    /// The digit count is unbounded on purpose: the source list is small, so a four-digit
+    /// marker like `[1000]` is always an invented citation, and capping the match at three
+    /// digits meant it never matched at all — rendered as plain text and never reported in
+    /// `outOfRangeCitations`, so the invalid-citation warning never fired for exactly the
+    /// numbers most likely to be fabricated. The range check below decides validity.
     private static let citationRegex = try? NSRegularExpression(
-        pattern: #"\[\s*\d{1,3}(?:\s*[,;]\s*\d{1,3})*\s*\]"#)
+        pattern: #"\[\s*\d+(?:\s*[,;]\s*\d+)*\s*\]"#)
 
     /// Parses `answer` against a source list of `sourceCount` entries.
     ///

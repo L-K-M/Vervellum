@@ -75,6 +75,22 @@ final class CitationValidatorTests: XCTestCase {
         XCTAssertEqual(result.outOfRangeCitations, [9])
     }
 
+    /// A marker with more digits than the source list could ever hold — `[1000]` against
+    /// 24 sources — is an invented citation too, and must be flagged, not silently left
+    /// as text. The regex used to cap numbers at three digits, so exactly these evaded
+    /// `outOfRangeCitations`.
+    func testFlagsFourDigitInventedCitations() {
+        let result = CitationValidator.validate(answer: "As shown [1000], and [2, 4321].",
+                                                sourceCount: 24)
+        XCTAssertEqual(result.outOfRangeCitations, [1000, 4321])
+        XCTAssertFalse(result.isClean)
+        // The all-invented marker degrades to plain text; the partly-valid one stays a
+        // chip for the number that is real.
+        XCTAssertTrue(result.spans.contains(.text("[1000]")))
+        XCTAssertTrue(result.spans.contains(.citation(sourceIndices: [1], raw: "[2, 4321]")))
+        XCTAssertEqual(result.citedSourceIndices, [1])
+    }
+
     /// The answer prompt forbids URLs outright, so one appearing is a prompt
     /// violation the UI has to warn about.
     func testFlagsLiteralURLs() {
