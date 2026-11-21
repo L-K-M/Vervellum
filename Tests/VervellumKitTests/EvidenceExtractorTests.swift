@@ -39,6 +39,18 @@ final class EvidenceExtractorTests: XCTestCase {
         ]]]
         XCTAssertEqual(EvidenceExtractor.sources(from: [payload]).first?.publishedAt,
                        "2026-01-02")
+        // The whole bidi override/isolate class, not just the two samples above: a
+        // stripper scoped to individual characters would pass them while the rest of
+        // the family stays open.
+        let bidi = ([0x202A...0x202E, 0x2066...0x2069].joined())
+            .map { String(Unicode.Scalar(UInt32($0))!) }
+            .joined()
+        let classPayload: [String: Any] = ["results": [[
+            "title": "X", "url": "https://a.example.com/1",
+            "publishedDate": "2026\(bidi)-01",
+        ]]]
+        XCTAssertEqual(EvidenceExtractor.sources(from: [classPayload]).first?.publishedAt,
+                       "2026-01")
     }
 
     /// Two searches routinely surface the same page; giving it two citation numbers
