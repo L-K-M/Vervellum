@@ -49,8 +49,7 @@ struct TurnView: View, Equatable {
     @State private var trailExpanded = false
     @State private var sourcesExpanded = false
     @State private var showsAllSources = false
-    /// The first draft, collapsed. The findings grade it, and the answer above is
-    /// the rewrite; opening this is the comparison the notice promises.
+    /// Keep the comparison collapsed so the displayed answer stays in reading order.
     @State private var showsDraft = false
 
     private var validation: CitationValidator.Result {

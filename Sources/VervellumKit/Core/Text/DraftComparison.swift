@@ -1,10 +1,7 @@
 import Foundation
 
-/// Whether a turn still has a first draft worth comparing with the answer on screen.
-///
-/// The revision and regather notices say the draft is kept for comparison. Offering
-/// it only when it differs from the answer avoids a disclosure that opens onto the
-/// same prose.
+/// Both a revision and an additional research round can leave a comparison draft.
+/// Offer it only when it differs from the answer on screen.
 enum DraftComparison {
     struct Description {
         let heading: String

@@ -31,7 +31,8 @@ runs the searches and answers based on current sources.
 - **A faulted answer is corrected, not just annotated.** When the check finds a claim
   the evidence contradicts or only half-supports, the answer is sent back once to be
   fixed against the same evidence — a correction of the sentences the findings name,
-  not a rewrite. The first draft is kept, because the findings below grade the draft.
+  not a rewrite. The assessed draft is kept for comparison. When a deep turn gathers more
+  evidence and answers again, the findings assess that second answer.
   A correction that never arrives, or that breaks the citation rule, is dropped and
   the draft stands with a warning.
 - **Finding nothing is a result.** *Not established* is a normal outcome, not an
