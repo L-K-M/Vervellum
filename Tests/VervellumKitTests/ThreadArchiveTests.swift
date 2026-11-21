@@ -636,22 +636,6 @@ final class ThreadArchiveTests: XCTestCase {
             guard deniedPaths.contains(URL.path) else { return try super.removeItem(at: URL) }
             throw CocoaError(.fileWriteNoPermission)
         }
-
-        /// Rotation replaces the backup rather than removing it, so the denial
-        /// has to cover both operations.
-        override func replaceItem(at originalItemURL: URL,
-                                  withItemAt newItemURL: URL,
-                                  backupItemName: String?,
-                                  options: FileManager.ItemReplacementOptions,
-                                  resultingItemURL: AutoreleasingUnsafeMutablePointer<NSURL?>?) throws {
-            guard deniedPaths.contains(originalItemURL.path) else {
-                return try super.replaceItem(at: originalItemURL, withItemAt: newItemURL,
-                                             backupItemName: backupItemName,
-                                             options: options,
-                                             resultingItemURL: resultingItemURL)
-            }
-            throw CocoaError(.fileWriteNoPermission)
-        }
     }
 
     /// Fails directory creation a fixed number of times, standing in for a folder

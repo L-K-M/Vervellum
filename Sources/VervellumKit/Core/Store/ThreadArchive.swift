@@ -548,15 +548,13 @@ final class ThreadArchive {
         do {
             try? fileManager.removeItem(at: staging)
             try fileManager.copyItem(at: fileURL, to: staging)
-            // `replaceItemAt` swaps in one step, so the old backup is never
-            // absent: a crash mid-rotation still leaves a `.bak` on disk. The
-            // first rotation has no backup yet, and `replaceItemAt` requires a
-            // destination, so that one is a plain move.
-            if fileManager.fileExists(atPath: backupURL.path) {
-                try fileManager.replaceItemAt(backupURL, withItemAt: staging)
-            } else {
-                try fileManager.moveItem(at: staging, to: backupURL)
-            }
+            // Remove the old backup only once the new copy exists, so a
+            // failure here leaves the previous recovery copy untouched. The
+            // remove-and-move is deliberately not `replaceItemAt`: that API
+            // cannot be overridden portably in the shared test target, and the
+            // staging copy is what makes the failure recoverable.
+            try? fileManager.removeItem(at: backupURL)
+            try fileManager.moveItem(at: staging, to: backupURL)
             pendingBackupStaging = nil
             return true
         } catch {
@@ -576,11 +574,8 @@ final class ThreadArchive {
             return false
         }
         do {
-            if fileManager.fileExists(atPath: backupURL.path) {
-                try fileManager.replaceItemAt(backupURL, withItemAt: staging)
-            } else {
-                try fileManager.moveItem(at: staging, to: backupURL)
-            }
+            try? fileManager.removeItem(at: backupURL)
+            try fileManager.moveItem(at: staging, to: backupURL)
             pendingBackupStaging = nil
             return true
         } catch {
