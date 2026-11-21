@@ -325,7 +325,13 @@ enum CitationText {
 
 /// Renders a whole answer: block structure from `MarkdownParser`, inline content and
 /// citations from `MarkdownText`.
-struct MarkdownBody: View {
+///
+/// `Equatable` so a streamed parent does not re-parse unchanged markdown: while an
+/// answer streams, the turn's body runs per coalesced snapshot, and without this the
+/// *static* blocks — a notice, the finished draft under its disclosure — were
+/// re-parsed at the snapshot rate for text that had not changed. Every stored property
+/// already conforms (`Source` does), so the conformance is synthesized.
+struct MarkdownBody: View, Equatable {
 
     let markdown: String
     let sources: [Source]
