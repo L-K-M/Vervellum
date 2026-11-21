@@ -129,10 +129,12 @@ enum CitationValidator {
                     malformed.append(trimmed)
                 }
             }
-            // Ascending and deduplicated: a range can overlap a neighbouring number
-            // (`[1, 1-3]`), and the renderers and the transcript expect one entry per
-            // source in citation order.
-            indices = Array(Set(indices)).sorted()
+            // Deduplicated in first-occurrence order: a range can overlap a neighbour
+            // (`[1, 1-3]`), and the chip's label is built from this order, so `[2, 1]`
+            // must still read "2,1".
+            var unique: [Int] = []
+            for index in indices where !unique.contains(index) { unique.append(index) }
+            indices = unique
             // A marker whose every number was invented is kept as plain text rather
             // than rendered as a chip that leads nowhere.
             if indices.isEmpty {
