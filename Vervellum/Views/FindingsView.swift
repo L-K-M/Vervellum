@@ -49,15 +49,7 @@ struct FindingsView: View {
                 .accessibilityLabel(finding.verdict.label)
 
             VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
-                HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
-                    Text(finding.verdict.label.uppercased())
-                        .font(PanelTheme.Font.label(textScale))
-                        .tracking(0.7)
-                        .foregroundStyle(PanelTheme.Palette.verdict(finding.verdict))
-                    ForEach(citedSources(finding)) { source in
-                        CitationChip(source: source, action: { onSelectSource(source) })
-                    }
-                }
+                evidenceHeader(finding)
                 Text(finding.claim)
                     .font(PanelTheme.Font.body(textScale))
                     .foregroundStyle(PanelTheme.Palette.primaryText)
@@ -88,6 +80,34 @@ struct FindingsView: View {
         // rail's verdict label, the claim, the reasoning and each chip as its own
         // actionable element.
         .accessibilityElement(children: .contain)
+    }
+
+    private func evidenceHeader(_ finding: Finding) -> some View {
+        let verdict = Text(finding.verdict.label.uppercased())
+            .font(PanelTheme.Font.label(textScale))
+            .tracking(0.7)
+            .foregroundStyle(PanelTheme.Palette.verdict(finding.verdict))
+        let chips = ForEach(citedSources(finding)) { source in
+            CitationChip(source: source, action: { onSelectSource(source) })
+        }
+
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
+                verdict
+                chips
+            }
+            .fixedSize()
+            VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
+                verdict
+                // A two-digit source number, brackets and chip padding at this type size.
+                // Leave the verdict its own line so its length cannot squeeze a button.
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 37 * textScale),
+                                             spacing: PanelTheme.Space.tight, alignment: .leading)],
+                          alignment: .leading, spacing: PanelTheme.Space.tight) {
+                    chips
+                }
+            }
+        }
     }
 
     private func citedSources(_ finding: Finding) -> [Source] {
