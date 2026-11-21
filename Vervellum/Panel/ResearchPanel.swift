@@ -121,12 +121,16 @@ final class ResearchPanel: NSPanel {
         // first responder, so ↑/↓ alone reach it, not the thread's scroll view — without
         // these a long transcript can only be scrolled with the pointer. The `flags`
         // check is repeated here so the ⌘ requirement is local to the branch and a
-        // bare arrow can never be swallowed, even if the guard above changes.
-        if event.keyCode == UInt16(KeyCode.upArrow), flags == .command {
+        // bare arrow can never be swallowed, even if the guard above changes;
+        // `subtracting(.capsLock)` keeps Caps-Lock users scrolling too (a no-op today,
+        // since `flags` is already cleaned above, but robust if that ever changes).
+        if event.keyCode == UInt16(KeyCode.upArrow),
+           flags.subtracting(.capsLock) == .command {
             post(.scrollToTop)
             return true
         }
-        if event.keyCode == UInt16(KeyCode.downArrow), flags == .command {
+        if event.keyCode == UInt16(KeyCode.downArrow),
+           flags.subtracting(.capsLock) == .command {
             post(.scrollToBottom)
             return true
         }
