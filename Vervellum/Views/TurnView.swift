@@ -250,7 +250,9 @@ struct TurnView: View, Equatable {
             Text(turn.askedAt, style: .relative)
                 .font(PanelTheme.Font.at(10, textScale))
                 .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                .lineLimit(1)
                 .help(turn.askedAt.formatted(date: .complete, time: .shortened))
+                .accessibilityLabel(turn.askedAt.formatted(date: .complete, time: .shortened))
         }
     }
 
