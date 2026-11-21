@@ -1915,9 +1915,8 @@ final class ResearchRunner: ResearchRunning {
             guard !stopped else { throw error }
             // The failure path is where the slowest assessments live — a timeout is
             // exactly the case a maintainer asking "is the assessor slow?" is chasing.
-            trace.warn("Assessment unavailable after "
-                       + String(format: "%.1fs", trace.elapsed - began)
-                       + ": \(ResearchError.safeLabel(for: error))")
+            trace.warn(String(format: "Assessment unavailable after %.1fs: %@",
+                              trace.elapsed - began, ResearchError.safeLabel(for: error)))
             return nil
         }
         trace.log("Assessment: \(assessment.findings.count) findings in "

@@ -20,11 +20,16 @@ final class ResearchTrace {
     /// mid-turn would otherwise make a stage duration negative or inflated, and the
     /// `%.1f` format would print it without complaint.
     private let started: TimeInterval
+    /// The clock `started` and `elapsed` are read from. Injectable so a test can
+    /// pin a stage duration without sleeping; the default is the system uptime.
+    private let now: () -> TimeInterval
 
-    init(id: String? = nil, sink: LogSink = StandardErrorLog()) {
+    init(id: String? = nil, sink: LogSink = StandardErrorLog(),
+         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.id = id ?? String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8)).lowercased()
         self.sink = sink
-        self.started = Self.now()
+        self.now = now
+        self.started = now()
     }
 
     func log(_ message: String) {
@@ -39,21 +44,19 @@ final class ResearchTrace {
     /// the error. A non-`ResearchError` is logged by *type name only*, because its
     /// description may contain the request URL or an authorization header.
     func stage<T>(_ label: String, _ work: () async throws -> T) async throws -> T {
-        let began = Self.now()
+        let began = now()
         log("\(label) started")
         do {
             let value = try await work()
-            log(String(format: "%@ completed in %.2fs", label, Self.now() - began))
+            log(String(format: "%@ completed in %.2fs", label, now() - began))
             return value
         } catch {
             warn(String(format: "%@ failed after %.2fs: %@", label,
-                        Self.now() - began, ResearchError.safeLabel(for: error)))
+                        now() - began, ResearchError.safeLabel(for: error)))
             throw error
         }
     }
 
     /// Seconds since the run began, for a final summary line.
-    var elapsed: TimeInterval { Self.now() - started }
-
-    private static func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
+    var elapsed: TimeInterval { now() - started }
 }
