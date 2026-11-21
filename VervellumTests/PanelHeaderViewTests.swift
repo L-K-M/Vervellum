@@ -7,10 +7,14 @@ final class PanelHeaderViewTests: XCTestCase {
     /// The drawn glyph frame every header button uses.
     private let glyphFrame = CGRect(x: 40, y: 6, width: 20, height: 18)
 
-    /// The hit target the production padding produces for the glyph frame.
+    /// The hit target the production padding produces for the glyph frame, computed
+    /// from all four padding values so an asymmetric padding cannot pass unnoticed.
     private var hitFrame: CGRect {
         let pad = HeaderButton.hitPadding
-        return glyphFrame.insetBy(dx: -pad.leading, dy: -pad.top)
+        return CGRect(x: glyphFrame.minX - pad.leading,
+                      y: glyphFrame.minY - pad.top,
+                      width: glyphFrame.width + pad.leading + pad.trailing,
+                      height: glyphFrame.height + pad.top + pad.bottom)
     }
 
     func testHitTargetContainsTheWholeGlyphFrame() {

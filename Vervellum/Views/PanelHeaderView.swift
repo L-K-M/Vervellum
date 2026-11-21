@@ -79,11 +79,12 @@ struct HeaderButton: View {
     /// The glyph's drawn frame, in the button's own coordinates.
     static let glyphFrame = CGRect(x: 0, y: 0, width: 20, height: 18)
 
-    /// Padding that grows the button's real frame past the glyph. With `.plain` style
-    /// and `.contentShape(Rectangle())` this makes the whole expanded frame the hit
-    /// target, the hover region and the tooltip region — all three agree, because the
-    /// shape is the button's actual frame rather than a rect drawn outside it, which
-    /// hit testing is not guaranteed to honor.
+    /// Padding that grows the button's real frame past the glyph, applied to the label
+    /// so it is part of the button's own frame. With `.plain` style and
+    /// `.contentShape(Rectangle())` this makes the whole expanded frame the hit target,
+    /// the hover region and the tooltip region — all three agree, because the shape is
+    /// the button's actual frame rather than a rect drawn outside it, which hit testing
+    /// is not guaranteed to honor.
     static var hitPadding: EdgeInsets {
         EdgeInsets(top: hitExpansionY, leading: hitExpansionX,
                    bottom: hitExpansionY, trailing: hitExpansionX)
@@ -108,13 +109,17 @@ struct HeaderButton: View {
                 // regions grow.
                 .background(isHovering ? PanelTheme.Palette.chipFill : .clear,
                             in: RoundedRectangle(cornerRadius: PanelTheme.Radius.chip, style: .continuous))
+            // Inside the label, so the padding is part of the label's — and with
+            // `.plain` style the button's — own frame: the default hit area is the
+            // label's 20×18 bounds, and padding applied outside the Button grows
+            // the container, not the button, so taps in the ring would never reach
+            // the action.
+            .padding(Self.hitPadding)
         }
         .buttonStyle(.plain)
-        // On the button, not the label: the default hit area is the label's 20×18
-        // bounds, which at the largest text scale is barely larger than the glyph
-        // itself. Grow the real frame so hit testing, hover and tooltip all cover
-        // the same 26×26, then shrink the layout footprint back.
-        .padding(Self.hitPadding)
+        // The button's frame is now the expanded 26×26, so hit testing, hover and
+        // the tooltip all cover the same area; the inverse padding outside restores
+        // the 20×18 layout footprint so header spacing is unchanged.
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .help(help)
