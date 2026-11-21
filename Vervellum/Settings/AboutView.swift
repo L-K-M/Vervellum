@@ -9,6 +9,13 @@ struct AboutView: View {
 
     private static let repositoryURL = URL(string: "https://github.com/L-K-M/Vervellum")!
 
+    /// The version line's text. `shortVersionString` is optional and interpolating an
+    /// optional prints `Optional("0.3.1")`, so read the raw Info.plist value and fall
+    /// back to "unknown" for a bundle without one. Pure over the bundle, so testable.
+    static func versionText(_ bundle: Bundle) -> String {
+        bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+    }
+
     var body: some View {
         SettingsPane {
             HStack(alignment: .top, spacing: 14) {
@@ -18,7 +25,7 @@ struct AboutView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Vervellum")
                         .font(.system(size: 18, weight: .semibold))
-                    Text("Version \(Bundle.main.shortVersionString)")
+                    Text("Version \(Self.versionText(Bundle.main))")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                     Text("A hotkey-summoned research panel for macOS.")
