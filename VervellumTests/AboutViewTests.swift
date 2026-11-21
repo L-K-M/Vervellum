@@ -16,6 +16,10 @@ final class AboutViewTests: XCTestCase {
     func testVersionTextFallsBackForABundleWithoutOne() {
         // `Bundle()` is an uninitialized bundle with no Info.plist, so this exercises
         // the fallback path deterministically — not the test host's own plist.
+        // Canary: fail loudly and specifically if platform behavior ever changes and
+        // Bundle() stops being plist-free.
+        XCTAssertNil(Bundle().object(forInfoDictionaryKey: "CFBundleShortVersionString"),
+                     "Bundle() unexpectedly has a CFBundleShortVersionString; the fallback path is no longer exercised")
         XCTAssertEqual(AboutView.versionText(Bundle()), "unknown")
         XCTAssertEqual(AboutView.versionLine(Bundle()), "Version unknown")
     }
