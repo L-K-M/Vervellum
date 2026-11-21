@@ -44,9 +44,6 @@ final class AttachmentIntakeTests: XCTestCase {
     /// that got as far as its bytes, not one that will be kept: every one of them can
     /// still be refused when those bytes are looked at.
     ///
-    /// Four files this cannot attach and a fifth that would have fit. The four spent the
-    /// budget, the fifth was never read, and the gesture used to say "the rest were left
-    /// out" — of nothing, because the four were refused in the same breath.
     /// The name of a pasted image follows its bytes: a JPEG taken as-is is `.jpg`,
     /// and only a JPEG is — PNG and TIFF-re-encoded-to-PNG stay `.png`.
     func testAPastedImagesNameFollowsTheSniffedBytes() {
@@ -62,6 +59,9 @@ final class AttachmentIntakeTests: XCTestCase {
         XCTAssertEqual(AttachmentIntake.name(forPastedImage: 2), "pasted image 2.png")
     }
 
+    /// Four files this cannot attach and a fifth that would have fit. The four spent the
+    /// budget, the fifth was never read, and the gesture used to say "the rest were left
+    /// out" — of nothing, because the four were refused in the same breath.
     func testTheCapSaysNothingLandedWhenTheCandidatesAreAllRefused() throws {
         // A NUL, so `text(from:)` refuses it, and no image signature in front of it. Not
         // an empty file: whether `contents(atPath:)` answers an empty file with `Data()`
