@@ -211,7 +211,9 @@ final class ComposerCommandTests: XCTestCase {
     /// behind them, so its help must not teach them (the legend's nil keeps every "⌘" out).
     func testTheLinuxHelpHasNoTranscriptScrollKeys() {
         let help = ComposerCommand.helpText(legend: .linux)
-        XCTAssertFalse(help.contains("top / bottom of the thread"))
+        for key in ["⌘↑", "⌘↓", "top / bottom of the thread"] {
+            XCTAssertFalse(help.contains(key), "Linux help unexpectedly mentions \(key)")
+        }
     }
 
     // MARK: /model

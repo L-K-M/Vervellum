@@ -119,12 +119,14 @@ final class ResearchPanel: NSPanel {
         }
         // Command-Arrow jumps the thread to its top or bottom. The composer always holds
         // first responder, so ↑/↓ alone reach it, not the thread's scroll view — without
-        // these a long transcript can only be scrolled with the pointer.
-        if event.keyCode == UInt16(KeyCode.upArrow) {
+        // these a long transcript can only be scrolled with the pointer. The `flags`
+        // check is repeated here so the ⌘ requirement is local to the branch and a
+        // bare arrow can never be swallowed, even if the guard above changes.
+        if event.keyCode == UInt16(KeyCode.upArrow), flags == .command {
             post(.scrollToTop)
             return true
         }
-        if event.keyCode == UInt16(KeyCode.downArrow) {
+        if event.keyCode == UInt16(KeyCode.downArrow), flags == .command {
             post(.scrollToBottom)
             return true
         }
@@ -152,7 +154,7 @@ final class ResearchPanel: NSPanel {
 /// A notification rather than a closure per command: the panel's root view is built
 /// once and reused across every summon, so there is no initializer to thread a dozen
 /// callbacks through, and the view owns the state each command needs to change.
-enum PanelCommand: String {
+enum PanelCommand: String, CaseIterable {
     /// Escape. The view decides what it backs out of; see `PanelRootView`.
     case escape
     case submit

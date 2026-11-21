@@ -6,9 +6,7 @@ final class PanelCommandTests: XCTestCase {
     /// Every command the panel window can post round-trips through its raw value, which
     /// is the notification contract `PanelRootView` switches on.
     func testEveryCommandRawValueRoundTrips() {
-        let all: [PanelCommand] = [.escape, .submit, .newThread, .toggleHistory,
-                                   .openSettings, .stop, .scrollToTop, .scrollToBottom]
-        for command in all {
+        for command in PanelCommand.allCases {
             XCTAssertEqual(PanelCommand(rawValue: command.rawValue), command)
         }
     }
