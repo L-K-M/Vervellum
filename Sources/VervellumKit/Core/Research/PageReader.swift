@@ -477,8 +477,7 @@ final class DirectPageReader: PageReading {
         case .utf8:
             text = String(data: data, encoding: .utf8)
         case .windowsCP1252:
-            text = String(data: data, encoding: .utf8)
-                ?? String(data: data, encoding: .windowsCP1252)
+            text = String(data: data, encoding: .utf8) ?? Self.windowsCP1252(data)
         case .isoLatin1:
             text = String(data: data, encoding: .utf8)
                 ?? String(data: data, encoding: .isoLatin1)
@@ -489,6 +488,33 @@ final class DirectPageReader: PageReading {
         // An explicit UTF-16 codec keeps a byte-order mark as U+FEFF; the extractor
         // and the model do not want a zero-width character at the top of the page.
         return text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
+    }
+
+    /// Windows-1252, decoded here rather than through `String(data:encoding:)`.
+    ///
+    /// The codec differs from ISO-8859-1 only in `0x80...0x9F`, where a Windows
+    /// page carries the euro, the smart quotes, dashes and friends. Darwin's
+    /// `.windowsCP1252` applies that table; swift-corelibs-foundation's does not —
+    /// it maps the C1 range to the same code points as Latin-1, so the same page
+    /// would decode differently on the two platforms. Decoding it explicitly keeps
+    /// the evidence identical everywhere, which is the point of the shared core.
+    private static func windowsCP1252(_ data: Data) -> String {
+        let overrides: [UInt8: Unicode.Scalar] = [
+            0x80: "€", 0x82: "‚", 0x83: "ƒ", 0x84: "„", 0x85: "…",
+            0x86: "†", 0x87: "‡", 0x88: "ˆ", 0x89: "‰", 0x8A: "Š",
+            0x8B: "‹", 0x8C: "Œ", 0x8E: "Ž", 0x91: "‘", 0x92: "’",
+            0x93: "“", 0x94: "”", 0x95: "•", 0x96: "–", 0x97: "—",
+            0x98: "˜", 0x99: "™", 0x9A: "š", 0x9B: "›", 0x9C: "œ",
+            0x9E: "ž", 0x9F: "Ÿ",
+        ]
+        var scalars = String.UnicodeScalarView()
+        scalars.reserveCapacity(data.count)
+        for byte in data {
+            // The bytes undefined in Windows-1252 (0x81, 0x8D, 0x8F, 0x90, 0x9D)
+            // fall back to the code point itself, which is what Latin-1 did.
+            scalars.append(overrides[byte] ?? Unicode.Scalar(byte))
+        }
+        return String(scalars)
     }
 
     /// The codec a `Content-Type` declares, or nil when it declares none this build
