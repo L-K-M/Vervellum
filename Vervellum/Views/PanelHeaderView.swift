@@ -69,21 +69,31 @@ struct HeaderButton: View {
     /// How far the tappable area extends past the glyph's frame, per axis.
     ///
     /// The drawn frame is 20×18 — smaller than the ~24 pt a pointer aims at — and the
-    /// buttons sit `PanelTheme.Space.small` (6 pt) apart, so 3 pt of horizontal expansion
-    /// makes neighbouring hit areas exactly meet without overlapping, and 4 pt vertical
-    /// stays inside the header's own 6 pt padding. The glyph and the hover background
-    /// are unchanged; only the hit shape grows.
-    static let hitExpansionX: CGFloat = 3
+    /// buttons sit `PanelTheme.Space.small` (6 pt) apart, so the horizontal expansion is
+    /// derived from half that spacing: neighbouring hit areas exactly meet without
+    /// overlapping, for any spacing value. 4 pt vertical stays inside the header's own
+    /// 6 pt padding.
+    static let hitExpansionX: CGFloat = PanelTheme.Space.small / 2
     static let hitExpansionY: CGFloat = 4
 
     /// The glyph's drawn frame, in the button's own coordinates.
     static let glyphFrame = CGRect(x: 0, y: 0, width: 20, height: 18)
 
-    /// The hit-test shape for a button whose label occupies `frame`: the frame grown by
-    /// the expansion, so a click beside the glyph still lands on the button. Pure, so
-    /// the geometry is unit-testable without a window.
-    static func hitShape(for frame: CGRect) -> CGRect {
-        frame.insetBy(dx: -hitExpansionX, dy: -hitExpansionY)
+    /// Padding that grows the button's real frame past the glyph. With `.plain` style
+    /// and `.contentShape(Rectangle())` this makes the whole expanded frame the hit
+    /// target, the hover region and the tooltip region — all three agree, because the
+    /// shape is the button's actual frame rather than a rect drawn outside it, which
+    /// hit testing is not guaranteed to honor.
+    static var hitPadding: EdgeInsets {
+        EdgeInsets(top: hitExpansionY, leading: hitExpansionX,
+                   bottom: hitExpansionY, trailing: hitExpansionX)
+    }
+
+    /// The inverse of `hitPadding`, applied last so the button's layout footprint stays
+    /// the glyph's 20×18 and the header's spacing is unchanged.
+    static var inverseHitPadding: EdgeInsets {
+        EdgeInsets(top: -hitExpansionY, leading: -hitExpansionX,
+                   bottom: -hitExpansionY, trailing: -hitExpansionX)
     }
 
     @State private var isHovering = false
@@ -94,19 +104,22 @@ struct HeaderButton: View {
                 .font(PanelTheme.Font.at(10.5, textScale, weight: .medium))
                 .foregroundStyle(tint)
                 .frame(width: Self.glyphFrame.width, height: Self.glyphFrame.height)
+                // The visible chip stays glyph-sized; only the hit and hover
+                // regions grow.
                 .background(isHovering ? PanelTheme.Palette.chipFill : .clear,
                             in: RoundedRectangle(cornerRadius: PanelTheme.Radius.chip, style: .continuous))
         }
         .buttonStyle(.plain)
-        // On the button, not the label, and grown past the frame: the default hit area
-        // is the label's 20×18 bounds, which at the largest text scale is barely larger
-        // than the glyph itself. The expansion stays within half the 6 pt spacing, so
-        // adjacent buttons' areas meet but never overlap — an overlapping shape would
-        // make one button swallow clicks meant for its neighbour.
-        .contentShape(Path { $0.addRect(Self.hitShape(for: Self.glyphFrame)) })
+        // On the button, not the label: the default hit area is the label's 20×18
+        // bounds, which at the largest text scale is barely larger than the glyph
+        // itself. Grow the real frame so hit testing, hover and tooltip all cover
+        // the same 26×26, then shrink the layout footprint back.
+        .padding(Self.hitPadding)
+        .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .help(help)
         .accessibilityLabel(help)
+        .padding(Self.inverseHitPadding)
     }
 }
 

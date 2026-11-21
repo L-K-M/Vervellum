@@ -7,33 +7,43 @@ final class PanelHeaderViewTests: XCTestCase {
     /// The drawn glyph frame every header button uses.
     private let glyphFrame = CGRect(x: 40, y: 6, width: 20, height: 18)
 
-    func testHitShapeContainsTheWholeGlyphFrame() {
-        let hit = HeaderButton.hitShape(for: glyphFrame)
-        XCTAssertTrue(hit.contains(glyphFrame))
+    /// The hit target the production padding produces for the glyph frame.
+    private var hitFrame: CGRect {
+        let pad = HeaderButton.hitPadding
+        return glyphFrame.insetBy(dx: -pad.leading, dy: -pad.top)
     }
 
-    func testHitShapeReachesAComfortableTargetSize() {
-        let hit = HeaderButton.hitShape(for: glyphFrame)
-        XCTAssertGreaterThanOrEqual(hit.width, 24)
-        XCTAssertGreaterThanOrEqual(hit.height, 24)
+    func testHitTargetContainsTheWholeGlyphFrame() {
+        XCTAssertTrue(hitFrame.contains(glyphFrame))
     }
 
-    /// Buttons sit `PanelTheme.Space.small` (6 pt) apart in the header, so the expansion
-    /// may grow at most half that horizontally or neighbouring hit areas overlap and one
-    /// button starts swallowing the next one's clicks.
-    func testHitShapeDoesNotOverlapANeighbouringButton() {
+    func testHitTargetReachesAComfortableTargetSize() {
+        XCTAssertGreaterThanOrEqual(hitFrame.width, 24)
+        XCTAssertGreaterThanOrEqual(hitFrame.height, 24)
+    }
+
+    /// Buttons sit `PanelTheme.Space.small` apart in the header; the expansion is half
+    /// that gap, so neighbouring hit areas meet but never overlap — one button must
+    /// not swallow clicks meant for its neighbour.
+    func testHitTargetDoesNotOverlapANeighbouringButton() {
         let gap = PanelTheme.Space.small
         let neighbour = CGRect(x: glyphFrame.maxX + gap, y: glyphFrame.minY,
                                width: glyphFrame.width, height: glyphFrame.height)
-        let hit = HeaderButton.hitShape(for: glyphFrame)
-        XCTAssertLessThanOrEqual(hit.maxX, neighbour.minX)
+        XCTAssertLessThanOrEqual(hitFrame.maxX, neighbour.minX)
     }
 
     /// The expansion is symmetric, so the target is centred on the glyph rather than
     /// shifted toward one edge.
-    func testHitShapeIsCentredOnTheGlyphFrame() {
-        let hit = HeaderButton.hitShape(for: glyphFrame)
-        XCTAssertEqual(hit.midX, glyphFrame.midX, accuracy: 0.01)
-        XCTAssertEqual(hit.midY, glyphFrame.midY, accuracy: 0.01)
+    func testHitTargetIsCentredOnTheGlyphFrame() {
+        XCTAssertEqual(hitFrame.midX, glyphFrame.midX, accuracy: 0.01)
+        XCTAssertEqual(hitFrame.midY, glyphFrame.midY, accuracy: 0.01)
+    }
+
+    /// The horizontal expansion is derived from the neighbour gap, so the no-overlap
+    /// guarantee holds by construction even if the theme spacing changes.
+    func testHorizontalExpansionIsHalfTheNeighbourGap() {
+        XCTAssertEqual(HeaderButton.hitPadding.leading, PanelTheme.Space.small / 2)
+        XCTAssertEqual(HeaderButton.hitPadding.trailing, PanelTheme.Space.small / 2)
+        XCTAssertEqual(HeaderButton.inverseHitPadding.leading, -PanelTheme.Space.small / 2)
     }
 }
