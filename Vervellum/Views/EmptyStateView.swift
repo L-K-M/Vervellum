@@ -46,7 +46,7 @@ struct EmptyStateView: View {
                 // The feature nobody finds: dropped files and pasted images go
                 // with the question, and the empty state is the one place that
                 // can say so before it is needed.
-                hint("Drop", "a file or paste an image to attach it")
+                hint("Drop / ⌘V", "a file or image in the composer to attach it")
                 hint(summonShortcut, "summon or dismiss from anywhere")
             }
             .padding(.top, PanelTheme.Space.small)
