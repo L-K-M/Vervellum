@@ -12,6 +12,7 @@ struct EmptyStateView: View {
 
     let configurationProblems: [String]
     let searches: Bool
+    let submitOnReturn: Bool
     let summonShortcut: String
     var onOpenSettings: () -> Void
     /// Loads the composer with the example — seeding, not submitting. The user
@@ -40,7 +41,11 @@ struct EmptyStateView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
-                hint("Return", "ask · Shift-Return for a new line")
+                if submitOnReturn {
+                    hint("Return", "ask · Shift-Return for a new line")
+                } else {
+                    hint("⌘Return", "ask · Return for a new line")
+                }
                 hint("/", "commands — and the four research levels by name")
                 hint("Esc", "clear the draft, then close")
                 hint(summonShortcut, "summon or dismiss from anywhere")
