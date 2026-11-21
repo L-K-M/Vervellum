@@ -128,7 +128,10 @@ final class ComposerRecallTests: XCTestCase {
     }
 
     private func composer(in view: NSView) -> NSTextView? {
-        if let text = view as? NSTextView, text.isEditable { return text }
+        // The delegate check is what distinguishes the composer from the answer's
+        // selectable text views, which are also editable-looking `NSTextView`s.
+        if let text = view as? NSTextView,
+           text.isEditable, text.delegate is ComposerView.Coordinator { return text }
         return view.subviews.lazy.compactMap(composer).first
     }
 
