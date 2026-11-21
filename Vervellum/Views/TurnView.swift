@@ -47,12 +47,13 @@ struct TurnView: View, Equatable {
     var onAskFollowup: (String) -> Void
     /// Reads back one attachment's stored bytes — called only when a preview is
     /// opened, never per frame: the row itself still shows names alone.
-    var attachmentData: (Attachment) -> Data? = { _ in nil }
+    var attachmentData: (Attachment) -> Data?
 
     @State private var trailExpanded = false
     @State private var sourcesExpanded = false
     @State private var showsAllSources = false
     @State private var previewedAttachment: Attachment?
+    @State private var previewedData: Data?
     /// The first draft, collapsed. The findings grade it, and the answer above is
     /// the rewrite; opening this is the comparison the notice promises.
     @State private var showsDraft = false
@@ -187,9 +188,12 @@ struct TurnView: View, Equatable {
                                            layout: .singleLine(.byTruncatingMiddle))
                             Spacer(minLength: 0)
                             // The bytes are still on disk; the name need not be all
-                            // there is to look at. Read lazily inside the popover —
-                            // the row cannot afford a file read per frame.
-                            Button { previewedAttachment = attachment } label: {
+                            // there is to look at. Read once on tap, so SwiftUI
+                            // updates while the popover is open do not hit disk again.
+                            Button {
+                                previewedData = attachmentData(attachment)
+                                previewedAttachment = attachment
+                            } label: {
                                 Image(systemName: "eye")
                                     .font(PanelTheme.Font.caption(textScale))
                                     .foregroundStyle(PanelTheme.Palette.tertiaryText)
@@ -198,9 +202,17 @@ struct TurnView: View, Equatable {
                             .help("Show the attachment again")
                             .accessibilityLabel("Show attachment \(attachment.name)")
                         }
-                        .popover(item: $previewedAttachment, arrowEdge: .top) { attachment in
+                        .popover(isPresented: Binding(
+                            get: { previewedAttachment?.id == attachment.id },
+                            set: { shown in
+                                if !shown && previewedAttachment?.id == attachment.id {
+                                    previewedAttachment = nil
+                                    previewedData = nil
+                                }
+                            }
+                        ), arrowEdge: .top) {
                             AttachmentPreview(attachment: attachment,
-                                              data: attachmentData(attachment))
+                                              data: previewedData)
                         }
                         // Named as an attachment, not merely named. The symbol is
                         // decorative to VoiceOver, so this row read out as a bare

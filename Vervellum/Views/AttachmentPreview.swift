@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 
 /// An attachment's bytes, shown on demand.
@@ -48,7 +49,7 @@ struct AttachmentPreview: View {
         if let data {
             switch attachment.kind {
             case .image:
-                if let image = NSImage(data: data) {
+                if let image = Self.downsampledImage(from: data) {
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -83,5 +84,19 @@ struct AttachmentPreview: View {
                 .foregroundStyle(PanelTheme.Palette.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// ImageIO decodes near the displayed size, avoiding a full-resolution bitmap
+    /// for a thumbnail that is at most 300 points tall.
+    private static func downsampledImage(from data: Data) -> NSImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 720
+        ]
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return nil }
+        return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
     }
 }
