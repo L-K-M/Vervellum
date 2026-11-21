@@ -45,11 +45,11 @@ enum CitationValidator {
     /// Matches `[3]`, `[3, 4]`, `[3,4 , 12]` — digits and separators only, so an
     /// ordinary markdown link `[text](url)` or a bracketed aside never matches.
     ///
-    /// The digit count is unbounded on purpose: the source list is small, so a four-digit
-    /// marker like `[1000]` is always an invented citation, and capping the match at three
-    /// digits meant it never matched at all — rendered as plain text and never reported in
-    /// `outOfRangeCitations`, so the invalid-citation warning never fired for exactly the
-    /// numbers most likely to be fabricated. The range check below decides validity.
+    /// The digit count is unbounded on purpose: capping the match at three digits meant a
+    /// four-digit marker like `[1000]` never matched at all — rendered as plain text and
+    /// never reported in `outOfRangeCitations`, so the invalid-citation warning never
+    /// fired for exactly the numbers most likely to be fabricated. Magnitude is decided
+    /// by the range check below against the actual list size, never by this pattern.
     private static let citationRegex = try? NSRegularExpression(
         pattern: #"\[\s*\d+(?:\s*[,;]\s*\d+)*\s*\]"#)
 
@@ -92,16 +92,20 @@ enum CitationValidator {
             let numbers = raw
                 .trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
                 .split(whereSeparator: { $0 == "," || $0 == ";" || $0 == " " })
-                .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+                .map { Int($0.trimmingCharacters(in: .whitespaces)) }
 
             var indices: [Int] = []
             for number in numbers {
-                if number >= 1 && number <= sourceCount {
-                    indices.append(number - 1)
-                    cited.insert(number - 1)
-                } else {
-                    outOfRange.append(number)
+                guard let value = number, value >= 1, value <= sourceCount else {
+                    // A token that does not parse — an overflowing digit run, or a
+                    // non-ASCII digit that ICU's `\d` matches but `Int` rejects — is an
+                    // invented citation too. Record it as `Int.max` so the out-of-range
+                    // warning fires instead of the marker silently passing as plain text.
+                    outOfRange.append(number ?? .max)
+                    continue
                 }
+                indices.append(value - 1)
+                cited.insert(value - 1)
             }
             // A marker whose every number was invented is kept as plain text rather
             // than rendered as a chip that leads nowhere.

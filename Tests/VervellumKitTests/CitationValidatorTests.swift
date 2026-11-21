@@ -91,6 +91,27 @@ final class CitationValidatorTests: XCTestCase {
         XCTAssertEqual(result.citedSourceIndices, [1])
     }
 
+    /// A four-digit marker that IS in range of a large source list must stay a valid
+    /// chip — the regex must never encode a digit-count limit of its own.
+    func testAcceptsFourDigitCitationWithinRangeOfLargeSourceList() {
+        let result = CitationValidator.validate(answer: "See [1000].", sourceCount: 5000)
+        XCTAssertEqual(result.outOfRangeCitations, [])
+        XCTAssertTrue(result.spans.contains(.citation(sourceIndices: [999], raw: "[1000]")))
+        XCTAssertEqual(result.citedSourceIndices, [999])
+    }
+
+    /// A digit run too large for `Int` (and a non-ASCII digit that ICU's `\d` matches
+    /// but `Int` rejects) are invented citations too: they must be flagged, not
+    /// silently passed as plain text.
+    func testFlagsOverflowingAndNonAsciiDigitCitations() {
+        let result = CitationValidator.validate(
+            answer: "A [99999999999999999999] and a [٣].", sourceCount: 24)
+        XCTAssertEqual(result.outOfRangeCitations, [.max, .max])
+        XCTAssertFalse(result.isClean)
+        XCTAssertTrue(result.spans.contains(.text("[99999999999999999999]")))
+        XCTAssertTrue(result.spans.contains(.text("[٣]")))
+    }
+
     /// The answer prompt forbids URLs outright, so one appearing is a prompt
     /// violation the UI has to warn about.
     func testFlagsLiteralURLs() {
