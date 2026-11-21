@@ -100,7 +100,7 @@ struct FindingsView: View {
 /// Source numbers have different widths, and a narrow panel can have more
 /// citations than fit on one line. Measure the native buttons at their ideal
 /// size so each keeps its entire label and hit target.
-struct FindingCitationLayout: Layout {
+private struct FindingCitationLayout: Layout {
     let spacing: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
@@ -119,22 +119,36 @@ struct FindingCitationLayout: Layout {
         var origins: [CGPoint] = []
         var usedWidth: CGFloat = 0
         var lineWidth: CGFloat = 0
-        var lineHeight: CGFloat = 0
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        var lineStart = 0
         var y: CGFloat = 0
+        // The verdict and padded buttons have different baselines. Offset each
+        // item from its line's baseline once all heights on the line are known.
+        func finishLine() {
+            for index in lineStart..<origins.count { origins[index].y += y + ascent }
+            y += ascent + descent
+            lineStart = origins.count
+            ascent = 0
+            descent = 0
+            lineWidth = 0
+        }
         for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
+            let size = view.dimensions(in: .unspecified)
+            let baseline = size[VerticalAlignment.firstTextBaseline]
             if lineWidth > 0, lineWidth + spacing + size.width > width {
-                y += lineHeight + spacing
-                lineWidth = 0
-                lineHeight = 0
+                finishLine()
+                y += spacing
             }
             let x = lineWidth == 0 ? 0 : lineWidth + spacing
-            origins.append(CGPoint(x: x, y: y))
+            origins.append(CGPoint(x: x, y: -baseline))
             lineWidth = x + size.width
             usedWidth = max(usedWidth, lineWidth)
-            lineHeight = max(lineHeight, size.height)
+            ascent = max(ascent, baseline)
+            descent = max(descent, size.height - baseline)
         }
-        return (CGSize(width: usedWidth, height: y + lineHeight), origins)
+        finishLine()
+        return (CGSize(width: usedWidth, height: y), origins)
     }
 }
 
