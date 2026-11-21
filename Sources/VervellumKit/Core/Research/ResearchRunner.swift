@@ -1913,7 +1913,11 @@ final class ResearchRunner: ResearchRunning {
                 || error is CancellationError
                 || (error as? ResearchError) == ResearchError.cancelled
             guard !stopped else { throw error }
-            trace.warn("Assessment unavailable: \(ResearchError.safeLabel(for: error))")
+            // The failure path is where the slowest assessments live — a timeout is
+            // exactly the case a maintainer asking "is the assessor slow?" is chasing.
+            trace.warn("Assessment unavailable after "
+                       + String(format: "%.1fs", trace.elapsed - began)
+                       + ": \(ResearchError.safeLabel(for: error))")
             return nil
         }
         trace.log("Assessment: \(assessment.findings.count) findings in "
