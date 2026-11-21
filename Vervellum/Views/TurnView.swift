@@ -269,7 +269,13 @@ struct StreamingCaret: View {
             // mid-stream, the blink must start then, not stay frozen at the dim tick
             // the appear-time guard left behind.
             .task(id: reduceMotion) {
-                guard !reduceMotion else { return }
+                guard !reduceMotion else {
+                    // End the blink rather than merely mask it: a repeatForever
+                    // animation otherwise keeps driving `isBright` under Reduce
+                    // Motion, and any future isBright-driven property would animate.
+                    withAnimation(nil) { isBright = false }
+                    return
+                }
                 withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
                     isBright = true
                 }
