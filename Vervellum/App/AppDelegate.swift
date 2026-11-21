@@ -429,9 +429,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// been running, so a slow run reads as "still working" rather than "stuck".
     private func startBusyTimer() {
         busyTimer?.invalidate()
-        busyTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) {
+        let timer = Timer(timeInterval: 1, repeats: true) {
             [weak self] _ in self?.updateBusyTitle()
         }
+        // Menu tracking changes the run-loop mode; keep the visible clock ticking.
+        RunLoop.main.add(timer, forMode: .common)
+        busyTimer = timer
         updateBusyTitle()
     }
 
@@ -450,7 +453,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // alone still says something is working.
         guard let started else { statusItem?.button?.title = ""; return }
         let elapsed = max(0, Int(Date().timeIntervalSince(started)))
-        statusItem?.button?.title = String(format: "%d:%02d", elapsed / 60, elapsed % 60)
+        statusItem?.button?.title = elapsed >= 3600
+            ? String(format: "%d:%02d:%02d", elapsed / 3600, elapsed / 60 % 60, elapsed % 60)
+            : String(format: "%d:%02d", elapsed / 60, elapsed % 60)
     }
 
     private func makeMenu() -> NSMenu {
