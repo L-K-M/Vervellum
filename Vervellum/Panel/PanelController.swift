@@ -113,6 +113,10 @@ final class PanelController {
         self.panel = panel
         place(panel, on: Self.screenUnderPointer(), animated: !isOpen)
         if takingFocus {
+            // A user-summoned panel belongs to the user, not to a Settings preview that
+            // may have opened it first: from here on, closing Settings must not hide it
+            // (the contract `setPreviewing` documents), so the flag is cleared here.
+            isPreviewing = false
             focus(panel)
         } else {
             panel.orderFrontRegardless()
