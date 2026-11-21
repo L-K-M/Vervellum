@@ -184,8 +184,14 @@ final class QuestionLinkTests: XCTestCase {
         XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/a?utm_source=news"),
                        "example.com/a")
         // `URLComponents.path` percent-decodes, so %E2%80%AE (a bidi RLO) arrives as a real
-        // override character — stripped like every other displayed field.
+        // override character — stripped like every other displayed field. NUL (C0) and a
+        // bidi isolate (U+2067 RLI) are the same class of smuggling vector; pin that they
+        // are stripped too.
         XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/%E2%80%AE/admin"),
+                       "example.com//admin")
+        XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/%00/admin"),
+                       "example.com//admin")
+        XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/%E2%81%A7/admin"),
                        "example.com//admin")
         XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/a#results"),
                        "example.com/a")

@@ -30,12 +30,12 @@ final class EvidenceExtractorTests: XCTestCase {
     }
 
     /// The published date is displayed beside the title in the source list and the
-    /// citation preview, so a hostile value in it (a bidi override, a C0 control) must be
+    /// citation preview, so a hostile value in it (a bidi override or isolate, C0 controls incl. NUL) must be
     /// stripped exactly like the url, title and snippet are.
     func testStripsHostileCharactersFromThePublishedDate() {
         let payload: [String: Any] = ["results": [[
             "title": "X", "url": "https://a.example.com/1",
-            "publishedDate": "2026\u{202E}-01\u{0002}-02",
+            "publishedDate": "2026\u{202E}\u{2067}-01\u{0002}\u{0000}-02",
         ]]]
         XCTAssertEqual(EvidenceExtractor.sources(from: [payload]).first?.publishedAt,
                        "2026-01-02")
