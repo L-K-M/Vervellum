@@ -7,6 +7,13 @@ tones, R03); their implemented slices are annotated in place and are not repeate
 here. New findings C01–C07 are appended at the end. Concurrent branches and other
 agents' PRs were not inspected during this review.
 
+Codex pass 2026-11-21 (second): reviewed against `origin/main` at `9c3e3d7`. Three
+fixes are open in PRs #232 (declared page encodings, A81), #237 (assessment stage
+timing, A82) and #248 (fence marker/length matching and the info string, A29).
+PRs #235 and #245 additionally cover A80 and A62, which the pass above already
+records as #236 and #233. New findings V01–V02 are appended at the end. Concurrent
+branches and other agents' PRs were not inspected during this review.
+
 Panel-UX pass 2026-11-21 (Devin): thirteen focused PRs are open — #204
 (Reduce-Motion caret), #207 and #202 (submit-key hint; S07 implemented slice),
 #211 (history delete confirmation; A28's confirmation slice), #215 (summon
@@ -544,6 +551,11 @@ where absent, preserving the native scroll view.
 Accept: Mismatched, shorter/longer and nested fences; incomplete streaming prefixes;
 long lines. Align render/parser and citation-code masks. No dependency or HTML
 renderer. Pango nested emphasis is A29a; range citations are A62.
+
+The fence half is implemented in open PR #248 (the opener's marker and run length
+are carried; a closer needs the same marker, at least that length and only trailing
+whitespace; the info string follows the whole opening run). Code-copy actions and
+Linux long-line handling remain. Restore the fence half if that PR closes unmerged.
 
 Earlier effort: M.
 
@@ -1604,6 +1616,11 @@ Suggested fix: honor recognized declared charsets before the generic UTF-8 fallb
 use `.windowsCP1252`, `.utf16LittleEndian`, and `.utf16BigEndian`, with byte fixtures
 that distinguish each encoding. Rough effort: about one hour.
 
+Implemented in open PR #232 (an explicit UTF-16 endianness is acted on before the
+generic fallback, a declared Windows-1252 page uses the Windows codec, and a strict
+UTF-8 decode still wins for the single-byte charsets so a mislabelled UTF-8 page
+reads correctly). Restore this entry if that PR closes unmerged.
+
 ### A82 · Measure the assessment stage rather than the whole turn
 
 General issues — nice-to-have
@@ -1617,6 +1634,8 @@ are unaffected.
 Suggested fix: capture a monotonic stage start immediately before assessment, as the
 revision path already does, and report only the assessment interval. Rough effort:
 under one hour.
+
+Implemented in open PR #237. Restore this entry if that PR closes unmerged.
 
 ### A83 · Evict idle research sessions
 
@@ -2296,3 +2315,44 @@ Performance — nice-to-have
 
 These are collected here so a future performance pass has one list; each is
 profiled before it is redesigned.
+
+## Codex pass 2026-11-21 (second)
+
+### V01 · Surface a failed thread write
+
+Bugs — nice-to-have
+
+`ThreadArchive.writeNow` catches every write and rotation error and writes one line
+to stderr. It sets neither `readFailure` nor `eraseFailure`, so `scheduleSave`'s gate
+keeps believing the last save succeeded and Settings keeps showing history as
+healthy. A full disk, a read-only folder or a permission regression is exactly when
+the user needs to know their threads are not being kept. A14 covers backup rotation
+and concurrent erase/flush; this is the primary write path.
+
+Suggested fix: record a `saveFailure` beside `eraseFailure`, surface it through
+`ThreadStore.eraseFailure` and Settings, and test that a failed write is reported
+without blocking the next save attempt.
+
+Accept: a forced write failure reaches the UI in Vervellum's own words; a later
+successful save clears it; no path or foreign error text is shown.
+
+Where: `Sources/VervellumKit/Core/Store/ThreadArchive.swift:391–420`;
+`Vervellum/Store/ThreadStore.swift` (`eraseFailure`). Effort: half a day.
+
+### V02 · Time `ResearchTrace.stage` with the injected clock
+
+General issues — nice-to-have
+
+`ResearchTrace.init` takes `now:` and uses it for `started`/`elapsed`, but `stage`
+and the completion logs call `Date()` directly. A test that injects a clock can
+predict `elapsed` but not the per-stage figures, so the trace's per-stage timings
+cannot be fixture-tested.
+
+Suggested fix: store the injected clock and use it for `stage` and the completion
+logs as well.
+
+Accept: a fixture clock produces deterministic stage durations; live behaviour is
+unchanged.
+
+Where: `Sources/VervellumKit/Core/Research/ResearchTrace.swift:33–45`. Effort: under
+one hour.
