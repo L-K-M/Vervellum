@@ -39,18 +39,19 @@ final class TranscriptFormatterTests: XCTestCase {
     /// prose nobody could read.
     func testCarriesTheDraftWhenAnAnswerWasRevised() throws {
         var subject = turn()
-        XCTAssertFalse(TranscriptFormatter.plainText(subject).contains("First draft"),
+        XCTAssertFalse(TranscriptFormatter.plainText(subject).contains("Draft before correction"),
                        "no revision, no draft")
+        subject.notices = [.answerRevised]
         subject.draftAnswer = subject.answer
-        XCTAssertFalse(TranscriptFormatter.plainText(subject).contains("First draft"),
+        XCTAssertFalse(TranscriptFormatter.plainText(subject).contains("Draft before correction"),
                        "a draft identical to the answer adds nothing")
         subject.draftAnswer = "Because of something else [1]."
         let text = TranscriptFormatter.plainText(subject)
-        XCTAssertTrue(text.contains("First draft (before the correction)"), text)
+        XCTAssertTrue(text.contains("Draft before correction"), text)
         XCTAssertTrue(text.contains("Because of something else [1]."), text)
         // And after the answer, before the claims it explains.
         let answerAt = try XCTUnwrap(text.range(of: subject.answer)).lowerBound
-        let draftAt = try XCTUnwrap(text.range(of: "First draft")).lowerBound
+        let draftAt = try XCTUnwrap(text.range(of: "Draft before correction")).lowerBound
         let claimsAt = try XCTUnwrap(text.range(of: "Claims")).lowerBound
         XCTAssertLessThan(answerAt, draftAt)
         XCTAssertLessThan(draftAt, claimsAt)

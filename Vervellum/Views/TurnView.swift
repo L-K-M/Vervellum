@@ -122,12 +122,12 @@ struct TurnView: View, Equatable {
             Button {
                 showsDraft.toggle()
             } label: {
-                Text(showsDraft ? DraftComparison.hideLabel : DraftComparison.showLabel)
+                Text(DraftComparison.toggleLabel(expanded: showsDraft))
                     .font(PanelTheme.Font.caption(textScale))
                     .foregroundStyle(PanelTheme.Palette.accent)
             }
             .buttonStyle(.plain)
-            .accessibilityHint("The findings grade this draft, not the answer above")
+            .accessibilityHint(DraftComparison.description(for: turn).hint)
             if showsDraft {
                 MarkdownBody(markdown: draft, sources: turn.sources, scale: textScale)
                     .padding(.vertical, PanelTheme.Space.hair)

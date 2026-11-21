@@ -9,6 +9,18 @@ import XCTest
 
 final class DraftComparisonTests: XCTestCase {
 
+    func testAssessmentTargetFollowsTheOperationThatSavedTheDraft() {
+        var turn = ResearchTurn(question: "What changed?")
+        XCTAssertEqual(DraftComparison.description(for: turn).heading, "Earlier draft")
+        turn.notices = [.answerRegathered]
+        XCTAssertEqual(DraftComparison.description(for: turn).hint,
+                       "The findings assess the answer written after additional research.")
+        for notices: [TurnNotice] in [[.answerRevised], [.answerRegathered, .answerRevised]] {
+            turn.notices = notices
+            XCTAssertEqual(DraftComparison.description(for: turn).hint, "The findings assess this draft.")
+        }
+    }
+
     func testADifferentDraftIsOfferedForComparison() {
         XCTAssertTrue(DraftComparison.isOffered(draft: "First [1].", answer: "Second [1]."))
         XCTAssertFalse(DraftComparison.isOffered(draft: nil, answer: "Second [1]."))

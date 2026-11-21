@@ -38,7 +38,7 @@ enum TranscriptFormatter {
         if let draft = turn.draftAnswer,
            DraftComparison.isOffered(draft: draft, answer: turn.answer) {
             lines.append("")
-            lines.append("First draft (before the correction)")
+            lines.append(DraftComparison.description(for: turn).heading)
             lines.append(draft)
         }
 
