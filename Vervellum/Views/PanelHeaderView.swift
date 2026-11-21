@@ -58,13 +58,33 @@ struct PanelHeaderView: View {
 }
 
 /// A small square icon button, styled once so every header control matches.
-private struct HeaderButton: View {
+struct HeaderButton: View {
     @Environment(\.panelTextScale) private var textScale
 
     let symbol: String
     let help: String
     var tint: Color = PanelTheme.Palette.secondaryText
     var action: () -> Void
+
+    /// How far the tappable area extends past the glyph's frame, per axis.
+    ///
+    /// The drawn frame is 20×18 — smaller than the ~24 pt a pointer aims at — and the
+    /// buttons sit `PanelTheme.Space.small` (6 pt) apart, so 3 pt of horizontal expansion
+    /// makes neighbouring hit areas exactly meet without overlapping, and 4 pt vertical
+    /// stays inside the header's own 6 pt padding. The glyph and the hover background
+    /// are unchanged; only the hit shape grows.
+    static let hitExpansionX: CGFloat = 3
+    static let hitExpansionY: CGFloat = 4
+
+    /// The glyph's drawn frame, in the button's own coordinates.
+    static let glyphFrame = CGRect(x: 0, y: 0, width: 20, height: 18)
+
+    /// The hit-test shape for a button whose label occupies `frame`: the frame grown by
+    /// the expansion, so a click beside the glyph still lands on the button. Pure, so
+    /// the geometry is unit-testable without a window.
+    static func hitShape(for frame: CGRect) -> CGRect {
+        frame.insetBy(dx: -hitExpansionX, dy: -hitExpansionY)
+    }
 
     @State private var isHovering = false
 
@@ -73,12 +93,17 @@ private struct HeaderButton: View {
             Image(systemName: symbol)
                 .font(PanelTheme.Font.at(10.5, textScale, weight: .medium))
                 .foregroundStyle(tint)
-                .frame(width: 20, height: 18)
+                .frame(width: Self.glyphFrame.width, height: Self.glyphFrame.height)
                 .background(isHovering ? PanelTheme.Palette.chipFill : .clear,
                             in: RoundedRectangle(cornerRadius: PanelTheme.Radius.chip, style: .continuous))
-                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // On the button, not the label, and grown past the frame: the default hit area
+        // is the label's 20×18 bounds, which at the largest text scale is barely larger
+        // than the glyph itself. The expansion stays within half the 6 pt spacing, so
+        // adjacent buttons' areas meet but never overlap — an overlapping shape would
+        // make one button swallow clicks meant for its neighbour.
+        .contentShape(Path { $0.addRect(Self.hitShape(for: Self.glyphFrame)) })
         .onHover { isHovering = $0 }
         .help(help)
         .accessibilityLabel(help)
