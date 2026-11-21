@@ -2078,6 +2078,29 @@ final class ResearchRunnerTests: XCTestCase {
 
     // MARK: Regather
 
+    func testRegatherOnlySpendsAnotherAnswerOnVisibleEvidence() throws {
+        let first = Source(number: 1, url: "https://one.example", title: "One", snippet: "")
+        var read = first
+        read.fullText = String(repeating: "page text", count: 200)
+        var second = read
+        second.number = 2
+        second.url = "https://two.example"
+        let bare = ResearchContext.measure(ResearchContext.evidence(from: [first]).entries)
+        let hidden = ResearchRunner.regatherEvidence(from: [read, second], limit: bare, comparedTo: [first])
+        XCTAssertFalse(hidden.hasAdditions)
+        XCTAssertEqual(hidden.sources, [first])
+        XCTAssertEqual(hidden.dropped, 1)
+        XCTAssertEqual(hidden.withheld, [1])
+
+        let visible = ResearchRunner.regatherEvidence(from: [read], limit: 5000, comparedTo: [first])
+        XCTAssertTrue(visible.hasAdditions)
+        XCTAssertEqual(visible.sources, [read])
+        XCTAssertFalse(ResearchRunner.regatherEvidence(from: [read], limit: 5000,
+                                                      comparedTo: [read]).hasAdditions)
+        XCTAssertTrue(ResearchRunner.regatherEvidence(from: [first, second], limit: 5000,
+                                                     comparedTo: [first]).hasAdditions)
+    }
+
     /// The first assessment's two replies, told apart by which answer they grade.
     private static func regatherTransport(secondAssessment: StubTransport.Reply)
         -> StubTransport {
@@ -2140,6 +2163,7 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(turn.draftAnswer, "First answer [1].",
                        "the first answer is kept as the draft for comparison")
         XCTAssertEqual(turn.sources.count, 2, "the regather round's hit joined the list")
+        XCTAssertTrue(turn.sources[0].wasRead, "keep the first pass's rank-order page read")
         XCTAssertTrue(turn.notices.contains(.answerRegathered))
         XCTAssertEqual(turn.findings.first?.verdict, .supported,
                        "the findings are the second check's — they grade what is on screen")
