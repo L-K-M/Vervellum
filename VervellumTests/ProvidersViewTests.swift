@@ -16,7 +16,7 @@ final class ProvidersViewTests: XCTestCase {
     private func exercisePendingClear() throws {
         let suite = "VervellumProvidersViewTest-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { SuitePlistCleanup.removeSuite(suite, from: defaults) }
         let preferences = Preferences(defaults: defaults)
         let id = UUID()
         let account = SecretAccount.derived(from: .modelAPIKey, for: id)
