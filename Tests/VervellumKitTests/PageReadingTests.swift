@@ -623,6 +623,14 @@ final class PageReadingTests: XCTestCase {
                        "<p>ok</p>")
     }
 
+    /// A bogus `xcharset=` token is skipped in favour of the real parameter that follows.
+    func testARealCharsetParameterAfterABogusTokenIsHonoured() {
+        let text = "<p>ok</p>"
+        XCTAssertEqual(DirectPageReader.decode(Data(text.utf8),
+                                              contentType: "text/html; xcharset=utf-16le; charset=utf-8"),
+                       "<p>ok</p>")
+    }
+
     // MARK: The reader server's reply
 
     /// The published documentation names the endpoint and the tool but not the argument

@@ -454,7 +454,7 @@ final class DirectPageReader: PageReading {
     /// Decodes a page's bytes, honouring the charset the response declared.
     ///
     /// The declaration is acted on where it is decisive. BOM-less UTF-16 whose text
-    /// is pure ASCII is valid UTF-8 — every second byte is NUL — so a UTF-8-first
+    /// is pure ASCII is valid UTF-8 — one byte in two is NUL — so a UTF-8-first
     /// decode reads it as a NUL-filled string (accented UTF-16 is rejected by a
     /// strict UTF-8 decode); an explicit little- or big-endian declaration is
     /// honoured before the generic fallback. For the single-byte charsets the order is the
@@ -572,15 +572,18 @@ final class DirectPageReader: PageReading {
     }
 
     private static func declaredEncoding(_ contentType: String) -> DeclaredEncoding? {
-        guard let marker = contentType.range(of: "charset=", options: .caseInsensitive) else {
-            return nil
-        }
         // `charset=` must open a parameter; a match inside another token (e.g.
-        // `xcharset=`) is not a declaration.
-        let preceding = contentType[contentType.startIndex..<marker.lowerBound]
-            .reversed()
-            .drop(while: { $0 == " " || $0 == "\t" })
-        guard preceding.isEmpty || preceding.first == ";" else {
+        // `xcharset=`) is not a declaration — keep scanning for a real one.
+        var marker = contentType.range(of: "charset=", options: .caseInsensitive)
+        while let found = marker {
+            let preceding = contentType[contentType.startIndex..<found.lowerBound]
+                .reversed()
+                .drop(while: { $0 == " " || $0 == "\t" })
+            if preceding.isEmpty || preceding.first == ";" { break }
+            marker = contentType.range(of: "charset=", options: .caseInsensitive,
+                                       range: found.upperBound..<contentType.endIndex)
+        }
+        guard let marker = marker else {
             return nil
         }
         let declared = contentType[marker.upperBound...]
