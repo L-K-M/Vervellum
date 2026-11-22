@@ -162,7 +162,9 @@ final class ThreadStore: ObservableObject {
         } else if attachmentEraseFailure != nil {
             eraseAttachments()
         }
-        let writeFailures = archive.storageFailures()
+        // The snapshot, not the queue: this runs from a button tap, and the
+        // warning the reader is answering was published through it.
+        let writeFailures = publishedWriteFailures
         if writeFailures.save != nil || writeFailures.backup != nil {
             archive.retrySave()
         }
