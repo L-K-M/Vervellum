@@ -2800,6 +2800,29 @@ final class ResearchRunnerTests: XCTestCase {
     /// The reviser reading the findings and judging that none of them warrants a change
     /// is a real answer, not a failure — and not a revision either. Nothing is said,
     /// because nothing happened.
+    func testARevisionWithAnUnreadableCitationIsDroppedWhole() async {
+        let draft = "Parallax is measured in degrees [1]."
+        for marker in ["[9-2]", "[1-3-5]", "[1-300]", "[4321]"] {
+            let revision = "Parallax is measured in arcseconds [1] \(marker)."
+            let transport = revisionTransport(verdict: "mixed", answer: [draft],
+                                              revision: .stream([revision]))
+            let turn = await run("How is stellar parallax measured?", transport: transport)
+            XCTAssertEqual(turn.answer, draft, "a valid citation must not excuse \(marker)")
+            XCTAssertNil(turn.draftAnswer, marker)
+            XCTAssertTrue(turn.notices.contains(.revisionUnavailable), marker)
+        }
+    }
+
+    func testARevisionMentioningAYearIsAdopted() async {
+        let revision = "Parallax is measured in arcseconds [1], as restated in [2023]."
+        let transport = revisionTransport(verdict: "mixed",
+                                          answer: ["Parallax is measured in degrees [1]."],
+                                          revision: .stream([revision]))
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+        XCTAssertEqual(turn.answer, revision)
+        XCTAssertFalse(turn.notices.contains(.invalidCitation))
+    }
+
     func testARevisionThatChangesNothingIsNotAnnouncedAsOne() async throws {
         let transport = revisionTransport(
             verdict: "mixed",
