@@ -216,6 +216,7 @@ struct ComposerView: NSViewRepresentable {
         var parent: ComposerView
         weak var textView: NSTextView?
         private var showObserver: NSObjectProtocol?
+        private var focusObserver: NSObjectProtocol?
 
         init(_ parent: ComposerView) {
             self.parent = parent
@@ -244,6 +245,7 @@ struct ComposerView: NSViewRepresentable {
 
         deinit {
             if let showObserver { NotificationCenter.default.removeObserver(showObserver) }
+            if let focusObserver { NotificationCenter.default.removeObserver(focusObserver) }
         }
 
         /// Re-asserts focus every time the panel is summoned. See the type's docs.
@@ -256,6 +258,9 @@ struct ComposerView: NSViewRepresentable {
                 // occasionally undone by AppKit's own focus restoration.
                 DispatchQueue.main.async { self?.claimFocus() }
             }
+            focusObserver = NotificationCenter.default.addObserver(
+                forName: .vervellumComposerShouldClaimFocus, object: nil, queue: .main
+            ) { [weak self] _ in self?.claimFocus() }
         }
 
         func claimFocus() {

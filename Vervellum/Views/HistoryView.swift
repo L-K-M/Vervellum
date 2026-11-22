@@ -21,6 +21,10 @@ struct HistoryView: View {
     var onClose: () -> Void
 
     @State private var query = ""
+    /// "Open and type" — the Spotlight-shaped flow. The view is inserted fresh
+    /// when History opens, so the freshly-built field can take focus here the
+    /// way the reused composer cannot.
+    @FocusState private var searchFocused: Bool
     @State private var matcher: HistoryMatcher?
     @State private var searchTask: Task<Void, Never>?
     @State private var matchingIDs: Set<UUID>?
@@ -38,6 +42,10 @@ struct HistoryView: View {
             } else {
                 list
             }
+        }
+        .onAppear {
+            // The newly inserted NSTextField joins the responder chain next turn.
+            DispatchQueue.main.async { searchFocused = true }
         }
         .onReceive(store.$library) { search($0) }
         .onChange(of: query) { search(store.library) }
@@ -90,6 +98,7 @@ struct HistoryView: View {
             TextField("Search earlier threads", text: $query)
                 .textFieldStyle(.plain)
                 .font(PanelTheme.Font.body(textScale))
+                .focused($searchFocused)
             if !query.isEmpty {
                 Button { query = "" } label: {
                     Image(systemName: "xmark.circle.fill")
