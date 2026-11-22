@@ -104,4 +104,24 @@ final class SourceHarvesterTests: XCTestCase {
         XCTAssertTrue(SourceHarvester.urls(in: 42).isEmpty)
         XCTAssertTrue(SourceHarvester.urls(in: [String: Any]()).isEmpty)
     }
+
+    /// Every click path that opens an address a thread carries goes through
+    /// `openableURL`, so the answer chips, the source rows and the finding chips all
+    /// agree. A stored `threads.json` is decoded without re-validation, which is why
+    /// the check belongs at the click and not only at harvest time.
+    func testOnlyAbsoluteHTTPAddressesAreOpenable() {
+        XCTAssertNotNil(SourceHarvester.openableURL("https://example.com/a"))
+        XCTAssertNotNil(SourceHarvester.openableURL("http://localhost:3000/a"))
+        XCTAssertNotNil(SourceHarvester.openableURL("https://example.com/a(1)"))
+        XCTAssertNil(SourceHarvester.openableURL("file:///etc/passwd"))
+        XCTAssertNil(SourceHarvester.openableURL("javascript:alert(1)"))
+        XCTAssertNil(SourceHarvester.openableURL("ftp://example.com/a"))
+        XCTAssertNil(SourceHarvester.openableURL("https://user:pass@example.com/a"))
+        // Percent-encoded userinfo is still userinfo: `URLComponents` exposes it as a
+        // user, and a click must not carry it either way.
+        XCTAssertNil(SourceHarvester.openableURL("https://user%40x:pass@example.com/a"))
+        XCTAssertNil(SourceHarvester.openableURL("https:///a"))
+        XCTAssertNil(SourceHarvester.openableURL("example.com"))
+        XCTAssertNil(SourceHarvester.openableURL(""))
+    }
 }
