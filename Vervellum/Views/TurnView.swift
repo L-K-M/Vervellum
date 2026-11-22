@@ -37,23 +37,39 @@ struct TurnView: View, Equatable {
 
     static func == (lhs: TurnView, rhs: TurnView) -> Bool {
         lhs.turn == rhs.turn && lhs.showsProcessTrail == rhs.showsProcessTrail
+            && lhs.palette == rhs.palette
     }
 
     @Environment(\.panelTextScale) private var textScale
 
     let turn: ResearchTurn
     let showsProcessTrail: Bool
+    /// The palette the row was last rendered with. Part of `==` because the theme is a
+    /// global (`PanelTheme.palette`), not an input any parent passes down: without this,
+    /// a theme change re-renders the panel chrome but every `TurnView` compares equal to
+    /// its predecessor and the rendered answer, findings and sources keep the old colours
+    /// until their text changes. A value captured here makes the change an input.
+    ///
+    /// The same holds one level down. Getting this body run again restyles only what it
+    /// draws itself, and SwiftUI skips a child whose stored inputs did not change, so
+    /// every themed view a turn contains stores the palette too, defaulted where it is
+    /// built. `TurnThemeRenderingTests` fails when one of them does not.
+    let palette: PanelPalette
     var onRetry: () -> Void
     var onAskFollowup: (String) -> Void
     /// Loads a question back into the composer for editing — seeding, not
     /// submitting, so a typo can be fixed rather than re-run verbatim.
     var onSeedComposer: (String) -> Void = { _ in }
+    /// Reads back one attachment's stored bytes — called only when a preview is
+    /// opened, never per frame: the row itself still shows names alone.
+    var attachmentData: (Attachment) -> Data?
 
     @State private var trailExpanded = false
     @State private var sourcesExpanded = false
     @State private var showsAllSources = false
-    /// The first draft, collapsed. The findings grade it, and the answer above is
-    /// the rewrite; opening this is the comparison the notice promises.
+    @State private var previewedAttachment: Attachment?
+    @State private var previewedData: Data?
+    /// Keep the comparison collapsed so the displayed answer stays in reading order.
     @State private var showsDraft = false
 
     private var validation: CitationValidator.Result {
@@ -93,7 +109,7 @@ struct TurnView: View, Equatable {
 
             if !turn.findings.isEmpty {
                 FindingsView(findings: turn.findings, sources: turn.sources) { source in
-                    if let url = URL(string: source.url) { NSWorkspace.shared.open(url) }
+                    if let url = SourceHarvester.openableURL(source.url) { NSWorkspace.shared.open(url) }
                 }
             } else if turn.stage == .assessing {
                 Label("Checking the answer's claims…", systemImage: "checkmark.seal")
@@ -125,12 +141,12 @@ struct TurnView: View, Equatable {
             Button {
                 showsDraft.toggle()
             } label: {
-                Text(showsDraft ? DraftComparison.hideLabel : DraftComparison.showLabel)
+                Text(DraftComparison.toggleLabel(expanded: showsDraft))
                     .font(PanelTheme.Font.caption(textScale))
                     .foregroundStyle(PanelTheme.Palette.accent)
             }
             .buttonStyle(.plain)
-            .accessibilityHint("The findings grade this draft, not the answer above")
+            .accessibilityHint(DraftComparison.description(for: turn).hint)
             if showsDraft {
                 MarkdownBody(markdown: draft, sources: turn.sources, scale: textScale)
                     .padding(.vertical, PanelTheme.Space.hair)
@@ -168,43 +184,72 @@ struct TurnView: View, Equatable {
                         // and the middle truncation are what the `Label` was giving; the
                         // selection is why this is worth the three extra lines.
                         HStack(spacing: PanelTheme.Space.tight) {
-                            Image(systemName: attachment.kind == .image ? "photo" : "doc.text")
-                                .font(PanelTheme.Font.caption(textScale))
-                                .foregroundStyle(PanelTheme.Palette.tertiaryText)
-                            // And selectable, like the question above it. Hover shows
-                            // the truncated part; only selection gets it into a search
-                            // box or a follow-up question.
-                            SelectableText(text: attachment.name,
-                                           font: PanelTheme.NativeFont.caption(textScale),
-                                           color: PanelTheme.NativePalette.tertiaryText,
-                                           // The name is the whole record of what the
-                                           // answer was looking at, and middle truncation
-                                           // eats the timestamp that tells one screenshot
-                                           // from the next. Kept anyway — both ends carry
-                                           // meaning too, and hover and selection below
-                                           // are what recover the part it hides.
-                                           layout: .singleLine(.byTruncatingMiddle))
-                            Spacer(minLength: 0)
+                            HStack(spacing: PanelTheme.Space.tight) {
+                                Image(systemName: attachment.kind == .image ? "photo" : "doc.text")
+                                    .font(PanelTheme.Font.caption(textScale))
+                                    .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                                // And selectable, like the question above it. Hover shows
+                                // the truncated part; only selection gets it into a search
+                                // box or a follow-up question.
+                                SelectableText(text: attachment.name,
+                                               font: PanelTheme.NativeFont.caption(textScale),
+                                               color: PanelTheme.NativePalette.tertiaryText,
+                                               // The name is the whole record of what the
+                                               // answer was looking at, and middle truncation
+                                               // eats the timestamp that tells one screenshot
+                                               // from the next. Kept anyway — both ends carry
+                                               // meaning too, and hover and selection below
+                                               // are what recover the part it hides.
+                                               layout: .singleLine(.byTruncatingMiddle))
+                                Spacer(minLength: 0)
+                            }
+                            // Named as an attachment, not merely named. The symbol is
+                            // decorative to VoiceOver, so this row read out as a bare
+                            // file name in the middle of a transcript — which is the
+                            // non-sequitur the paragraph above keeps out of the reading
+                            // for anyone who can see the icon. The label is read whole,
+                            // so the middle truncation does not reach it either.
+                            //
+                            // `.ignore` because the name is two views rather than one:
+                            // without it the symbol and the text would be read as separate
+                            // elements and the label below would name neither. It stops short
+                            // of the button, which has to stay an element of its own.
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Attached "
+                                + (attachment.kind == .image ? "image" : "file")
+                                + ": " + attachment.name)
+                            // Hover has the whole of it, truncation or not. Applied after the
+                            // accessibility modifiers rather than before: `.help` sets a help
+                            // trait as well as a tooltip, and the element it would have landed
+                            // on above is the one `.ignore` discards.
+                            .help(attachment.name)
+                            // The bytes are still on disk; the name need not be all
+                            // there is to look at. Read once on tap, so SwiftUI
+                            // updates while the popover is open do not hit disk again.
+                            Button {
+                                previewedData = attachmentData(attachment)
+                                previewedAttachment = attachment
+                            } label: {
+                                Image(systemName: "eye")
+                                    .font(PanelTheme.Font.caption(textScale))
+                                    .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Show the attachment again")
+                            .accessibilityLabel("Show attachment \(attachment.name)")
                         }
-                        // Named as an attachment, not merely named. The symbol is
-                        // decorative to VoiceOver, so this row read out as a bare
-                        // file name in the middle of a transcript — which is the
-                        // non-sequitur the paragraph above keeps out of the reading
-                        // for anyone who can see the icon. The label is read whole,
-                        // so the middle truncation does not reach it either.
-                        //
-                        // `.ignore` because the row is now two views rather than one:
-                        // without it the symbol and the text would be read as separate
-                        // elements and the label below would name neither.
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Attached "
-                            + (attachment.kind == .image ? "image" : "file")
-                            + ": " + attachment.name)
-                        // Hover has the whole of it, truncation or not. Applied after the
-                        // accessibility modifiers rather than before: `.help` sets a help
-                        // trait as well as a tooltip, and the element it would have landed
-                        // on above is the one `.ignore` discards.
-                        .help(attachment.name)
+                        .popover(isPresented: Binding(
+                            get: { previewedAttachment?.id == attachment.id },
+                            set: { shown in
+                                if !shown && previewedAttachment?.id == attachment.id {
+                                    previewedAttachment = nil
+                                    previewedData = nil
+                                }
+                            }
+                        ), arrowEdge: .top) {
+                            AttachmentPreview(attachment: attachment,
+                                              data: previewedData)
+                        }
                     }
                 }
             }
@@ -263,19 +308,34 @@ struct TurnView: View, Equatable {
 
 /// A blinking caret for the moment between the last search and the first token.
 struct StreamingCaret: View {
-    @State private var isBright = false
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The caret's opacity for a brightness tick. Under Reduce Motion it is held
+    /// steady and dimmed, so a still caret does not read as a solid block of text.
+    static func opacity(isBright: Bool, reduceMotion: Bool) -> Double {
+        reduceMotion ? 0.6 : (isBright ? 1 : 0.25)
+    }
 
     var body: some View {
+        Group {
+            if reduceMotion {
+                caret.opacity(Self.opacity(isBright: false, reduceMotion: true))
+            } else {
+                // Removing this subtree also stops an in-flight repeating animation.
+                caret.phaseAnimator([false, true]) { view, bright in
+                    view.opacity(Self.opacity(isBright: bright, reduceMotion: false))
+                } animation: { _ in .easeInOut(duration: 0.55) }
+            }
+        }
+        .accessibilityLabel("Writing the answer")
+    }
+
+    private var caret: some View {
         RoundedRectangle(cornerRadius: 1, style: .continuous)
             .fill(PanelTheme.Palette.accent)
             .frame(width: 7, height: 14)
-            .opacity(isBright ? 1 : 0.25)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
-                    isBright = true
-                }
-            }
-            .accessibilityLabel("Writing the answer")
     }
 }
 
@@ -286,6 +346,8 @@ struct NoticesView: View {
     @Environment(\.panelTextScale) private var textScale
 
     let notices: [TurnNotice]
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
@@ -313,6 +375,8 @@ struct LimitationsView: View {
     @Environment(\.panelTextScale) private var textScale
 
     let text: String
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
@@ -330,6 +394,8 @@ struct FollowupsView: View {
     @Environment(\.panelTextScale) private var textScale
 
     let followups: [String]
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     var onSelect: (String) -> Void
 
     var body: some View {
@@ -363,6 +429,8 @@ struct FailureView: View {
     @Environment(\.panelTextScale) private var textScale
 
     let message: String
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     var onRetry: () -> Void
 
     var body: some View {

@@ -39,21 +39,43 @@ final class TranscriptFormatterTests: XCTestCase {
     /// prose nobody could read.
     func testCarriesTheDraftWhenAnAnswerWasRevised() throws {
         var subject = turn()
-        XCTAssertFalse(TranscriptFormatter.plainText(subject).contains("First draft"),
+        XCTAssertFalse(TranscriptFormatter.plainText(subject).contains("Draft before correction"),
                        "no revision, no draft")
+        subject.notices = [.answerRevised]
         subject.draftAnswer = subject.answer
-        XCTAssertFalse(TranscriptFormatter.plainText(subject).contains("First draft"),
+        XCTAssertFalse(TranscriptFormatter.plainText(subject).contains("Draft before correction"),
                        "a draft identical to the answer adds nothing")
         subject.draftAnswer = "Because of something else [1]."
         let text = TranscriptFormatter.plainText(subject)
-        XCTAssertTrue(text.contains("First draft (before the correction)"), text)
+        XCTAssertTrue(text.contains("Draft before correction\nThe findings assess this draft."), text)
         XCTAssertTrue(text.contains("Because of something else [1]."), text)
         // And after the answer, before the claims it explains.
         let answerAt = try XCTUnwrap(text.range(of: subject.answer)).lowerBound
-        let draftAt = try XCTUnwrap(text.range(of: "First draft")).lowerBound
+        let draftAt = try XCTUnwrap(text.range(of: "Draft before correction")).lowerBound
         let claimsAt = try XCTUnwrap(text.range(of: "Claims")).lowerBound
         XCTAssertLessThan(answerAt, draftAt)
         XCTAssertLessThan(draftAt, claimsAt)
+    }
+
+    func testRegatheredTranscriptIdentifiesWhichAnswerWasAssessed() {
+        var subject = turn()
+        subject.notices = [.answerRegathered]
+        subject.draftAnswer = "Earlier answer [1]."
+        let text = TranscriptFormatter.plainText(subject)
+        XCTAssertTrue(text.contains("Draft before additional research\n"
+                                    + DraftComparison.description(for: subject).hint
+                                    + "\nEarlier answer [1]."))
+    }
+
+    func testIncludesSourcesCitedOnlyInTheExportedDraft() {
+        var subject = turn()
+        subject.sources.append(Source(number: 4, url: "https://unused.example.com",
+                                      title: "Unused", snippet: ""))
+        subject.draftAnswer = "Earlier evidence [3, 1]. Code `items[4]`. Unknown [99]."
+        let text = subject.transcript
+        XCTAssertTrue(text.contains("[3] Three — https://three.example.com"))
+        XCTAssertEqual(text.components(separatedBy: "[1] One —").count, 2)
+        XCTAssertFalse(text.contains("unused.example.com"))
     }
 
     /// A dump of everything the search returned misrepresents what the answer rests on.

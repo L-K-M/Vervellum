@@ -950,7 +950,7 @@ final class LinuxPanel {
             if DraftComparison.isOffered(draft: turn.draftAnswer, answer: turn.answer),
                let draft = turn.draftAnswer {
                 let open = expandedDrafts.contains(turn.id)
-                let toggle = GTK.button(open ? DraftComparison.hideLabel : DraftComparison.showLabel) { [weak self] in
+                let toggle = GTK.button(DraftComparison.toggleLabel(expanded: open)) { [weak self] in
                     guard let self else { return }
                     if self.expandedDrafts.contains(turn.id) {
                         self.expandedDrafts.remove(turn.id)
@@ -964,7 +964,7 @@ final class LinuxPanel {
                 // accessibility hint: without it the button is a label that
                 // expands something, and a tooltip is where GTK readers look.
                 gtk_widget_set_tooltip_text(toggle,
-                    "The findings grade this draft, not the answer above")
+                    DraftComparison.description(for: turn).hint)
                 GTK.append(box, toggle)
                 if open {
                     let shown = GTK.markupLabel(PangoMarkup.answer(draft, sources: turn.sources))

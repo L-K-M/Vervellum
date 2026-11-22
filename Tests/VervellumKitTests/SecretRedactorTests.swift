@@ -81,6 +81,14 @@ final class SecretRedactorTests: XCTestCase {
         assertRedacted("postgres://admin:s3cr3tpass@db.example.com/app", "s3cr3tpass")
     }
 
+    /// URL schemes are case-insensitive, so an uppercased scheme must redact too —
+    /// `HTTPS://u:p@host` is the same address as `https://u:p@host`, and `URL` accepts
+    /// both. A lowercase-only scheme class would pass it straight to the composer.
+    func testRedactsCredentialsInAnUppercaseSchemeURL() {
+        assertRedacted("see HTTPS://admin:s3cr3tpass@db.example.com/app today", "s3cr3tpass")
+        assertRedacted("Mixed Case HtTp://admin:s3cr3tpass@db.example.com", "s3cr3tpass")
+    }
+
     func testRedactsJWTs() {
         assertRedacted("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w",
                        "eyJzdWIiOiIxMjM0")

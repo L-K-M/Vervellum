@@ -14,6 +14,8 @@ struct FindingsView: View {
 
     let findings: [Finding]
     let sources: [Source]
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     var onSelectSource: (Source) -> Void
 
     var body: some View {
@@ -49,7 +51,8 @@ struct FindingsView: View {
                 .accessibilityLabel(finding.verdict.label)
 
             VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
-                HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
+                BaselineFlowLayout(spacing: PanelTheme.Space.small,
+                                   lineSpacing: PanelTheme.Space.tight) {
                     Text(finding.verdict.label.uppercased())
                         .font(PanelTheme.Font.label(textScale))
                         .tracking(0.7)
@@ -102,6 +105,8 @@ struct CitationChip: View {
     @Environment(\.panelTextScale) private var textScale
 
     let source: Source
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     var action: () -> Void
 
     var body: some View {
@@ -126,6 +131,8 @@ struct SectionLabel: View {
 
     let text: String
     var trailing: String?
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {

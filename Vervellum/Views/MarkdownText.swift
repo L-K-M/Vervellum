@@ -25,6 +25,8 @@ struct MarkdownText: View, Equatable {
     let markdown: String
     let sources: [Source]
     var scale: Double = 1.0
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     /// The block's base font. Passed in rather than applied by the caller: this is drawn
     /// by an `NSTextView`, and a `.font()` modifier on a representable reaches the
     /// SwiftUI wrapper rather than the text inside it — a heading styled from outside
@@ -84,6 +86,8 @@ private struct HoveredAnswer: View {
 
     let attributed: NSAttributedString
     let sources: [Source]
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     /// The chip the pointer is resting on, if any.
     ///
@@ -262,34 +266,9 @@ enum CitationText {
             // grouped marker names is still in the list under the answer, which is
             // where the rest of them are read.
             return MaskedCitation(label: cited.map { String($0.number) }.joined(separator: ","),
-                                  url: cited.first.flatMap { Self.openable($0.url) })
+                                  url: cited.first?.browserURL)
         }
         return (mask.text, citations)
-    }
-
-    /// A citation's address, but only when it is one a click may follow.
-    ///
-    /// `NSTextView` opens a `.link` run through `NSWorkspace`, which will launch *any*
-    /// scheme a URL carries — `file:`, and whatever a third-party app has registered.
-    /// A source address is harvested from the web, so it is not this panel's to trust:
-    /// the GTK front end already refuses everything but http(s) in `GTK.openLink`, for
-    /// the same reason and in the same words, and a chip that behaved differently on one
-    /// platform would be the harder half to remember.
-    ///
-    /// A refused address still renders as a chip — the number, the face, the colour —
-    /// and simply does not open. The source list under the answer is where its address
-    /// is read either way.
-    private static func openable(_ address: String) -> URL? {
-        // A host as well as the scheme. `URL(string:)` will build `https:` — a scheme
-        // and nothing else — and that passes a check that asks only what it starts
-        // with. Nothing is opened by it, but this is the funnel that decides what a
-        // click may reach, and a funnel that admits what it cannot describe is one
-        // nobody can reason about later.
-        guard let url = URL(string: address),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              url.host?.isEmpty == false else { return nil }
-        return url
     }
 
     // MARK: Inline parsing
@@ -330,6 +309,8 @@ struct MarkdownBody: View {
     let markdown: String
     let sources: [Source]
     var scale: Double = 1.0
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.medium) {
@@ -343,11 +324,19 @@ struct MarkdownBody: View {
     private func row(for block: MarkdownParser.Block) -> some View {
         switch block.kind {
         case .paragraph:
-            MarkdownText(markdown: block.text, sources: sources, scale: scale)
+            // Font and colour are passed explicitly rather than left to `MarkdownText`'s
+            // defaults: the defaults read the global palette at render time, which an
+            // `Equatable` comparison cannot see, so a theme change would not count as a
+            // changed input and the block would keep the old colours. Explicit inputs
+            // make the palette part of the comparison.
+            MarkdownText(markdown: block.text, sources: sources, scale: scale,
+                         font: PanelTheme.NativeFont.body(scale),
+                         color: PanelTheme.NativePalette.primaryText)
 
         case .heading(let level):
             MarkdownText(markdown: block.text, sources: sources, scale: scale,
-                         font: PanelTheme.NativeFont.heading(level, scale))
+                         font: PanelTheme.NativeFont.heading(level, scale),
+                         color: PanelTheme.NativePalette.primaryText)
                 .padding(.top, level == 1 ? PanelTheme.Space.small : PanelTheme.Space.hair)
 
         case .bullet(let depth):
@@ -362,6 +351,7 @@ struct MarkdownBody: View {
                     .fill(PanelTheme.Palette.accent.opacity(0.55))
                     .frame(width: 2)
                 MarkdownText(markdown: block.text, sources: sources, scale: scale,
+                             font: PanelTheme.NativeFont.body(scale),
                              color: PanelTheme.NativePalette.secondaryText)
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -385,7 +375,9 @@ struct MarkdownBody: View {
                 // A fixed width keeps every item's text on the same left edge, which
                 // a proportional marker ("1." vs "10.") would otherwise ragged out.
                 .frame(width: 16, alignment: .trailing)
-            MarkdownText(markdown: text, sources: sources, scale: scale)
+            MarkdownText(markdown: text, sources: sources, scale: scale,
+                         font: PanelTheme.NativeFont.body(scale),
+                         color: PanelTheme.NativePalette.primaryText)
         }
         .padding(.leading, CGFloat(depth) * 14)
         .fixedSize(horizontal: false, vertical: true)
@@ -398,6 +390,8 @@ struct CodeBlock: View {
     let code: String
     let language: String
     var scale: Double = 1.0
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -439,6 +433,8 @@ struct TableBlock: View {
     let rows: [[String]]
     let sources: [Source]
     var scale: Double = 1.0
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -449,7 +445,8 @@ struct TableBlock: View {
                     ForEach(headers.indices, id: \.self) { column in
                         MarkdownText(markdown: headers[column], sources: sources,
                                      scale: scale,
-                                     font: PanelTheme.NativeFont.bodyEmphasis(scale))
+                                     font: PanelTheme.NativeFont.bodyEmphasis(scale),
+                                     color: PanelTheme.NativePalette.primaryText)
                     }
                 }
                 // A direct child of Grid (not wrapped in GridRow) spans all columns.
@@ -458,7 +455,9 @@ struct TableBlock: View {
                     GridRow {
                         ForEach(rows[row].indices, id: \.self) { column in
                             MarkdownText(markdown: rows[row][column], sources: sources,
-                                         scale: scale)
+                                         scale: scale,
+                                         font: PanelTheme.NativeFont.body(scale),
+                                         color: PanelTheme.NativePalette.primaryText)
                         }
                     }
                 }
