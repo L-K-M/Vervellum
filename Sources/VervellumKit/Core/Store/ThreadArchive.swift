@@ -511,10 +511,23 @@ final class ThreadArchive {
                 // snapshot pending so `retrySave()` can rewrite the same document.
                 pendingSnapshot = nil
             } catch {
+                // The write failed, so the primary is untouched and a rotation
+                // that succeeded on this attempt never re-checked its mode. If
+                // this attempt reported no backup problem, re-run the chmod
+                // rather than clearing a standing permission warning.
+                var backup = attemptBackupFailure
+                if backup == nil {
+                    do {
+                        try fileManager.setAttributes([.posixPermissions: 0o600],
+                                                      ofItemAtPath: fileURL.path)
+                    } catch {
+                        backup = Self.permissionFailureMessage(
+                            in: directory, file: fileURL.lastPathComponent)
+                    }
+                }
                 recordFailures(save: Self.saveFailureMessage(in: directory,
                                                              file: fileURL.lastPathComponent),
-                               // This attempt's rotation result.
-                               backup: attemptBackupFailure)
+                               backup: backup)
                 FileHandle.standardError.write(Data("vervellum warning: could not save threads\n".utf8))
                 return
             }
