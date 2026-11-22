@@ -16,7 +16,7 @@ extension Notification.Name {
 /// that outlives a user interaction: it holds the preferences, the thread store, the
 /// research engine, the panel, the status item and the two global shortcuts, and it
 /// is what re-registers a shortcut when the user changes one.
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private let preferences = Preferences.shared
     private let secrets: SecretStore = KeychainStore()
@@ -54,6 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The menu's Stop item. Kept because `autoenablesItems` is off and the item is
     /// enabled by hand when the run state changes.
     private var stopMenuItem: NSMenuItem?
+    /// The "what is it doing" line at the top of the menu, retitled every time the
+    /// menu opens (`menuNeedsUpdate`) and hidden while nothing is running.
+    private var busyMenuItem: NSMenuItem?
+    private var busySeparator: NSMenuItem?
     private var runningObserver: AnyCancellable?
     private var previewObserver: NSObjectProtocol?
 
@@ -426,6 +430,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // other item having to answer a validation message. All of them are always
         // available anyway.
         menu.autoenablesItems = false
+        // What the hourglass icon cannot say: which question it is working on.
+        // Hidden while idle; `menuNeedsUpdate` fills the title on every open, so a
+        // detached session the panel cannot show is still named here.
+        let busy = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        busy.isEnabled = false
+        busy.isHidden = true
+        menu.addItem(busy)
+        busyMenuItem = busy
+        let separator = NSMenuItem.separator()
+        separator.isHidden = true
+        menu.addItem(separator)
+        busySeparator = separator
+        menu.delegate = self
         for (title, selector, key) in [
             ("Ask Vervellum…", #selector(summon), ""),
             ("Research the Selection", #selector(summonSelection), ""),
@@ -484,6 +501,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func checkForUpdates() { updateChecker.checkNow() }
 
     // MARK: Helpers
+
+    func menuNeedsUpdate(_ menu: NSMenu) { updateBusyMenuItem() }
+
+    /// Retitles the "Researching: …" line from the live state each time the menu
+    /// opens — cheaper and more honest than tracking every publish that could
+    /// change it.
+    private func updateBusyMenuItem() {
+        guard let busyMenuItem, let busySeparator else { return }
+        let running = engine.runningThreadIDs
+        let questions = running
+            .compactMap { id in store.library.threads.first(where: { $0.id == id }) }
+            .compactMap { $0.turns.last?.question }
+        if running.count > 1 {
+            busyMenuItem.title = "Researching \(running.count) threads"
+        } else if let question = questions.first,
+                  question.contains(where: { !$0.isWhitespace }) {
+            // A question can be multi-line and arbitrarily long; the menu gets one
+            // line of it.
+            let oneLine = question.split(whereSeparator: \.isNewline).joined(separator: " ")
+            busyMenuItem.title = "Researching: " + String(oneLine.prefix(57))
+                + (oneLine.count > 57 ? "…" : "")
+        } else {
+            busyMenuItem.title = "Researching…"
+        }
+        busyMenuItem.isHidden = running.isEmpty
+        busySeparator.isHidden = running.isEmpty
+    }
 
     private static var isRunningTests: Bool {
         NSClassFromString("XCTestCase") != nil
