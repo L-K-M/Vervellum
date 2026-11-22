@@ -51,7 +51,8 @@ extension TurnNotice {
              .pageTextTrimmed, .linkNotRead, .imagesNotSent, .attachmentMissing,
              .attachmentTrimmed:
             return .caution
-        case .answerRevised, .linkReadingOff, .modelFellBack, .answerRegathered, .unknown:
+        case .answerRevised, .linkReadingOff, .modelFellBack, .answerRegathered, .singleDomain,
+             .unknown:
             return .informational
         }
     }

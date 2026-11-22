@@ -761,9 +761,7 @@ final class ResearchRunner: ResearchRunning {
         // answer the reader stopped mid-sentence.
         update { turn in
             let validation = turn.applyCitationValidation(sourceCount: sources.count)
-            if turn.citesSingleDomain(using: validation) {
-                turn.addNotice(.singleDomain)
-            }
+            turn.refreshSingleDomainNotice(using: validation)
         }
         try Task.checkCancellation()
 
@@ -1779,7 +1777,10 @@ final class ResearchRunner: ResearchRunning {
             return nil
         }
         recordAnsweringModel(from: chain)
-        update { $0.applyCitationValidation(sourceCount: sources.count) }
+        update { turn in
+            let validation = turn.applyCitationValidation(sourceCount: sources.count)
+            turn.refreshSingleDomainNotice(using: validation)
+        }
         try Task.checkCancellation()
 
         update { $0.stage = .assessing }
@@ -2186,6 +2187,7 @@ final class ResearchRunner: ResearchRunning {
         update { turn in
             turn.draftAnswer = answer
             turn.answer = corrected
+            turn.refreshSingleDomainNotice(using: validation)
             turn.addNotice(.answerRevised)
         }
         trace.log("Revised the answer in " + String(format: "%.1fs", trace.elapsed - began))

@@ -700,6 +700,16 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
         return Set(cited.map(\.domain)).count == 1
     }
 
+    /// Makes the single-site cue describe the answer now on screen. A revision or a
+    /// regathered answer can cite differently, so it is withdrawn as well as added.
+    mutating func refreshSingleDomainNotice(using validation: CitationValidator.Result) {
+        if citesSingleDomain(using: validation) {
+            addNotice(.singleDomain)
+        } else {
+            notices.removeAll { $0 == .singleDomain }
+        }
+    }
+
     /// The turn as plain text, for the clipboard and the command line.
     ///
     /// The rendering lives in `TranscriptFormatter` so the macOS Copy button and the
