@@ -11,6 +11,29 @@ import XCTest
 /// read.
 final class ModelCatalogTests: XCTestCase {
 
+    func testCatalogUsesOnlyTheSavedDestinationsCredential() throws {
+        let saved = ProviderSettings(modelEndpoint: "https://models.example/tenant/v1")
+        var draft = try XCTUnwrap(saved.selectedModel)
+        let secrets = EphemeralSecretStore()
+        try secrets.set("saved", for: draft.secretAccount)
+        func key(_ edit: ProviderCredentialCommit.CredentialEdit = .unchanged) -> String? {
+            ProviderCredentialCommit.catalogKey(for: draft, saved: saved, edit: edit, secrets: secrets)
+        }
+
+        draft.endpoint = "https://MODELS.example:443/tenant/v1/chat/completions"
+        XCTAssertEqual(key(), "saved")
+        XCTAssertNil(key(.clear))
+        for changed in ["https://another.example/tenant/v1", "https://models.example/other/v1",
+                        "https://models.example/tenant/v1?project=other"] {
+            draft.endpoint = changed
+            XCTAssertNil(key())
+            XCTAssertEqual(key(.replace("new")), "new")
+        }
+        draft.endpoint = "https://models.example/tenant/v1"
+        draft.id = UUID()
+        XCTAssertNil(key())
+    }
+
     // MARK: The address
 
     /// The three shapes a user pastes as their chat endpoint, in reverse.
