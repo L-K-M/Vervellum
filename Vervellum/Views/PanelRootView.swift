@@ -59,6 +59,7 @@ struct PanelRootView: View {
     /// with it, and one that was refused keeps both.
     @State private var attachments: [PendingAttachment] = []
     @State private var showsHistory = false
+    @State private var panelVisible = false
     /// Markdown shown above the thread in place of a turn — `/help`, and the `/model`
     /// listing. One slot rather than a flag per command: they are mutually exclusive by
     /// nature (each replaces the last), and Escape has one thing to back out of.
@@ -214,7 +215,19 @@ struct PanelRootView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .vervellumPanelDidShow)) { _ in
+            panelVisible = true
             refreshConfiguredState()
+        }
+        .onChange(of: showsHistory) { _, shown in
+            // History's search field took first responder while it was open; on
+            // close the composer claims it back, unless the whole panel is hiding.
+            if !shown && panelVisible {
+                DispatchQueue.main.async {
+                    guard panelVisible else { return }
+                    NotificationCenter.default.post(name: .vervellumComposerShouldClaimFocus,
+                                                    object: nil)
+                }
+            }
         }
         // Also on first build: the panel is constructed and shown in the same turn, so
         // without this the very first frame renders the not-configured state even for a
@@ -224,6 +237,7 @@ struct PanelRootView: View {
         // opens on the thread rather than wherever the user happened to be. The draft
         // is deliberately kept — a half-typed question should survive a dismissal.
         .onReceive(NotificationCenter.default.publisher(for: .vervellumPanelWillHide)) { _ in
+            panelVisible = false
             showsHistory = false
             notice = nil
             recallIndex = nil
