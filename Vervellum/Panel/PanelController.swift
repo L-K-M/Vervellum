@@ -127,22 +127,34 @@ final class PanelController {
 
     // MARK: Live settings
 
+    /// The side/width/height the open panel was last placed with. After a header drag
+    /// the panel's frame no longer matches the preference-derived one, so comparing
+    /// frames — as `preferencesDidChange` used to — would snap the dragged position
+    /// back on every unrelated preference write. Comparing the geometry instead
+    /// re-places only when a placement preference actually changed.
+    private var placedGeometry: (side: PanelSide, width: CGFloat, height: CGFloat)?
+
     /// Re-places an open panel from the current preferences.
     ///
     /// Without this, the panel's edge, width and height were read once per summon, so
     /// the only way to see what a width slider did was to close the panel and summon it
     /// again — which is exactly the moment the comparison is no longer in front of you.
     ///
-    /// Unanimated, and a no-op when the frame is unchanged. A slider drag emits a change
-    /// per pixel; animating each one leaves several animations fighting over the same
-    /// window, and re-setting an identical frame makes AppKit redraw the hosted SwiftUI
-    /// tree for nothing.
+    /// Unanimated, and a no-op when neither the placement preferences nor the frame
+    /// changed. A slider drag emits a change per pixel; animating each one leaves
+    /// several animations fighting over the same window, and re-setting an identical
+    /// frame makes AppKit redraw the hosted SwiftUI tree for nothing.
     func preferencesDidChange() {
         guard isOpen, let panel, let screen = panel.screen ?? NSScreen.main else { return }
+        let geometry = (side: preferences.panelSide,
+                        width: preferences.panelWidth,
+                        height: preferences.panelHeight)
+        if let placed = placedGeometry, placed == geometry { return }
+        placedGeometry = geometry
         let frame = PanelPlacement.frame(in: screen.visibleFrame,
-                                         side: preferences.panelSide,
-                                         width: preferences.panelWidth,
-                                         height: preferences.panelHeight)
+                                         side: geometry.side,
+                                         width: geometry.width,
+                                         height: geometry.height)
         guard frame != panel.frame else { return }
         panel.setFrame(frame, display: true)
     }
@@ -230,11 +242,17 @@ final class PanelController {
 
     private func place(_ panel: ResearchPanel, on screen: NSScreen?, animated: Bool) {
         guard let screen = screen ?? NSScreen.main else { return }
-        let side = preferences.panelSide
+        // One snapshot of the placement preferences, so the recorded geometry and the
+        // applied frame can never come from two different reads.
+        let geometry = (side: preferences.panelSide,
+                        width: preferences.panelWidth,
+                        height: preferences.panelHeight)
+        let side = geometry.side
+        placedGeometry = geometry
         let frame = PanelPlacement.frame(in: screen.visibleFrame,
                                          side: side,
-                                         width: preferences.panelWidth,
-                                         height: preferences.panelHeight)
+                                         width: geometry.width,
+                                         height: geometry.height)
         guard animated else {
             panel.setFrame(frame, display: true)
             panel.alphaValue = 1
