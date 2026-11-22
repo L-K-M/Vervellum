@@ -311,6 +311,7 @@ final class AttachmentTests: XCTestCase {
         let decoded = try JSONDecoder().decode(Attachment.self, from: Data(negative.utf8))
         XCTAssertEqual(decoded.byteCount, 0)
         XCTAssertEqual(decoded.sizeDescription, "0 bytes")
+        XCTAssertEqual(decoded.name, "shot.png")
     }
 
     /// Sanitising a sanitised name changes nothing, which is what lets the decoder run
