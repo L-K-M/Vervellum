@@ -29,6 +29,7 @@ extension Notification.Name {
 final class PanelController {
 
     private let preferences: Preferences
+    private let frontmostApplication: () -> NSRunningApplication?
     private let rootView: () -> AnyView
 
     private var panel: ResearchPanel?
@@ -51,6 +52,12 @@ final class PanelController {
     /// dismissing a panel the user had summoned themselves.
     private(set) var isPreviewing = false
 
+    /// Whether the open panel was shown without focus and has not been given it since:
+    /// the first-launch panel and the Settings preview. Until then a summon means
+    /// "let me use this", and the app to hand focus back to is still whichever one
+    /// the user is in, not the one from when the panel appeared.
+    private var awaitsFocus = false
+
     /// Called when the panel is dismissed, so the owner can flush anything pending.
     var onDismiss: (() -> Void)?
     /// Asked for the text to seed the composer with, when summoned via the
@@ -62,8 +69,11 @@ final class PanelController {
     /// dismissal, never before a deliberate one.
     var isBusy: (() -> Bool)?
 
-    init(preferences: Preferences, rootView: @escaping () -> AnyView) {
+    init(preferences: Preferences,
+         frontmostApplication: @escaping () -> NSRunningApplication? = { NSWorkspace.shared.frontmostApplication },
+         rootView: @escaping () -> AnyView) {
         self.preferences = preferences
+        self.frontmostApplication = frontmostApplication
         self.rootView = rootView
     }
 
@@ -77,11 +87,15 @@ final class PanelController {
     /// multi-display desk.
     func toggle() {
         guard isOpen, let panel else { show(); return }
-        // A previewing panel is visible but unfocused — the user has never been
-        // *in* it, so "visible" cannot mean "summoned, dismiss it". The summon
-        // gesture on a preview means "let me use this": take focus. `focus` ends
+        // A previewing or first-launch panel is visible but unfocused — the user has
+        // never been *in* it, so "visible" cannot mean "summoned, dismiss it". The
+        // summon gesture on one means "let me use this": take focus. `focus` ends
         // the preview, so Settings closing later will not hide a panel in use.
-        if isPreviewing { focus(panel); return }
+        if isPreviewing || awaitsFocus {
+            refreshRestoreTarget()
+            focus(panel)
+            return
+        }
         let target = Self.screenUnderPointer()
         if let target, panel.screen !== target {
             place(panel, on: target, animated: true)
@@ -108,11 +122,14 @@ final class PanelController {
     ///   making the panel key. Used by the Settings preview, where stealing focus would
     ///   pull the caret out of the very field the user is editing.
     func show(takingFocus: Bool) {
-        let frontmost = NSWorkspace.shared.frontmostApplication
+        let frontmost = frontmostApplication()
         if !isOpen {
             appToRestoreOnClose = frontmost?.processIdentifier
                 == NSRunningApplication.current.processIdentifier ? nil : frontmost
             hadRestoreTarget = appToRestoreOnClose != nil
+            awaitsFocus = !takingFocus
+        } else if takingFocus {
+            refreshRestoreTarget()
         }
 
         let panel = self.panel ?? makePanel()
@@ -200,6 +217,7 @@ final class PanelController {
         guard isOpen, let panel else { return }
         isOpen = false
         isPreviewing = false
+        awaitsFocus = false
         NotificationCenter.default.post(name: .vervellumPanelWillHide, object: nil)
         removeObservers()
 
@@ -293,7 +311,10 @@ final class PanelController {
         panel.makeKey()
         // `setPreviewing(false)` would hide the panel. Only transfer ownership
         // after it really became key; the observer covers a later key transition.
-        if panel.isKeyWindow { isPreviewing = false }
+        if panel.isKeyWindow {
+            isPreviewing = false
+            awaitsFocus = false
+        }
         NotificationCenter.default.post(name: .vervellumPanelDidShow, object: nil)
     }
 
@@ -337,8 +358,20 @@ final class PanelController {
         becomeKeyObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main
         ) { [weak self] _ in
+            self?.refreshRestoreTarget()
             self?.isPreviewing = false
+            self?.awaitsFocus = false
         }
+    }
+
+    /// Remembers the app in front as an unfocused panel is promoted. The one captured
+    /// when it appeared can be long stale. Vervellum itself is never the answer.
+    private func refreshRestoreTarget() {
+        guard awaitsFocus, let frontmost = frontmostApplication(),
+              frontmost.processIdentifier != NSRunningApplication.current.processIdentifier
+        else { return }
+        appToRestoreOnClose = frontmost
+        hadRestoreTarget = true
     }
 
     /// Escape, and the shortcuts that only make sense while the panel is up.
