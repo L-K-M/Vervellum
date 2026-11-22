@@ -272,15 +272,29 @@ struct PanelRootView: View {
             case .openSettings:
                 onOpenSettings()
             case .stop: engine.cancel()
+            case .scrollToTop: scrollToEdge(top: true)
+            case .scrollToBottom: scrollToEdge(top: false)
             }
         }
     }
 
     // MARK: Thread
 
+    /// Holds the thread's scroll proxy so panel commands (⌘↑/⌘↓) can scroll it. A
+    /// reference box rather than a stored property on the view: `body` is a computed
+    /// property, so `self` is immutable there and a `var` cannot be assigned from the
+    /// reader's closure; and `@State` would re-invalidate the view on every render, a
+    /// loop. Nothing in `body` reads the box — the command handler does, outside any
+    /// render pass.
+    private final class ScrollProxyBox {
+        var proxy: ScrollViewProxy?
+    }
+    private let scrollProxyBox = ScrollProxyBox()
+
     private var thread: some View {
         ScrollViewReader { proxy in
-            ScrollView {
+            scrollProxyBox.proxy = proxy
+            return ScrollView {
                 // Keep row lifetimes stable while scrolling. LazyVStack repeatedly
                 // changes item phases for these variable-height AppKit-backed rows;
                 // the resulting view-graph churn can occupy the main loop forever.
@@ -323,6 +337,9 @@ struct PanelRootView: View {
                 }
                 .padding(.horizontal, PanelTheme.Space.gutter)
                 .padding(.vertical, PanelTheme.Space.large)
+                // ⌘↑'s anchor is the padded content itself. A spacer row at the top
+                // would push every thread down by the stack's spacing.
+                .id(Self.topAnchor)
                 // Observe the full scroll content, including its bottom anchor.
                 .background(BottomSentinel { pinned in isPinnedToBottom = pinned })
             }
@@ -366,11 +383,26 @@ struct PanelRootView: View {
     }
 
     private static let bottomAnchor = "vervellum.bottom"
+    private static let topAnchor = "vervellum.top"
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         // Unanimated: an animated scroll re-targeted on every streamed token fights
         // itself and the text visibly judders.
         proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+    }
+
+    /// ⌘↑/⌘↓: jump the transcript to an end.
+    ///
+    /// Animated, unlike the follow-scroll while an answer streams — this is a deliberate
+    /// jump, not a token re-target. The sentinel observes the resulting scroll and updates
+    /// the pin, so ⌘↑ mid-answer stops the auto-follow until the reader returns to the
+    /// bottom, exactly as scrolling up by hand does.
+    private func scrollToEdge(top: Bool) {
+        guard !showsHistory, let proxy = scrollProxyBox.proxy else { return }
+        withAnimation(PanelTheme.Motion.disclosureAnimation(reduceMotion)) {
+            proxy.scrollTo(top ? Self.topAnchor : Self.bottomAnchor,
+                           anchor: top ? .top : .bottom)
+        }
     }
 
     /// The way back to the stream after scrolling up mid-answer. Tapping it scrolls,

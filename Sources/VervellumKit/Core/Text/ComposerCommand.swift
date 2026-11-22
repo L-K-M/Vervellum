@@ -439,6 +439,9 @@ enum ComposerCommand: Equatable {
         if let close = legend.windowCloseKey {
             keys.append("- `\(close)` — close the \(legend.closeNoun)")
         }
+        if let scroll = legend.scrollKeys {
+            keys.append("- \(scroll)")
+        }
 
         return """
             ## How hard to look
@@ -492,6 +495,10 @@ enum ComposerCommand: Equatable {
         var stopKey: String?
         var settingsKey: String?
         var windowCloseKey: String?
+        /// A pre-formatted line naming the keys that jump the transcript to its top and
+        /// bottom, or nil where no such keys exist. Formatted whole rather than split into
+        /// key and meaning because the pair "⌘↑ / ⌘↓" is one affordance, not two.
+        var scrollKeys: String?
         /// Command names this front end does not implement, omitted from the list.
         var hiddenCommands: Set<String>
         /// Where a reader adds or removes providers.
@@ -508,6 +515,7 @@ enum ComposerCommand: Equatable {
             stopKey: "⌘.",
             settingsKey: "⌘,",
             windowCloseKey: "⌘W",
+            scrollKeys: "`⌘↑` / `⌘↓` — top / bottom of the thread, when the composer is empty",
             hiddenCommands: [],
             providersGuidance: "Add and remove providers in Settings ▸ Providers.")
 
@@ -522,6 +530,7 @@ enum ComposerCommand: Equatable {
             stopKey: nil,
             settingsKey: nil,
             windowCloseKey: nil,
+            scrollKeys: nil,
             // `/history` and `/copy` work here; `/settings` has no window to open, so
             // the legend points at the settings file instead.
             hiddenCommands: ["settings"],
