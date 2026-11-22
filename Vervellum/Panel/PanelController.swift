@@ -340,9 +340,13 @@ final class PanelController {
     private func installResignObserver(for panel: ResearchPanel) {
         resignObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification, object: panel, queue: .main
-        ) { [weak self] _ in
+        ) { [weak self, weak panel] _ in
             guard let self, self.preferences.dismissOnFocusLoss else { return }
             guard NSApp.modalWindow == nil else { return }
+            // A sheet on the panel is not modal to the app, so `modalWindow` misses it,
+            // and it takes key status from the panel. The History delete confirmation
+            // is one: dismissing here would take the question away as it was asked.
+            guard panel?.attachedSheet == nil else { return }
             // Even with the preference on, a run in flight keeps the panel up. A
             // provider's own authentication sheet, a system alert, or the user glancing
             // at another window all resign key status — losing a 40-second answer to
