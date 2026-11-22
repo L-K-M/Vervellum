@@ -797,6 +797,26 @@ final class ThreadArchiveTests: XCTestCase {
         XCTAssertTrue(store.library.threads.isEmpty)
     }
 
+    /// A successful erase makes a failed-write warning moot; it must not survive
+    /// to a later retry.
+    func testAnErasureClearsTheWriteWarning() throws {
+        let manager = CompoundFileManager()
+        manager.createDirectoryFailures = 0
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        manager.createDirectoryFailures = 1
+        store.save(thread("two"))
+        store.flush()
+        XCTAssertNotNil(store.storageFailures().save)
+
+        manager.deniesRemoval = false
+        store.deleteAll()
+        XCTAssertNil(store.storageFailures().save,
+                     "the erased document's save warning is moot")
+        XCTAssertNil(store.storageFailures().backup)
+    }
+
     /// When no staging copy survived, the retry falls back to rotating the current
     /// primary afresh rather than reporting a failure it could still resolve.
     func testABackupRetryWithoutStagingRotatesTheCurrentPrimary() throws {

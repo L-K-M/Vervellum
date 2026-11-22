@@ -169,7 +169,14 @@ final class ThreadStore: ObservableObject {
         // The archive clears its own pending snapshot on erase; this is the
         // second half, because the published snapshot this reads may be a
         // publish behind the erase.
-        guard !erased else { return }
+        guard !erased else {
+            // The archive has already dropped the write failures (the erase made
+            // them moot); drop the published snapshot too, so no later tap can
+            // act on it and the banner clears without waiting for the hop.
+            publishedWriteFailures = (nil, nil)
+            objectWillChange.send()
+            return
+        }
         // The snapshot, not the queue: this runs from a button tap, and the
         // warning the reader is answering was published through it.
         let writeFailures = publishedWriteFailures

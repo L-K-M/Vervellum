@@ -301,6 +301,10 @@ final class ThreadArchive {
                 // write to it is what keeps the flag race-free.
                 readFailure = nil
                 libraryIsTrustworthy = true
+                // The document is gone, so a write or backup failure described
+                // bytes that no longer exist. Drop it here rather than letting a
+                // later retry act on a warning the erase made moot.
+                recordFailures(save: nil, backup: nil)
             }
         }
         // Reported, not swallowed. "History off means the bytes are gone" is a promise
