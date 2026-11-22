@@ -31,9 +31,11 @@ enum EvidenceExtractor {
     /// substitute for reading it, and long ones crowd out real evidence in context.
     static let maxSnippetLength = 600
 
+    private static let maxPublicationDateBytes = 128
+
     private static let titleKeys = ["title", "name", "heading", "page_title"]
     private static let snippetKeys = ["snippet", "content", "summary", "description", "text", "abstract"]
-    private static let dateKeys = ["publish_date", "published_at", "published", "date", "publishedDate"]
+    private static let dateKeys = ["publish_date", "published_at", "publishedAt", "published", "publishedDate", "datePublished", "date"]
     private static let linkKeys = ["url", "link", "href"]
     private static let ignoredLinkKeys: Set<String> = ["icon", "favicon", "site_icon", "siteicon", "logo"]
 
@@ -65,7 +67,10 @@ enum EvidenceExtractor {
                    url: HostileText.stripped(hit.url),
                    title: HostileText.stripped(hit.title),
                    snippet: HostileText.stripped(hit.snippet),
-                   publishedAt: hit.date)
+                   // The date is displayed beside the title in the source list and the
+                   // citation preview, so it gets the same stripping as the other fields —
+                   // a search engine's result is untrusted input like the rest.
+                   publishedAt: hit.date.map { HostileText.stripped($0) })
         }
     }
 
@@ -277,7 +282,15 @@ enum EvidenceExtractor {
             .first(where: { !$0.isEmpty })?.trimmed(to: 200)
         let snippet = snippetKeys.compactMap { firstString(dictionary, $0) }
             .first(where: { !$0.isEmpty })?.trimmed(to: maxSnippetLength)
-        let date = dateKeys.compactMap { firstString(dictionary, $0) }.first(where: { !$0.isEmpty })
+        let date = dateKeys.lazy.compactMap { key -> String? in
+            // Optional metadata shares the evidence budget with every later source.
+            // A malformed date must never consume their space. Check bytes before
+            // cleaning so a single enormous grapheme cannot bypass the limit.
+            guard let raw = firstString(dictionary, key), raw.utf8.count <= maxPublicationDateBytes else { return nil }
+            let label = HostileText.stripped(raw).split(whereSeparator: { $0.isWhitespace })
+                .joined(separator: " ")
+            return label.isEmpty ? nil : label
+        }.first
 
         return (url: url,
                 // `url` came back from `SourceHarvester.normalized`, so it is already a

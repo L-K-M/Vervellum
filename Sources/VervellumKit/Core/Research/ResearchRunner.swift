@@ -1889,6 +1889,11 @@ final class ResearchRunner: ResearchRunning {
             question: question, history: history, today: today,
             extra: ["answer": answer, "evidence": evidence, "reading": reading])
         if assessContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
+        // Sampled before the call, not read from `trace.elapsed` at the end: that one
+        // starts at the beginning of the turn, so the figure below would include
+        // planning, searching, page reading and the answer stream. A maintainer asking
+        // whether the assessor is slow is the reader this line exists for.
+        let began = trace.elapsed
         let assessment: AssessmentParser.Assessment
         do {
             let assessObject = try await chain.perform("Assess") { chat in
@@ -1908,11 +1913,14 @@ final class ResearchRunner: ResearchRunning {
                 || error is CancellationError
                 || (error as? ResearchError) == ResearchError.cancelled
             guard !stopped else { throw error }
-            trace.warn("Assessment unavailable: \(ResearchError.safeLabel(for: error))")
+            // The failure path is where the slowest assessments live — a timeout is
+            // exactly the case a maintainer asking "is the assessor slow?" is chasing.
+            trace.warn(String(format: "Assessment unavailable after %.1fs: %@",
+                              trace.elapsed - began, ResearchError.safeLabel(for: error)))
             return nil
         }
         trace.log("Assessment: \(assessment.findings.count) findings in "
-                  + String(format: "%.1fs", trace.elapsed))
+                  + String(format: "%.1fs", trace.elapsed - began))
         return assessment
     }
 
@@ -2253,11 +2261,15 @@ final class ResearchRunner: ResearchRunning {
     /// introduce fetched text into a field the URL already answers.
     static func linkTitle(for url: String) -> String {
         guard let components = URLComponents(string: url), let host = components.host else {
-            return ResearchContext.shorten(url, to: 120)
+            return HostileText.stripped(ResearchContext.shorten(url, to: 120))
         }
         let name = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
         let path = components.path
-        return ResearchContext.shorten(path.isEmpty || path == "/" ? name : name + path, to: 120)
+        // `components.path` percent-decodes, so a pasted link can smuggle a bidi override
+        // (…%E2%80%AE) or a NUL into the title through the path; strip like every other
+        // displayed field. The title is what the source list shows, never a fetch target.
+        return HostileText.stripped(
+            ResearchContext.shorten(path.isEmpty || path == "/" ? name : name + path, to: 120))
     }
 
     /// Reads the pages the question linked to, and turns the ones that answered into
