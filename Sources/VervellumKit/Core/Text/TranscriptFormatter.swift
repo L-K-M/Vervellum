@@ -33,14 +33,14 @@ enum TranscriptFormatter {
         var citedNumbers = Set(turn.findings.flatMap(\.sourceNumbers))
         citedNumbers.formUnion(sourceNumbers(in: turn.answer, turn: turn))
 
-        // The draft the findings were written about. It is kept so a reader can see what
-        // the correction changed, and an export that omitted it would leave the claims
-        // table grading prose nobody can read. Gated like the panel's disclosure: a
-        // blank draft, or one identical to the answer, adds nothing to compare.
+        // The earlier answer gives readers the same comparison available in the panel.
+        // A blank draft or one identical to the answer adds nothing to the export.
         if let draft = turn.draftAnswer,
            DraftComparison.isOffered(draft: draft, answer: turn.answer) {
             lines.append("")
-            lines.append("First draft (before the correction)")
+            let comparison = DraftComparison.description(for: turn)
+            lines.append(comparison.heading)
+            if !turn.findings.isEmpty { lines.append(comparison.hint) }
             lines.append(draft)
             citedNumbers.formUnion(sourceNumbers(in: draft, turn: turn))
         }
