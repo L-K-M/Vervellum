@@ -109,7 +109,9 @@ your IP address.
   server, and `VERVELLUM_READER_KEY` for a reader service; otherwise the keyring is
   tried before the mode-0600 file. Writes prefer the keyring, then the file. In every case they are never written to
   preferences, never included as configuration in a stored thread, and never logged.
-  Typed or pasted secrets are still ordinary user text; review what you send.
+  Typed, dropped or attached secrets are ordinary user content, and so is anything
+  pasted on Linux. Pastes on macOS are scanned (see below), which cannot catch
+  everything; review what you send.
 
 ## The selection shortcut (macOS only)
 
@@ -123,6 +125,12 @@ credentials — API keys, tokens, private-key blocks, `KEY=value` lines, URLs wi
 embedded passwords — and tells you how many it removed. This reduces accidental
 disclosure; it cannot catch a secret that looks like ordinary text, so read what you
 are about to send. The behaviour can be turned off in Settings ▸ Shortcuts.
+
+## Pasted text (macOS only)
+
+Text pasted into the composer goes through the same removal, under the same setting,
+whether or not the selection shortcut is on. The original stays on your clipboard;
+only what is inserted into the composer changes.
 
 Because macOS ties this permission to an app's code signature and released builds are
 ad-hoc signed, the grant is reset by every update. Vervellum says so when that happens.

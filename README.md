@@ -346,10 +346,10 @@ page reading also contacts up to three pages for One pass, or eight shared
 between pasted links and search results for Deep rounds and Agent loop; reader-service
 mode sends those URLs to the configured reader instead. Threads and preferences stay
 on your machine. API keys live in the Keychain on macOS. Linux reads explicit
-environment keys first, then the keyring, then an unencrypted mode-0600 file. Text
-captured by the macOS selection shortcut is scanned for credential-shaped values
-before it reaches the composer, and you're told how many were removed. See
-[PRIVACY.md](PRIVACY.md) for the complete per-stage account.
+environment keys first, then the keyring, then an unencrypted mode-0600 file. On macOS,
+text captured by the selection shortcut or pasted into the composer is scanned for
+credential-shaped values before it reaches the composer, and you're told how many were
+removed. See [PRIVACY.md](PRIVACY.md) for the complete per-stage account.
 
 ## Distribution
 
