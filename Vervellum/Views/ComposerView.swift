@@ -83,12 +83,20 @@ struct ComposerView: NSViewRepresentable {
         let outcome = PasteboardIntake.read(pasteboard, existing: existing)
         guard outcome.isEmpty else { return .attach(outcome) }
         guard redact,
-              let text = pasteboard.string(forType: .string),
+              let text = pastedText(on: pasteboard),
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return .plain }
         let result = SecretRedactor.redact(text)
         guard result.didRedact else { return .plain }
         return .insert(result.text, redactions: result.redactionCount)
+    }
+
+    /// What `super.paste` would type. A board can hold HTML or RTFD and no plain
+    /// string, and the text view flattens those, so they have to be read as well.
+    private static func pastedText(on pasteboard: NSPasteboard) -> String? {
+        if let plain = pasteboard.string(forType: .string) { return plain }
+        let rich = pasteboard.readObjects(forClasses: [NSAttributedString.self], options: nil)
+        return (rich?.first as? NSAttributedString)?.string
     }
 
     /// The composer's text size before the preference is applied.

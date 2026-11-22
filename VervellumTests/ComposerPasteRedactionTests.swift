@@ -33,6 +33,27 @@ final class ComposerPasteRedactionTests: XCTestCase {
         XCTAssertEqual(ComposerView.route(board, existing: 0, redact: true), .plain)
     }
 
+    /// The composer flattens rich text it is given, so a board with no plain-text
+    /// flavour still delivers the credential as text.
+    func testACredentialInRichTextAloneIsRedacted() throws {
+        let attributed = NSAttributedString(string: credential)
+        let rtfd = try XCTUnwrap(attributed.rtfd(from: NSRange(location: 0, length: attributed.length),
+                                                 documentAttributes: [:]))
+        let flavours: [(NSPasteboard.PasteboardType, Data)] = [(.html, Data("<p>\(credential)</p>".utf8)),
+                                                               (.rtfd, rtfd)]
+        for (type, data) in flavours {
+            let board = NSPasteboard.withUniqueName()
+            board.setData(data, forType: type)
+            XCTAssertNil(board.string(forType: .string), "the fixture must have no plain text")
+
+            guard case .insert(let text, _) = ComposerView.route(board, existing: 0, redact: true) else {
+                XCTFail("\(type.rawValue) reached the composer unredacted")
+                continue
+            }
+            XCTAssertFalse(text.contains("sk-abcdefghijklmnopqrstuvwxyz123456"), type.rawValue)
+        }
+    }
+
     /// The preference is the selection one, and it governs both paths.
     func testRedactionCanBeTurnedOff() {
         let board = NSPasteboard.withUniqueName()
