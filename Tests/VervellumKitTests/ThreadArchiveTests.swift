@@ -648,10 +648,11 @@ final class ThreadArchiveTests: XCTestCase {
         }
     }
 
-    /// Fails directory creation a fixed number of times, standing in for a folder
-    /// that is momentarily unwritable.
+    /// Fails directory creation until told otherwise, standing in for a folder that
+    /// is momentarily unwritable. Not one-shot: `flush()` retries a retained snapshot
+    /// and can race the debounced attempt, which would use up a single failure.
     private final class FlakyFileManager: FileManager {
-        var createDirectoryFailures = 1
+        var createDirectoryFailures = Int.max
 
         override func createDirectory(at URL: URL,
                                       withIntermediateDirectories: Bool,
@@ -959,6 +960,59 @@ final class ThreadArchiveTests: XCTestCase {
         store.retrySave()
         wait(for: [cleared], timeout: 2)
         XCTAssertNil(store.storageFailures().save)
+    }
+
+    /// The staging copy holds the threads that were being erased, so leaving it behind
+    /// is a failed erase like leaving the backup.
+    func testAStagingCopyThatWillNotDeleteFailsTheErase() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        let staging = fileURL.appendingPathExtension("bak").appendingPathExtension("tmp")
+        try Data("earlier threads".utf8).write(to: staging)
+        manager.deniedPaths.insert(staging.path)
+
+        store.deleteAll()
+
+        XCTAssertNotNil(store.eraseFailure)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staging.path))
+    }
+
+    /// A write can fail in the same attempt as its backup or chmod, so neither of
+    /// those warnings may claim the threads were saved.
+    func testAFailedWriteIsNeverDescribedAsSaved() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        // A directory where the file was fails the write itself; the refused chmod
+        // fails the rotation in the same attempt.
+        try FileManager.default.removeItem(at: fileURL)
+        try FileManager.default.createDirectory(at: fileURL, withIntermediateDirectories: false)
+        try Data().write(to: fileURL.appendingPathComponent("occupied"))
+        manager.deniesAttributeChanges = true
+        store.save(thread("two"))
+        store.flush()
+
+        let failures = store.storageFailures()
+        XCTAssertNotNil(failures.save, "setup: the write itself must fail")
+        let backup = try XCTUnwrap(failures.backup)
+        XCTAssertFalse(backup.contains("was saved"), backup)
+    }
+
+    /// Core never marshals to the main queue: GLib does not drain it, so a hop there
+    /// would mean the hook never fires on Linux.
+    func testFailureHookDoesNotWaitForTheMainQueue() {
+        let store = ThreadArchive(fileURL: fileURL, fileManager: FlakyFileManager(), debounce: 0)
+        let published = expectation(description: "published")
+        published.assertForOverFulfill = false
+        var hookRan = false
+        store.onFailureChanged = { hookRan = true; published.fulfill() }
+        store.save(thread("one"))
+        store.flush()
+        XCTAssertTrue(hookRan, "the hook must have run by the time flush returns")
+        wait(for: [published], timeout: 2)
     }
 
     // MARK: Retention

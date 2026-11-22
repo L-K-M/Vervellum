@@ -220,6 +220,26 @@ final class AttachmentStore {
         try? fileManager.attributesOfItem(atPath: file.path)[.modificationDate] as? Date
     }
 
+    /// Finishes an erase that was asked for at `cutoff` and could not complete then.
+    ///
+    /// Not `removeAll`: by the time an erase is retried the directory can hold the
+    /// attachments of threads started since. Files written after the cutoff stay,
+    /// because a question's bytes land before the first save that names them, and so
+    /// does anything `live` names, whatever its date says.
+    ///
+    /// - Throws: the last failure, after trying every file.
+    func removeStored(notNewerThan cutoff: Date, keeping live: Set<UUID>) throws {
+        guard fileManager.fileExists(atPath: directory.path) else { return }
+        var failure: Error?
+        for name in try fileManager.contentsOfDirectory(atPath: directory.path) {
+            if let id = UUID(uuidString: name), live.contains(id) { continue }
+            let file = directory.appendingPathComponent(name)
+            if let written = modified(file), written > cutoff { continue }
+            do { try fileManager.removeItem(at: file) } catch { failure = error }
+        }
+        if let failure { throw failure }
+    }
+
     /// Removes everything, for the "erase stored threads" path that already exists for
     /// the thread file itself. A library the user asked to be gone should not leave the
     /// pictures behind.

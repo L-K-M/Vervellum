@@ -25,6 +25,12 @@ final class ThreadStore: ObservableObject {
     /// to look and the user is never told "erased" over a directory of screenshots that
     /// are still there.
     private var attachmentEraseFailure: String?
+    /// When the attachments were last asked to be erased, until they have been.
+    ///
+    /// Set even when the thread file's failure held the attachment erase back, so
+    /// whatever later clears that failure can finish the job. A time rather than a
+    /// flag: threads started after it keep their attachments when the erase is retried.
+    private var pendingAttachmentErase: Date?
     /// The last published write/backup failures, main-thread only.
     ///
     /// `storageFailure` is read while SwiftUI evaluates a body, and a
@@ -61,16 +67,14 @@ final class ThreadStore: ObservableObject {
         // A write or backup failure is not a library change, so `onChange` does not
         // fire for it. Without this hook the Settings warning would stay on screen
         // until something else republished the store.
+        if archive.eraseFailure != nil { pendingAttachmentErase = Date() }
+        // Always a hop, even on the main thread: the hook can be running inside the
+        // archive's own `queue.sync`, where reading the failures back would deadlock.
         archive.onFailureChanged = { [weak self] in
-            guard let self else { return }
-            if Thread.isMainThread {
+            DispatchQueue.main.async {
+                guard let self else { return }
                 self.publishedWriteFailures = self.archive.storageFailures()
                 self.objectWillChange.send()
-            } else {
-                DispatchQueue.main.async {
-                    self.publishedWriteFailures = self.archive.storageFailures()
-                    self.objectWillChange.send()
-                }
             }
         }
         archive.onChange = { [weak self] in
@@ -151,38 +155,23 @@ final class ThreadStore: ObservableObject {
 
     /// Re-runs the operation behind `storageFailure`.
     ///
-    /// A failed erase is retried first, and the attachment bytes only when the
-    /// thread file actually went — an erase that could not remove the threads leaves
-    /// them naming those bytes. A failed write or backup is retried after, because
-    /// the archive keeps the exact snapshot that failed.
+    /// A failed erase is retried first, and the attachment bytes only once the thread
+    /// file actually went: an erase that could not remove the threads leaves them
+    /// naming those bytes. That half takes only what was stored when the erase was
+    /// asked for, never the attachments of threads started since.
     func retryStorage() {
-        // Local to this tap, so the attachment sweep below cannot double-fire
-        // with the `else if` branch: that branch runs only when no erase was
-        // attempted, which leaves this false.
-        var eraseRetriedThisTap = false
+        var erased = false
         if archive.eraseFailure != nil {
             archive.retryErase()
-            eraseRetriedThisTap = archive.eraseFailure == nil
-        } else if attachmentEraseFailure != nil {
-            eraseAttachments()
+            erased = archive.eraseFailure == nil
         }
-        // A retryErase that just succeeded means the thread file went in this
-        // same tap: reclaim the attachment bytes here rather than leaving them
-        // on disk until a second Try Again tap.
-        if eraseRetriedThisTap && attachmentEraseFailure != nil {
-            eraseAttachments()
-        }
-        // A successful erase removed the document, so a retained save snapshot
-        // must not be rewritten over it — "history off means the bytes are gone".
-        // The archive clears its own pending snapshot on erase; this is the
-        // second half, because the published snapshot this reads may be a
-        // publish behind the erase.
-        guard !eraseRetriedThisTap else {
-            // The archive has already dropped the write failures (the erase made
-            // them moot); drop the published snapshot too, so no later tap can
-            // act on it and the banner clears without waiting for the hop.
+        finishPendingAttachmentErase()
+        defer { objectWillChange.send() }
+        guard !erased else {
+            // The erase made the write failures moot and dropped their snapshot, and
+            // the archive schedules its own save of anything started since. Drop the
+            // published copy too, so the banner clears without waiting for the hop.
             publishedWriteFailures = (nil, nil)
-            objectWillChange.send()
             return
         }
         // The snapshot, not the queue: this runs from a button tap, and the
@@ -192,6 +181,7 @@ final class ThreadStore: ObservableObject {
             archive.retrySave()
         }
     }
+
     var isHistoryEnabled: Bool {
         get { archive.isHistoryEnabled }
         set {
@@ -229,7 +219,14 @@ final class ThreadStore: ObservableObject {
             // *previous* operation's nil and takes the pictures out of threads that
             // survived the failure, so the erase would have to move into whatever
             // completion the archive grew instead.
-            if !newValue, archive.eraseFailure == nil { eraseAttachments() }
+            guard !newValue else {
+                // Switching history on retries a failed thread erase, so the half that
+                // failure held back may now be able to finish.
+                finishPendingAttachmentErase()
+                return
+            }
+            pendingAttachmentErase = Date()
+            if archive.eraseFailure == nil { eraseAttachments() }
         }
     }
 
@@ -278,6 +275,7 @@ final class ThreadStore: ObservableObject {
         // the pictures behind.
         archive.deleteAll()
         onRemove?(nil)
+        pendingAttachmentErase = Date()
         // And the thread file first, for the reason `isHistoryEnabled` gives: a delete
         // that could not remove the threads leaves them naming these bytes, so taking
         // the bytes would destroy pictures out of conversations the user still has.
@@ -305,13 +303,33 @@ final class ThreadStore: ObservableObject {
     private func eraseAttachments() {
         do {
             try attachmentStore.removeAll()
+            pendingAttachmentErase = nil
             attachmentEraseFailure = nil
         } catch {
-            attachmentEraseFailure = "Could not delete \(attachmentsDirectory.path). The "
-                + "folder may be read-only, or a file in it locked; the images in it are "
-                + "still there."
+            attachmentEraseFailure = attachmentEraseMessage
         }
         objectWillChange.send()
+    }
+
+    /// Finishes an attachment erase that could not complete when it was asked for.
+    ///
+    /// Never `removeAll`, which is only right at the moment of asking.
+    private func finishPendingAttachmentErase() {
+        guard let cutoff = pendingAttachmentErase, archive.eraseFailure == nil else { return }
+        do {
+            try attachmentStore.removeStored(notNewerThan: cutoff, keeping: liveAttachmentIDs)
+            pendingAttachmentErase = nil
+            attachmentEraseFailure = nil
+        } catch {
+            attachmentEraseFailure = attachmentEraseMessage
+        }
+        objectWillChange.send()
+    }
+
+    private var attachmentEraseMessage: String {
+        "Could not delete everything in \(attachmentsDirectory.path). The "
+            + "folder may be read-only, or a file in it locked; the images in it are "
+            + "still there."
     }
 
     /// Deletes the bytes of every attachment no thread in the library refers to any more.
@@ -352,10 +370,14 @@ final class ThreadStore: ObservableObject {
         // reading it would find a deleted thread's attachments still referenced and keep
         // them until the next launch. The error direction is safe, which is exactly why
         // it would never be noticed.
-        let live = Set(archive.library.threads
+        attachmentStore.sweep(keeping: liveAttachmentIDs)
+    }
+
+    /// The attachments the library's turns still name.
+    private var liveAttachmentIDs: Set<UUID> {
+        Set(archive.library.threads
             .flatMap(\.turns)
             .flatMap(\.attachments)
             .map(\.id))
-        attachmentStore.sweep(keeping: live)
     }
 }

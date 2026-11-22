@@ -23,9 +23,12 @@ final class ThreadArchive {
     /// Invoked after any change to `library`, so a platform can republish it.
     var onChange: (() -> Void)?
 
-    /// Invoked when `saveFailure` or `backupFailure` changes, so a front end that
-    /// shows them can republish. Hops to the main queue; `writeNow` runs on the
-    /// archive's private queue.
+    /// Invoked when `saveFailure`, `backupFailure` or a retried erase's outcome
+    /// changes, so a front end that shows them can republish.
+    ///
+    /// Called directly, usually on the archive's private queue and sometimes inside a
+    /// `queue.sync`. Core cannot hop to the main queue, which GLib never drains. The
+    /// handler must hand off asynchronously before it calls `storageFailures()`.
     var onFailureChanged: (() -> Void)?
 
     private(set) var library: ThreadLibrary
@@ -285,7 +288,9 @@ final class ThreadArchive {
             pendingSave?.cancel()
             pendingSave = nil
             pendingSnapshot = nil
-            for url in [fileURL, backupURL] where fileManager.fileExists(atPath: url.path) {
+            // The staging copy of a failed rotation holds the same threads, so it is
+            // part of the erase, and failing to remove it is a failed erase.
+            for url in [fileURL, backupURL, backupStagingURL] where fileManager.fileExists(atPath: url.path) {
                 do { try fileManager.removeItem(at: url) } catch { failure = error }
             }
             if failure == nil {
@@ -305,13 +310,9 @@ final class ThreadArchive {
                 // bytes that no longer exist. Drop it here rather than letting a
                 // later retry act on a warning the erase made moot.
                 recordFailures(save: nil, backup: nil)
-                // A staging copy left by a failed rotation holds the pre-erase
-                // primary: finishing it later would move deleted threads back
-                // into the backup, and a stale slot would make the next
-                // rotation report a failure that never happened. Removed even
-                // when the in-memory slot is nil, because a crash can leave the
-                // file without the slot.
-                try? fileManager.removeItem(at: backupURL.appendingPathExtension("tmp"))
+                // The staging file went above, whether or not this process made it.
+                // A stale slot would make the next rotation report a failure that
+                // never happened.
                 pendingBackupStaging = nil
             }
         }
@@ -358,11 +359,13 @@ final class ThreadArchive {
         guard eraseFailure != nil else { return }
         let failureBefore = eraseFailure
         recordingFailure { try eraseEverything() }
+        // Threads started while the erase was failing were held back from disk by that
+        // failure. They are the only ones left in the library (every erase empties it),
+        // and clearing the warning without writing them would lose them at quit.
+        if eraseFailure == nil, !library.threads.isEmpty { scheduleSave() }
         // Only republish on an actual change, matching `recordFailures`. A retry
         // that fails again for the same reason leaves the same warning standing.
-        if eraseFailure != failureBefore {
-            DispatchQueue.main.async { self.onFailureChanged?() }
-        }
+        if eraseFailure != failureBefore { onFailureChanged?() }
     }
 
     /// Re-attempts a failed write or backup rotation.
@@ -426,12 +429,11 @@ final class ThreadArchive {
     /// Publishes a pair of failure strings. Both nil clears a previous warning, so
     /// a successful retry cannot leave a stale one beside the file.
     private func recordFailures(save: String?, backup: String?) {
-        // Every successful write passes through here; a main-queue hop on each one
-        // would put a block on the queue ten times a second during a stream.
+        // Every successful write passes through here, so only a change publishes.
         guard saveFailure != save || backupFailure != backup else { return }
         saveFailure = save
         backupFailure = backup
-        DispatchQueue.main.async { self.onFailureChanged?() }
+        onFailureChanged?()
     }
 
     /// The write/backup failure strings, safe to read from any thread.
@@ -451,18 +453,21 @@ final class ThreadArchive {
     }
 
     private static func backupFailureMessage(in directory: URL, file: String) -> String {
-        "Could not keep a backup copy of \(file) in \(directory.path). The threads "
-        + "file itself was saved, but the previous copy was not replaced."
+        // Nothing about the write itself: this can accompany a failed one.
+        "Could not keep a backup copy of \(file) in \(directory.path), so there may be "
+        + "no recent copy to recover from."
     }
 
     private static func permissionFailureMessage(in directory: URL, file: String) -> String {
-        "Could not make \(file) owner-readable only in \(directory.path). The file was "
-        + "saved, but it may be readable by others."
+        // Nothing about the write itself: this can accompany a failed one.
+        "Could not make \(file) owner-readable only in \(directory.path). It may be "
+        + "readable by others."
     }
 
     // MARK: Persistence
 
     private var backupURL: URL { fileURL.appendingPathExtension("bak") }
+    private var backupStagingURL: URL { backupURL.appendingPathExtension("tmp") }
 
     private func scheduleSave() {
         // An unreadable document is not an empty one. Writing the in-memory library over
@@ -607,7 +612,7 @@ final class ThreadArchive {
         guard primaryIsTrustworthy, fileManager.fileExists(atPath: fileURL.path) else {
             return true
         }
-        let staging = backupURL.appendingPathExtension("tmp")
+        let staging = backupStagingURL
         // A staging copy inherited from a failed rotation holds the pre-write
         // primary — the recovery copy this rotation exists to make. Finish that
         // rotation rather than staging a new copy over it. Returning false keeps
