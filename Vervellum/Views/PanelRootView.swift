@@ -68,6 +68,16 @@ struct PanelRootView: View {
     @State private var queueFullNote = false
     /// Earlier questions, newest first, for ↑/↓ recall in the composer.
     @State private var recallIndex: Int?
+    /// The text the recall walk last put in the composer.
+    ///
+    /// The walk has to survive a draft change, or ↑ could not move through the list.
+    /// It must not survive an *edit*: a reader who corrects a recalled question and
+    /// presses ↑ again expects the correction to stay, not to be replaced by the next
+    /// question. Comparing the draft against this is the whole rule — a draft that no
+    /// longer equals it is an edit, and an edit ends the walk. `recall` writes both in
+    /// the same transaction, so the change that puts a question on screen is not itself
+    /// read as an edit.
+    @State private var recalledDraft: String?
 
     /// Which command in the completion list the keyboard has highlighted, if any.
     ///
@@ -308,6 +318,13 @@ struct PanelRootView: View {
                 scrollToBottom(proxy)
             }
             .onChange(of: draft) { old, new in
+                // An edit to a recalled question ends the walk before anything else,
+                // so the next ↑ cannot replace what the reader just typed. A recall
+                // writes `recalledDraft` in the same transaction as the draft, so the
+                // change that puts a question on screen does not trip this.
+                if recallIndex != nil, new != recalledDraft {
+                    recallIndex = nil
+                }
                 // Any edit invalidates the highlight: the list is filtered by what has
                 // been typed, so an index kept across a keystroke could point past the
                 // end of the shorter list, or at a command the user has just filtered out.
@@ -1431,6 +1448,7 @@ struct PanelRootView: View {
             guard next < questions.count else { return true }
             recallIndex = next
             draft = questions[next]
+            recalledDraft = questions[next]
         } else {
             // The index points into a *particular* thread's list, and opening a thread
             // from history swaps that list underneath it. Re-validate before indexing:
@@ -1443,9 +1461,11 @@ struct PanelRootView: View {
             if current == 0 {
                 recallIndex = nil
                 draft = ""
+                recalledDraft = ""
             } else {
                 recallIndex = current - 1
                 draft = questions[current - 1]
+                recalledDraft = questions[current - 1]
             }
         }
         return true
