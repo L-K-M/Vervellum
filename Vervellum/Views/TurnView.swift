@@ -264,19 +264,32 @@ struct TurnView: View, Equatable {
 struct StreamingCaret: View {
     /// An input, so a theme change redraws this view. See `TurnView.palette`.
     var palette: PanelPalette = PanelTheme.palette
-    @State private var isBright = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The caret's opacity for a brightness tick. Under Reduce Motion it is held
+    /// steady and dimmed, so a still caret does not read as a solid block of text.
+    static func opacity(isBright: Bool, reduceMotion: Bool) -> Double {
+        reduceMotion ? 0.6 : (isBright ? 1 : 0.25)
+    }
 
     var body: some View {
+        Group {
+            if reduceMotion {
+                caret.opacity(Self.opacity(isBright: false, reduceMotion: true))
+            } else {
+                // Removing this subtree also stops an in-flight repeating animation.
+                caret.phaseAnimator([false, true]) { view, bright in
+                    view.opacity(Self.opacity(isBright: bright, reduceMotion: false))
+                } animation: { _ in .easeInOut(duration: 0.55) }
+            }
+        }
+        .accessibilityLabel("Writing the answer")
+    }
+
+    private var caret: some View {
         RoundedRectangle(cornerRadius: 1, style: .continuous)
             .fill(PanelTheme.Palette.accent)
             .frame(width: 7, height: 14)
-            .opacity(isBright ? 1 : 0.25)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
-                    isBright = true
-                }
-            }
-            .accessibilityLabel("Writing the answer")
     }
 }
 

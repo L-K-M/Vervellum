@@ -132,6 +132,7 @@ struct SourcesView: View {
 /// The row therefore describes the evidence the answer had, never the request that was
 /// made on its behalf.
 struct SourceRow: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.panelTextScale) private var textScale
 
     let source: Source
@@ -207,7 +208,7 @@ struct SourceRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering in
-            withAnimation(PanelTheme.Motion.disclosure) { isHovering = hovering }
+            withAnimation(PanelTheme.Motion.disclosureAnimation(reduceMotion)) { isHovering = hovering }
         }
         .help(source.url)
         .accessibilityLabel("Source \(source.number), \(source.title), \(source.domain)"
