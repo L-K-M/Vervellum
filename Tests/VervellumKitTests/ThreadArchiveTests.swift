@@ -761,6 +761,30 @@ final class ThreadArchiveTests: XCTestCase {
                        "the retry restores the pre-write primary as the backup")
     }
 
+    /// A write that landed after a failed rotation is the next backup. Finishing the
+    /// older staged copy alone would leave that document in no file at all.
+    func testTheWriteAfterAFailedRotationBacksUpTheDocumentItReplaces() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        for title in ["one", "two"] {
+            store.save(thread(title))
+            store.flush()
+        }
+        let backupURL = fileURL.appendingPathExtension("bak")
+        manager.deniedPaths.insert(backupURL.path)
+        store.save(thread("three"))
+        store.flush()
+        XCTAssertNotNil(store.storageFailures().backup, "the rotation must have failed")
+
+        manager.deniedPaths.removeAll()
+        store.save(thread("four"))
+        store.flush()
+
+        XCTAssertNil(store.storageFailures().backup)
+        let backup = ThreadArchive(fileURL: backupURL, debounce: 0)
+        XCTAssertEqual(backup.library.threads.map(\.title), ["three", "two", "one"])
+    }
+
     /// The erase warning's retry is the difference between a refusal the reader
     /// can act on and one they can only report.
     func testRetryEraseClearsTheFailure() throws {

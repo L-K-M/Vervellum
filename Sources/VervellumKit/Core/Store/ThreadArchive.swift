@@ -613,12 +613,17 @@ final class ThreadArchive {
             return true
         }
         let staging = backupStagingURL
-        // A staging copy inherited from a failed rotation holds the pre-write
-        // primary — the recovery copy this rotation exists to make. Finish that
-        // rotation rather than staging a new copy over it. Returning false keeps
-        // the failure reported and the staging copy alive for the next attempt.
+        // A staging copy inherited from a failed rotation may be the only recovery
+        // copy, so finish that rotation before staging a new copy over it. Returning
+        // false keeps the failure reported and the staging copy alive for the next
+        // attempt. Then rotate as usual: the write that followed the failure may have
+        // landed, and the document it left is the one this write is about to replace.
         if pendingBackupStaging == staging {
-            return finishPendingBackupRotation()
+            if fileManager.fileExists(atPath: staging.path) {
+                guard finishPendingBackupRotation() else { return false }
+            } else {
+                pendingBackupStaging = nil
+            }
         }
         do {
             try? fileManager.removeItem(at: staging)

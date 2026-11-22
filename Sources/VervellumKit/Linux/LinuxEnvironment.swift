@@ -148,13 +148,14 @@ final class LinuxEnvironment {
 
     /// Whether a thread file — or the backup that stands in for one — is still on disk.
     ///
-    /// Both, because `ThreadArchive.eraseEverything` removes the pair and a `.bak` alone
-    /// is still a record naming attachments: it is what a recovery reads. The name is
-    /// derived the same way the archive derives it, which is the one coupling here; a
+    /// Every copy `ThreadArchive.eraseEverything` removes, the staged backup included:
+    /// any one alone is still a record naming attachments. The names are
+    /// derived the same way the archive derives them, which is the one coupling here; a
     /// mismatch would read as "erased" for a backup that is sitting right there.
-    private static func threadFileSurvives(_ threadsFile: URL,
+    static func threadFileSurvives(_ threadsFile: URL,
                                            fileManager: FileManager = .default) -> Bool {
-        [threadsFile, threadsFile.appendingPathExtension("bak")]
+        let backup = threadsFile.appendingPathExtension("bak")
+        return [threadsFile, backup, backup.appendingPathExtension("tmp")]
             .contains { fileManager.fileExists(atPath: $0.path) }
     }
 
