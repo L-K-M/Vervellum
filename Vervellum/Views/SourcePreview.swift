@@ -25,6 +25,8 @@ struct SourcePreview: View {
     @Environment(\.panelTextScale) private var textScale
 
     let source: Source
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {

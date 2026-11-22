@@ -14,6 +14,8 @@ struct FindingsView: View {
 
     let findings: [Finding]
     let sources: [Source]
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     var onSelectSource: (Source) -> Void
 
     var body: some View {
@@ -102,6 +104,8 @@ struct CitationChip: View {
     @Environment(\.panelTextScale) private var textScale
 
     let source: Source
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     var action: () -> Void
 
     var body: some View {
@@ -126,6 +130,8 @@ struct SectionLabel: View {
 
     let text: String
     var trailing: String?
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {

@@ -25,6 +25,8 @@ struct MarkdownText: View, Equatable {
     let markdown: String
     let sources: [Source]
     var scale: Double = 1.0
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     /// The block's base font. Passed in rather than applied by the caller: this is drawn
     /// by an `NSTextView`, and a `.font()` modifier on a representable reaches the
     /// SwiftUI wrapper rather than the text inside it — a heading styled from outside
@@ -84,6 +86,8 @@ private struct HoveredAnswer: View {
 
     let attributed: NSAttributedString
     let sources: [Source]
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     /// The chip the pointer is resting on, if any.
     ///
@@ -323,6 +327,8 @@ struct MarkdownBody: View {
     let markdown: String
     let sources: [Source]
     var scale: Double = 1.0
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.medium) {
@@ -402,6 +408,8 @@ struct CodeBlock: View {
     let code: String
     let language: String
     var scale: Double = 1.0
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -443,6 +451,8 @@ struct TableBlock: View {
     let rows: [[String]]
     let sources: [Source]
     var scale: Double = 1.0
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {

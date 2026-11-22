@@ -28,6 +28,8 @@ struct AnswerTextView: NSViewRepresentable {
     /// cites. Passed as a list and indexed once per update rather than searched on every
     /// mouse movement.
     let sources: [Source]
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     /// Reported on every change, including nil when the pointer leaves a chip.
     var onHover: (CitationHover?) -> Void
 
