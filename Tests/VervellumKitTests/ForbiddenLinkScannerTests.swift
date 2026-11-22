@@ -7,6 +7,11 @@ import XCTest
 
 final class ForbiddenLinkScannerTests: XCTestCase {
 
+    func testCredentialBearingURLIsStillForbiddenInModelOutput() {
+        XCTAssertEqual(ForbiddenLinkScanner.links(in: "See https://user:secret@example.com/page."),
+                       ["https://user:secret@example.com/page"])
+    }
+
     func testFindsEveryDestinationSpelling() {
         let examples = [
             "HTTPS://EXAMPLE.COM/path",

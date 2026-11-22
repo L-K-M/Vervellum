@@ -1,26 +1,88 @@
 # Vervellum research backlog
 
-Reviewed 2026-11-21 against `origin/main` at `d4c9c1c`. The new review's
-actionable findings and experiments were consolidated into the existing entries
-below: A09, A11a, A12, A17, A18a, A23, A28, A64, A77e, R03, N01, N03, N06,
-N10 and N13. The source URL userinfo fix is in open PR #200 and the panel
-header target-size fix is in open PR #205, so their implemented slices are
-omitted from this backlog. Neither PR has been merged at the time of this
-update; restore its entry if it closes unmerged. Verify the header at the
-360-point minimum width and largest text scale in a GUI session. Concurrent
+Mistral Vibe pass 2026-11-21: reviewed against `origin/main` at `1ed52ba` — a full
+read of the shared core, the store/text layer, the macOS views/settings and the
+composer-command layer, plus three parallel helper deep-reads (full write-up in
+`tmp.md`). Eight PRs are open: #230 (header-button hit areas; also the target-size
+half of C06), #239 (⌘↑/⌘↓ scroll the thread; a slice of A65), #241 (case-insensitive
+URL-scheme redaction; a redactor slice adjacent to A63), #244 (one shared composer
+whitespace definition), #246 (About version without the `Optional` wrapper), #250
+(unbounded citation digits), #251 (hostile characters in the published date and
+linked-page title) and #253 (restyle the open thread when the theme changes). Their
+slices are annotated in place below; restore an entry if its PR closes unmerged.
+New findings from this pass are A87–A99, N15–N24 and the D01–D09 delight ideas,
+appended at the end. Concurrent branches and other agents' PRs were not inspected
+during this review.
+
+Codex (little-platypus) pass 2026-11-21: reviewed against `origin/main` at
+`b3a5bf1`. Three PRs are open — #231 (protected editing chords; A18's policy
+slice), #242 (storage failure reporting and retry; A13's retry slice and A14's
+reporting slice) and #247 (single-domain evidence cue; N01). Their slices are
+annotated in place below; restore an entry if its PR closes unmerged. New
+findings from the pass are A84 and A85, plus A86 (since implemented in open PR
+#255) and additions to A83, C01 and S08.
+
+Codex pass 2026-11-21: reviewed against `origin/main` at `e90efc3`. Four small
+fixes from this pass are open in PRs #233 (range citations, A62), #234
+(image-retry state, S33), #236 (negative attachment size, A80) and #240 (notice
+tones, R03); their implemented slices are annotated in place and are not repeated
+here. New findings C01–C07 appear below, with C05 folded into A22. Concurrent branches and other
+agents' PRs were not inspected during this review.
+
+Codex pass 2026-11-21 (little-platypus worktree): reviewed against `origin/main` at
+`d4c9c1c`, which is the code `e90efc3` still carries. Four fixes from this pass are
+open in PRs #254 (delete a committed `.orig` test artifact), #255 (one openable-URL
+predicate for every click path, and userinfo rejected at click time as well as at
+harvest time), #256 (redact pasted text; the macOS slice of A63) and #257 (end the
+recall walk when the recalled draft is edited; the recall slice of A23). Their
+implemented slices are annotated in place. New findings L01-L05 are appended at the
+end. Concurrent branches and other agents' PRs were not inspected during this review.
+
+Codex pass 2026-11-21 (second): reviewed against `origin/main` at `9c3e3d7`. Three
+fixes are open in PRs #232 (declared page encodings, A81), #237 (assessment stage
+timing, A82) and #248 (fence marker/length matching and the info string, A29).
+PRs #235 and #245 additionally cover A80 and A62, which the pass above already
+records as #236 and #233. New findings V01–V02 are appended at the end. Concurrent
 branches and other agents' PRs were not inspected during this review.
 
-Consolidated 2026-11-04 against `origin/main` at `1924f01`. Completed requirements
-and implemented slices in open PRs are omitted. Earlier context remains in
-[PR-REVIEW.md](PR-REVIEW.md), [fable.md](fable.md) and the
-[historical analysis](https://github.com/L-K-M/Vervellum/blob/0311b35/ANALYSIS.md).
+Panel-UX pass 2026-11-21 (Devin): thirteen focused PRs are open — #204
+(Reduce-Motion caret), #207 and #202 (submit-key hint; S07 implemented slice),
+#211 (history delete confirmation; A28's confirmation slice), #215 (summon
+promotes a Settings preview; the visible-panel half of S08), #216 (per-turn
+askedAt timestamp), #217 (status menu names the running question), #218 (Latest
+jump in finished threads), #222 (edit & re-ask), #223 (attachment preview
+popover), #225 (history search-field focus on open; A28's focus slice), #226
+(empty-state attachment hint), #227 (status-item elapsed time), #228 (first-frame
+provider readiness). Their implemented slices are omitted below; restore the
+entry if a PR closes unmerged.
 
-Relevant open PRs through #191 were checked for overlap; only their implemented
-slices are omitted. They are not merged. Restore a requirement from its PR if it
-closes unmerged. Sol3 feature PRs were verified on their individual heads rather
-than as a combined stack; parallel PRs not cited here were not reviewed. #138's
-proposed code-URL exemption conflicts with the citation contract and was flagged
-on that PR.
+Two further November 21 reviews used `d4c9c1c`. The first reconciled A09, A11a,
+A12, A17, A18a, A23, A28, A64, A77e, R03, N01, N03, N06, N10 and N13.
+It recorded #200 for source URL userinfo and #205 for panel-header hit targets
+as open at review time. Verify the header at the 360-point minimum width and
+largest text scale in a GUI session. Each review examined its own PRs.
+
+The second review followed the research evidence through export, history search
+and the native panel. The implementation PRs cover
+[transcript sources](https://github.com/L-K-M/Vervellum/pull/203),
+[history scans](https://github.com/L-K-M/Vervellum/pull/213),
+[Reduce Motion](https://github.com/L-K-M/Vervellum/pull/214),
+[citation layout](https://github.com/L-K-M/Vervellum/pull/219) and
+[deep-round evidence budgeting](https://github.com/L-K-M/Vervellum/pull/221).
+If one closes unmerged, restore its acceptance criteria here. A18a is covered by
+staged credential edits and cleanup-failure reporting. Keycap now owns Escape in
+the recorder, which retires A75c.
+
+The new checks used main at `d4c9c1c`, the repository screenshot, the macOS views and the shared runner, store and tests. A rendered 360-point fixture at 140% text confirmed that 24 citation chips lost their numbers and displaced the heading. The wrapping patch displayed every number across five lines.
+
+The following slices have implementation PRs. If a PR closes without landing, restore its task from the linked patch. [History search evaluation (#201)](https://github.com/L-K-M/Vervellum/pull/201), [composer shortcut hints (#202)](https://github.com/L-K-M/Vervellum/pull/202), [source publication metadata limits (#206)](https://github.com/L-K-M/Vervellum/pull/206), [model discovery credential ownership (#210)](https://github.com/L-K-M/Vervellum/pull/210), [wrapping finding citations (#220)](https://github.com/L-K-M/Vervellum/pull/220) and [stable source details (#224)](https://github.com/L-K-M/Vervellum/pull/224).
+
+The November 4 review was based on `1924f01` and covered changes through #191.
+It verified Sol3 heads independently, excluded uninspected parallel work and
+flagged #138's proposed code-URL exemption as incompatible with the citation
+contract. Earlier context remains in [PR-REVIEW.md](PR-REVIEW.md),
+[fable.md](fable.md) and the
+[historical analysis](https://github.com/L-K-M/Vervellum/blob/0311b35/ANALYSIS.md).
 
 The nine earlier Sol2 patches passed together: 903 macOS tests with Xcode 26.0.1 on
 macOS 15 Intel; the 839-case Linux suite with the display-dependent GTK test
@@ -42,6 +104,8 @@ design decision and the ambiguous table-delimiter regression tests.
 
 Historical scores are mean · user/engineer/designer · effort, not new measurements.
 S means local work, M several components, L design work. Estimates are rough.
+
+The 21 November panel and research review produced PRs #198 (history search), #199 (test backup), #208 (draft labels), #209 (regather evidence), and #212 (citation wrapping). Their implemented slices are omitted below. Revisit a slice if its PR closes unmerged.
 
 ## Important
 
@@ -69,6 +133,10 @@ Historical progress options: 8.3 · 9/7/9 · M; live query counts 8.0 · 8/8/8 �
 
 Earlier effort: M.
 
+Exercise both the initial answer payload and the post-assessment regather payload. Track each planned query through all attempted engines. A successful empty response and a query that failed on every engine need distinct outcomes. Cover a query that succeeds on one engine and fails on another before choosing the persisted representation.
+
+Earlier effort: M.
+
 ### A11a · Keep neighboring search snippets separate
 
 Bugs — important
@@ -76,6 +144,12 @@ Bugs — important
 EvidenceExtractor can assign overlapping context to adjacent prose result links, making one result appear to support another.
 
 Suggested fix: Partition dense prose into non-overlapping result items; keep each snippet with its own URL.
+
+The partition is still closed at both ends. For link lines at 0 and 2, both results
+include line 1: the earlier item ends at `linkLines[position + 1] - 1` and the later
+one starts at `linkLines[position - 1] + 1`, which are the same line. Assign the line
+between two links to one of them (starting each item at its own link line is the
+simplest form) and pin it with the no-blank-line fixture.
 
 Accept: Results without blank lines, multiple links, distinct pages and permissive extraction must not fabricate source context.
 
@@ -102,9 +176,14 @@ erase runs when history is off, and deleting a thread discards its session. Two 
 remain: a recorded deletion failure has no retry affordance; and Linux open-session behavior after `deleteAll` still needs an integration test
 and an explicit stored-history-versus-active-session retention policy.
 
-Suggested fix: add a retry action to the erase-failure notice (sanitized errors
-only); make the open-thread behavior after `deleteAll` match that explicit retention
-policy, including late callbacks.
+Open PR #242 implements the first clause: the Settings warning now carries a
+**Try Again** button that re-runs the erase (and any failed write) with sanitized,
+application-authored errors. Remaining: Linux open-session behavior after
+`deleteAll` still needs an integration test and an explicit
+stored-history-versus-active-session retention policy.
+
+Suggested fix: make the open-thread behavior after `deleteAll` match that explicit
+retention policy, including late callbacks.
 
 Accept: denied deletion, queued writes, completion after Delete All, and relaunch
 with history disabled all end with primary and backup gone or a visible error saying
@@ -116,19 +195,34 @@ Earlier effort: M.
 
 Bugs — important
 
-Validated backup rotation exists; the private-directory fence is covered by open #125. Backup removal/copy failures are still suppressed, and concurrent erase/flush behavior needs regression proof.
+Validated backup rotation exists; the private-directory fence is covered by open #125.
+Open PR #242 reports backup removal/copy and 0600-permission failures in
+application-authored terms, rotates through a staging copy so a failed copy
+preserves the previous `.bak`, keeps a failed write's snapshot pending for a real
+retry, and adds a Settings retry action. Remaining: concurrent erase/flush
+behavior needs regression proof.
 
-Suggested fix: Report backup/permission failures in application-authored terms. Test failure during recovery, backup rotation and concurrent erase/flush before changing synchronization.
+The rotation is remove-then-move, not `replaceItemAt`: a crash in that window
+leaves the staging copy but no `.bak`, and the next launch does not finish the
+rotation. `replaceItemAt` would close the window but cannot be overridden in the
+shared Linux test target (corelibs has no `AutoreleasingUnsafeMutablePointer`),
+so the atomic swap was reverted for portability. A future cross-platform test
+seam for the rotation would allow it.
+
+Suggested fix: test failure during recovery, backup rotation and concurrent
+erase/flush before changing synchronization.
 
 Accept: Recovery followed by a failed write must preserve a usable backup. Read-only archives remain untouched. Keep permission-before-content proof. Current writes use queued immutable snapshots; do not reintroduce the obsolete claim that writeNow reads mutable isHistoryEnabled.
 
 Where: Sources/VervellumKit/Core/Store/ThreadArchive.swift:303–337. Earlier effort: M.
 
+Exercise recovery with attachments. ThreadArchive rotates the previous JSON into its backup, while ThreadStore and LinuxEnvironment collect old blobs using the live library. Age a fixture attachment past the collection grace period, prune its thread, flush, damage the primary, and reopen from backup. Decide whether prune promises a recoverable attachment or an explicit missing-file state. Test user-requested deletion and Erase All separately before extending retention.
+
 ### A17 · Make credential acquisition nonblocking and erasure truthful
 
 Performance problems, stuttering, and jank — important
 
-Open #132 bounds desktop subprocesses, but each synchronous lookup can still stall GTK. Locked-keyring UX, failed keyring deletion and actual read-backend reporting remain unresolved.
+Desktop subprocesses now have time bounds, but each synchronous lookup can still stall GTK. Locked-keyring UX, failed keyring deletion and actual read-backend reporting remain unresolved.
 
 Suggested fix: Acquire credentials asynchronously through the secret service while retaining process bounds. Report deletion failures and read-only environment overrides. Record which backend answered each account; document the existing JSON file backend and which entry points write it.
 
@@ -140,28 +234,21 @@ Where: Sources/VervellumKit/Linux/LinuxSecretStore.swift; LinuxPanel.swift. Earl
 
 General issues — important
 
-After Shift-only bindings are rejected, any Command-, Control-, or Option-modified
-chord remains registerable, including global versions of editing commands such as
-Command-C, Command-V, and Command-Z. Those bindings can steal routine editing across
-macOS, while Option-only character chords still lack an explicit text-composition
-policy. The remaining policy belongs in `HotkeyBinding.swift` and
-`HotkeyRecorder.swift`, before Carbon registration.
+Keycap rejects Shift-only bindings and several system-owned shortcuts. Common editing
+chords such as Command-C, Command-V and Command-Z still need a policy, as do
+Option-only character chords used for text composition. The policy could live in
+Keycap (release there, then update the dependency) or in Vervellum's own binding.
+
+Open PR #231 implements the policy in `HotkeyBinding` rather than waiting for a
+Keycap release: Command/Shift-Command on A/C/V/X/Z and Option/Option-Shift on a
+non-function key are refused at the registration boundary, with tests for stored
+bindings and the modifier combinations that stay allowed. The recorder itself is
+still Keycap's and accepts such a combo; the Shortcuts pane's warning names the
+reason, which is the honest half-measure until Keycap grows a validation hook.
 
 Suggested fix: reject a documented set of protected editing chords before
 registration, define the Option-only policy explicitly, and test recorder, stored
 preferences, duplicate handling, and Carbon registration together.
-
-### A18a · Make Keychain Clear outcomes match the save model
-
-General issues — important
-
-Clear can appear successful when deletion failed. It also deletes immediately even though the Providers pane promises staged changes until Save; provider removal itself is deferred.
-
-Suggested fix: Propagate sanitized deletion outcomes. Either stage Clear with accountsToDelete until Save, or plainly disclose that Clear is immediate in its help and footnote.
-
-Accept: Denied or failed deletion never reports success. Closing Settings without Save must match the advertised Clear semantics, without confusing provider credential ownership.
-
-Where: Vervellum/Settings/ProvidersView.swift:241–253,247,476,494. Earlier effort: S.
 
 ### A22 · Absolute provider deadlines and the fixture matrix
 
@@ -184,6 +271,10 @@ through the response head and body, while preserving the legitimate
 slow-local-model behavior the 600 s interval protects; route cheap SearXNG calls
 through the existing cheap-JSON budget helper with cancellation coverage.
 
+The SearXNG half is implemented in open PR #270 (`vibe-0jlhruyq/searxng-cheap-budget`):
+`SearXNGClient.search` now uses `sendCheapJSON` with a 30 s budget on both clocks,
+pinned by a `SearXNGClientTests` case. Restore that half if the PR closes unmerged.
+
 Accept: no headers, idle body, trickle-versus-keepalive, cancellation before
 registration, early matching MCP response, refused redirects, and producer-cap
 fixtures; inject clocks/transport at the service boundary or use loopback fixtures,
@@ -193,6 +284,8 @@ Cheap-call location: Sources/VervellumKit/Core/Research/SearXNGClient.swift:123�
 
 Earlier effort: M.
 
+C05 adds the buffered JSON path to this fixture. In `HTTPTransport.swift`, `fetch` races the open-and-collect pair against a timer, while `sendJSON` awaits the head before starting its body clock. MCP and cheap JSON use that path. Cover a delayed head within a longer idle allowance (120 seconds in the original example), a slow body and cancellation. Preserve the existing credential-free fetch behavior.
+
 ### A23 · Preserve edited drafts during recall and suggestions
 
 Bugs — important
@@ -200,6 +293,10 @@ Bugs — important
 Editing a recalled question must end recall mode; otherwise arrows can replace the edited text. Clicking a follow-up replaces a nonempty draft, while programmatic NSTextView.string assignment does not provide the undo the comment promises.
 
 Suggested fix: Make suggestion replacement reversible or explicitly confirm it. End recall after user edits and use undo-cooperative shouldChangeText/didChangeText updates.
+
+Open PR #257 carries the recall slice: the walk records the text it put on screen and
+a draft that no longer equals it ends the walk, so an edited recalled question is not
+replaced by the next arrow press. The suggestion-replacement and undo halves remain.
 
 Accept: Cover multiline drafts, edited recalled text, suggestions during runs, undo, keypad/modified Return and CJK composition. Verify hasMarkedText routing before consuming composition-confirming Return. No unintended send or draft/attachment loss.
 
@@ -209,13 +306,10 @@ Where: Vervellum/Views/PanelRootView.swift:1108–1129,1370–1397; ComposerView
 
 Usability: speed, convenience, clarity — important
 
-Labeled, hover-free Delete controls arrive through parallel #146; that finding is
-not duplicated here. What remains of A28: deletion undo and confirmation; focus the
-history search field when History opens and restore composer focus on exit; ↑/↓
-result navigation and Return to open, without intercepting composer editing keys;
-Delete with undo from the keyboard; separate row-action semantics; Open and the
-destructive Delete as distinct, labeled actions in the accessibility tree, not a
-nested hover affordance.
+History rows now have separate Open and Delete buttons. Verify their spoken order
+and labels. Move focus to the search field on entry and back to the composer on
+exit. Add arrow-key navigation, Return to open and keyboard deletion with undo or
+confirmation.
 
 Suggested fix: add an undo/confirmation step to history deletion (coordinate with
 archive coordination from A13/A15-era work already shipped); manage focus on
@@ -248,13 +342,13 @@ Where: Sources/VervellumKit/Core/Research/PageReader.swift; SECURITY.md:98–104
 
 General issues — important
 
-Releases are ad-hoc signed; updates authenticate neither downloaded bytes nor Team ID, and size is checked only after download. Signing needs maintainer-owned credentials.
+Releases use ad-hoc signing. Updraft checks GitHub redirect hosts, the completed file's size and an API-supplied SHA-256 digest when available. Its default session has idle and resource timeouts. A transfer can still exceed its expected size before the file is checked. Developer ID signing requires maintainer-owned credentials.
 
-Suggested fix: adopt Developer ID and notarization, verify signature/Team ID before offering an update, and enforce byte/time caps while downloading. GitHub asset redirects require a separate bounded credential-free policy, not relaxed provider authorization rules.
+Suggested fix: adopt Developer ID and notarization, verify signature/Team ID before offering an update, and enforce a byte cap during download in Updraft. Preserve its credential-free redirect checks and timeouts.
 
 Accept: never present an unauthenticated artifact as verified. Keep unsigned-release and reset-Accessibility-grant limitations explicit. A future apt channel needs signed repository metadata. Denied-Keychain diagnosis is S23.
 
-Where: release workflows; Sources/VervellumKit/Core/Updates/; Vervellum/Updates/. Earlier effort: L.
+Where: release workflows, the pinned Updraft package and Vervellum/App/AppDelegate.swift. Earlier effort: L.
 
 ### A63 · Redact pasted text
 
@@ -268,9 +362,17 @@ Suggested fix: route paste through the same redaction and the same banner as the
 selection path, building on A07 (redact before truncation, before display); keep
 plain prose untouched.
 
+Open PR #256 carries the macOS slice: `ComposerView.route` sends a text paste through
+`SecretRedactor` under the existing preference, inserts the redacted text undoably and
+raises the same banner. The Linux Ctrl-V slice remains; it needs a GTK clipboard-text
+read, which the shim does not expose yet.
+
 Accept: a pasted key is replaced and the banner names the count; redaction is
 visible before Return, never applied silently on send; no false positives beyond
 `SecretRedactor`'s documented conservative bias.
+
+Redactor slice implemented in open PR #241 (Mistral Vibe pass): the URL-userinfo
+pattern is now case-insensitive, so `HTTPS://user:pass@host` is redacted too.
 
 Earlier effort: S.
 
@@ -380,7 +482,7 @@ Where: Vervellum/Settings/ProvidersView.swift:204,536–549. Earlier effort: S.
 
 General issues — nice-to-have
 
-Open #128 preserves sequential external edits, but cached reads do not live-reload. A damaged or unwritable settings file is reported only on stderr; unsaved in-session changes are not a successful disk save.
+The settings store preserves sequential external edits, but cached reads do not live-reload. A damaged or unwritable settings file is reported only on stderr; unsaved in-session changes are not a successful disk save.
 
 Suggested fix: Expose reload/validation and persistence-error state through the settings service, for example on window focus. Apply valid settings without requiring A30's form first; keep externally repaired JSON authoritative and preserve unreadable bytes.
 
@@ -392,10 +494,14 @@ Where: Sources/VervellumKit/Core/Platform/SettingsStore.swift; Sources/Vervellum
 
 Performance problems, stuttering, and jank — nice-to-have
 
-Coalescing, Equatable turn views and SelectableText exist. Open #156 preserves
+Coalescing, Equatable turn views and SelectableText exist. The Linux renderer preserves
 GTK widgets during answer-only growth; stage, source and notice changes still
 rebuild the thread. Native MarkdownBody still parses the growing answer per
 evaluation, and composer measurement repeats when its inputs have not changed.
+`MarkdownBody` itself is now Equatable (open PR #265, `vibe-0jlhruyq/markdown-body-equatable`),
+so unchanged notice/draft blocks are no longer re-parsed at the snapshot rate.
+
+Profile a stream containing tables, code and grouped citations with older turns visible. Record main-thread time and snapshot count. Preserve code masking when reusing completed blocks.
 
 Suggested fix: Profile block-level parsing reuse, terminal GTK row identity and
 measurement memoization. Measure queue depth before pre-enqueue coalescing, and
@@ -452,52 +558,26 @@ no unintended send, cancellation or unrelated editing-key interception. Quit is 
 
 Earlier effort: M.
 
-### A25 · Evidence card stability and grouped sources
+### A25 · Expose each member of a grouped citation
 
-Visual issues and layout problems — nice-to-have
+A grouped citation such as `[2, 5]` exposes only the first source from the answer. Give each number an individually accessible action that resolves through the turn's own source list. Retain the summary/page-read caveat, title, date and domain. Show the external-open affordance on keyboard focus. Verify each source with keyboard and VoiceOver, check invalid numbers and ensure a single action opens only the chosen page.
 
-The `SourcePreview` popover with its permanent summary/page-read caveat and
-domain/date rows exists. Remaining: revealing a summary still changes row height,
-moving later sources under the pointer and hiding the summary from keyboard users
-(S19; explicit disclosure or a stable-size inspector, with keyboard activation);
-a grouped citation `[2, 5]` opens or exposes only the first source; expose every
-grouped source (one chip per number is the smaller change, B86); opening several
-tabs must never be an implicit group action.
+The stable source-list details work is tracked in the November 21 implementation. Test both entry points at 140% with a long snippet and the panel against either screen edge. After dismissing Details, keyboard focus should return to its button. Earlier group-chip estimate B86, source-row estimate S19 (half a day), historical score 7.7 · 7/7/9 · S.
 
-Suggested fix: fixed-height rows with explicit disclosure; keyboard-activatable
-preview; per-number chips that each resolve to their own source. Show the browser
-glyph on keyboard focus, not only hover. Put the snippet/caveat in the accessibility
-value and a permanent summary/page-read tag beside the number.
+D09 proposed an inline first-click preview and a second click to open the page (half-day estimate). Compare the explicit Details and Open controls in #224 with that alternative on a narrow panel before changing primary-click behavior. Verify both actions from the keyboard alongside D01.
 
-Accept: keyboard and screen-reader inspection of every source's domain, date,
-snippet and "Search summary; not the full page" caveat; hover never changes
-transcript height; group citations expose all members; the app-owned numbered-citation
-rule is preserved.
+Compare SourcePreview at its fixed 300-point width with a screen-bounded width at 100% and 140% text, with long titles and dates in both appearances. Try a neutral document accent for page availability. Verify that a read page with a contradicted claim remains visually distinct from a supported verdict and that the full title remains inspectable.
 
-Where: Vervellum/Views/SourcesView.swift:181–197. Effort: half a day (S19). Historical score: 7.7 · 7/7/9 · S.
+### A26 · Verify the remaining narrow-panel layouts
 
-Earlier effort: M.
+[Claim card wrapping](https://github.com/L-K-M/Vervellum/pull/219) covers the
+verdict and citation buttons. Check the remaining label combinations on short
+displays at minimum width and 140% type, including long model, domain and date
+strings, RTL and CJK text. Capture the failing layout before changing it. Every
+essential label and action should stay readable and reachable. Historical B87/S20
+estimate for evidence wrapping was half a day.
 
-### A26 · Wrap crowded evidence rows
-
-Visual issues and layout problems — nice-to-have
-
-The type funnel scales through `Font.at`/`panelTextScale`, the composer is
-measured against the actual clamped width, and #136 reserves the running-controls
-width. Remaining: the verdict-label-plus-citation-chips row in `FindingsView` still
-cannot wrap; many source chips at narrow widths or 140% text have no wrapping
-strategy (B87/S20).
-
-Suggested fix: adaptive rows (wrapping layout or a chip-flow container) that
-preserve every label and action.
-
-Accept: minimum panel width, 140% text, long model/domain/date labels, RTL/CJK,
-many source chips, and short displays show no clipped controls or overflowing
-content; essential information never depends on tiny secondary labels.
-
-Where: Vervellum/Views/FindingsView.swift:52–60. Effort: half a day (S20).
-
-Earlier effort: M.
+The November 21 reviews include a second implementation and a rendered 24-source fixture. The hosted #212 fixture verified wrapping at 360 points, 140% text and both layout directions. Check keyboard traversal across line breaks, separate VoiceOver actions, and scrolling the complete final line into view.
 
 ### A27 · Measured contrast and live accessibility observation
 
@@ -509,14 +589,12 @@ measurements of every current theme. Verdict-colored sentences also need checkin
 (PangoMarkup.swift:25) may miss contrast on dark Adwaita; this is unmeasured.
 Evaluate theme-derived foreground alpha, not another fixed compromise.
 Verify an opaque Reduce Transparency fallback, not merely the absence of Liquid
-Glass, and observe transparency changes live; the streaming caret repeats
-indefinitely and some transitions bypass the reduced-motion routes `SourcesView`
-already uses (S25).
+Glass, and observe transparency changes live. [Panel Reduce Motion changes](https://github.com/L-K-M/Vervellum/pull/214)
+cover the writing caret, source hover and Latest overlay. Verify the live setting
+with a running answer and VoiceOver.
 
 Suggested fix: measure presets in light/dark/high-contrast and correct failures
-with semantic or scheme-aware colors; observe the accessibility notifications live;
-route all panel motion through the shared reduced-motion gate, with a static caret
-style.
+with semantic or scheme-aware colors; observe accessibility changes live and check each preset against rendered content.
 
 Accept: measured contrast over bright/dark content and Adwaita themes in both
 appearance schemes; live Reduce Transparency/Reduce Motion switches; meaning stays
@@ -524,9 +602,18 @@ readable without color; GUI QA before claiming any aesthetic improvement.
 
 Where: Vervellum/Views/PanelTheme.swift:171–174; TurnView.swift:228–241,264,341; PanelRootView.swift:300,334. Effort: contrast 1 day (S24), motion half a day (S25). Historical contrast: 8.3 · 8/8/9 · S; motion: 8.0 · 7/9/8 · S; scheme tuning: 6.7 · 6/6/8 · S.
 
+A November 21 hosted FindingsView sample at 360 points and 140% text gave a
+maximum glyph-to-background contrast of 3.83:1 for the small “CLAIMS” heading,
+6.88:1 for “MIXED”, 11.14:1 for the claim and 6.14:1 for its explanation.
+These are sampled bitmap pixels converted to sRGB, including antialiasing, on one
+opaque dark window background. Start with the heading when measuring the resolved
+foreground and background colors across the actual panel presets.
+
 Earlier palette notes: mixed about 2.1:1 and supported about 2.9:1 on light grounds; Linux used #c4630f, #217a4a and #9a6a10 as candidate light-safe hues. Also inspect dark card contrast, a light-mode scrim and an opaque reduced-transparency tint. These are historical estimates/design hypotheses, not fresh measurements.
 
 Earlier effort: M.
+
+For a repeatable contrast fixture, render the same completed turn over neutral light, neutral dark and high-chroma desktops at 360 points and 140% scale. Sample the composited domain label, verdict text and keyboard focus ring, including the Reduce Transparency rendering. Record wallpaper, theme and measurements before tuning the scrim.
 
 ### A29 · Match Markdown fences and complete code-block actions
 
@@ -545,6 +632,11 @@ where absent, preserving the native scroll view.
 Accept: Mismatched, shorter/longer and nested fences; incomplete streaming prefixes;
 long lines. Align render/parser and citation-code masks. No dependency or HTML
 renderer. Pango nested emphasis is A29a; range citations are A62.
+
+The fence half is implemented in open PR #248 (the opener's marker and run length
+are carried; a closer needs the same marker, at least that length and only trailing
+whitespace; the info string follows the whole opening run). Code-copy actions and
+Linux long-line handling remain. Restore the fence half if that PR closes unmerged.
 
 Earlier effort: M.
 
@@ -582,8 +674,7 @@ Historical Linux UI parity: 6.0 · 6/6/6 · M. Earlier effort: L.
 
 Missing features — nice-to-have
 
-Open #154 supplies saved-thread rows, reopen and deletion, but not a history search
-field. The core search exists and #144 extends its fields.
+The GTK panel can list, reopen and delete saved threads. Add a search field using the shared core matcher.
 
 Suggested fix: Add GTK filtering over ThreadLibrary.search, preserving detached
 session identity and the result completeness required by R06.
@@ -728,6 +819,8 @@ Accept: Use existing turn data; retain incomplete/failure labels and unambiguous
 
 Earlier effort: S–M.
 
+L04 adds a plain-text Copy Receipt action beside Copy. Use TranscriptFormatter and list the level, successful searches, pages actually seen by the model, evidence kept or dropped, assessment model and elapsed time wherever the turn records them. Omit unavailable fields in older archives. Keep the incomplete state explicit for a turn that stopped before assessment.
+
 ### A36c · Remember the last inspected source
 
 Novel, delightful, or quirky ideas worth trying — nice-to-have
@@ -739,6 +832,8 @@ Suggested fix: Keep a session reading bookmark. Persist scroll offsets only afte
 Accept: Do not let streaming or layout changes override deliberate reading position.
 
 Earlier effort: S–M.
+
+Use the turn ID alongside the citation number for an explicit return to the originating claim. Check repeated source numbers across turns, a revised answer, thread deletion and Reduce Motion. Use only session state and avoid additional provider requests.
 
 ### A36d · Seed a counter-evidence follow-up
 
@@ -1319,6 +1414,10 @@ by `sourceCount`, or flag an unparseable digit group as `invalidCitation`.
 Accept: `[1-3]` renders chips for 1, 2, 3 and marks them cited; `[9-2]` and
 `[1-300]` are flagged; code spans stay ignored.
 
+Implemented in open PR #233 (three dash spellings, bounded expansion, reversed and
+oversized ranges flagged, renderer and transcript unchanged). Restore this entry if
+that PR closes unmerged.
+
 Earlier effort: S.
 
 ### A64 · A citation click reveals the source in the panel
@@ -1363,6 +1462,9 @@ Accept: every visible action is reachable without a pointer; the focus ring is
 visible in both schemes; Escape returns focus to the composer before its usual
 back-out order; find highlights update as the answer streams without restarting
 the search.
+
+Scroll slice implemented in open PR #239 (Mistral Vibe pass): ⌘↑/⌘↓ scroll the
+thread to its top/bottom while the composer holds first responder.
 
 Historical traversal: 6.3 · 8/4/7 · M; find: 5.3 · 6/5/5 · M.
 
@@ -1492,18 +1594,6 @@ Accept: Verify double/triple digits, 140% text and long wrapped items.
 
 Where: Vervellum/Views/MarkdownText.swift:387. Earlier effort: S.
 
-### A75c · Use the existing Escape key constant
-
-General issues — nice-to-have
-
-HotkeyRecorder compares keyCode against the literal 53.
-
-Suggested fix: Use the existing named Escape definition in the touched recorder path.
-
-Accept: Keep recording/cancellation behavior unchanged.
-
-Where: Vervellum/Settings/HotkeyRecorder.swift:69. Earlier effort: S.
-
 ### A75d · Avoid repeated login-item status probes
 
 Performance problems, stuttering, and jank — nice-to-have
@@ -1596,6 +1686,9 @@ recoverable.
 Suggested fix: clamp legacy negative values to zero or discard only the invalid
 attachment while preserving the containing turn, with tolerant-decoding tests.
 
+Implemented in open PR #236 (clamped on decode, record kept). Restore this entry if
+that PR closes unmerged.
+
 ### A81 · Decode declared legacy page encodings accurately
 
 Bugs — nice-to-have
@@ -1611,6 +1704,11 @@ Suggested fix: honor recognized declared charsets before the generic UTF-8 fallb
 use `.windowsCP1252`, `.utf16LittleEndian`, and `.utf16BigEndian`, with byte fixtures
 that distinguish each encoding. Rough effort: about one hour.
 
+Implemented in open PR #232 (an explicit UTF-16 endianness is acted on before the
+generic fallback, a declared Windows-1252 page uses the Windows codec, and a strict
+UTF-8 decode still wins for the single-byte charsets so a mislabelled UTF-8 page
+reads correctly). Restore this entry if that PR closes unmerged.
+
 ### A82 · Measure the assessment stage rather than the whole turn
 
 General issues — nice-to-have
@@ -1625,6 +1723,8 @@ Suggested fix: capture a monotonic stage start immediately before assessment, as
 revision path already does, and report only the assessment interval. Rough effort:
 under one hour.
 
+Implemented in open PR #237. Restore this entry if that PR closes unmerged.
+
 ### A83 · Evict idle research sessions
 
 Performance problems, stuttering, and jank — nice-to-have
@@ -1638,23 +1738,86 @@ Suggested fix: evict inactive sessions after they become idle, have no returned 
 questions, and their latest thread snapshot is durable; always retain running, queued,
 and currently active sessions. Rough effort: about half a day.
 
-### S07 · Match key hints to the submit preference
+The returned queue also pins its `PendingAttachment` bytes: a dropped screenshot's
+megabytes are held for the process lifetime because nothing else refers to them.
 
-Usability: speed, convenience, clarity — nice-to-have
+### A84 · Restore activation when Vervellum is frontmost at summon
 
-Empty-state Return/Shift-Return advice is hard-coded and contradicts the disabled Return-to-send preference. Platform-specific help alone does not resolve preference-sensitive wording.
+Bugs — important
 
-Suggested fix: Derive empty-state and relevant help hints from the submit preference.
+`PanelController.show()` captures the frontmost app only when the panel is closed,
+and stores nil when that app is Vervellum itself; `restoreActivation` then has no
+target and does nothing, so Esc/⌘W leaves Vervellum frontmost with no windows — a
+dead keyboard. Reachable by re-summoning inside the activation handoff, by
+`applicationShouldHandleReopen`, or by pressing the summon hotkey while an alert is
+up. `SettingsWindowController.windowWillClose` has the same shape with no Finder
+fallback. Distinct from A77b, which is a *stale* target; this is no target at all.
 
-Accept: Check both preference settings and each platform's actual submit chord.
+Suggested fix: remember the last non-self frontmost app (workspace activation
+notifications) and fall back to it, or to Finder, whenever the panel is dismissed
+with Vervellum frontmost and no window of its own.
 
-Where: Vervellum/Views/EmptyStateView.swift:39. Effort: 1 hour.
+Accept: Escape returns focus to a real app on every summon path, with no unrelated
+activation changes.
+
+Where: Vervellum/Panel/PanelController.swift:104–110,338–360;
+Vervellum/Settings/SettingsWindowController.swift:85–96. Effort: S.
+
+### A85 · A provider retry can resurrect the dead provider's partial answer
+
+Bugs — important
+
+`streamAnswer` resets `answer` to empty in `beforeRetry` when the chain moves to the
+next provider. The reset is published through `SnapshotCoalescer`, and a growth
+snapshot from the dying provider can still be waiting in it: the reset's delivery is
+queued on the main queue, while a coalescer flush scheduled earlier can land first,
+restoring the fragment the new provider's chunks then append to — the exact seam the
+reset exists to remove. Reachable when a provider fails within the 100 ms
+coalescing window of its last chunk.
+
+Suggested fix: give the runner a way to flush-and-supersede the coalescer when it
+resets the answer, or have the retry path discard pending snapshots through the
+session.
+
+Accept: a fallback answer never contains text from the provider that failed; the
+ordering guarantees in `SnapshotCoalescer` are unchanged.
+
+Where: Sources/VervellumKit/Core/Research/ResearchRunner.swift:1802–1877;
+Sources/VervellumKit/Core/Research/ResearchSession.swift:336–360. Effort: M.
+
+### A86 · Route source and finding activation through the URL funnel
+
+General issues — nice-to-have
+
+`SourceRow` and the `FindingsView` chip call `NSWorkspace.shared.open` directly,
+while citation chips go through `CitationText.openable`, which refuses every scheme
+but http(s) with a host. Sources are http(s) by construction today, so this is
+defence in depth rather than a live hole — but the funnel exists precisely because a
+view should not trust upstream filtering.
+
+Suggested fix: expose the existing `openable` check and route both call sites
+through it.
+
+Implemented in open PR #255: one openable-URL predicate is shared by the citation
+chip, the source row and the finding chip, and userinfo is refused at click time as
+well as at harvest time. Restore this entry if that PR closes unmerged.
+
+Accept: no behaviour change for a real source; a malformed stored URL cannot launch
+another scheme.
+
+Where: Vervellum/Views/SourcesView.swift:140–142; Vervellum/Views/TurnView.swift:93–94;
+Vervellum/Views/MarkdownText.swift:282–293. Effort: S.
 
 ### S08 · Clear stale preview state
 
 Bugs — nice-to-have
 
 Dismissing the Settings preview through another panel-hide path can leave the preview toggle on. Runtime reproduction remains open.
+
+The concrete gap: `PanelController.hide()` sets `isPreviewing = false` but does not
+post `.vervellumPanelPreviewChanged`, so dismissing a preview with the summon
+shortcut, Esc or ⌘W leaves the General toggle reading on over a panel that is not
+there. `setPreviewing(false)` also early-returns when the flags already match.
 
 Suggested fix: Clear preview state on panel-hide notification as well as Settings close.
 
@@ -1686,6 +1849,10 @@ Accept: Cover clean revisions of invalid drafts, assessment-only invalid referen
 
 Where: Sources/VervellumKit/Core/Research/ResearchRunner.swift:1664,1680–1687,2036–2058; ResearchModels.swift:633–637. Effort: half a day.
 
+Draft attribution for regather, revision, both in sequence and legacy records is covered by #208. Verify interrupted adoption as part of the provenance fixtures below.
+
+Bind saved draft citations to the evidence available when that draft was generated. TranscriptFormatter can omit a draft-only citation from its bibliography. The macOS and GTK draft renderers can resolve a formerly invalid number against sources added later. Capture the draft-time source bound and which pages were read, define a conservative display for older regather records without that provenance, and use it in both renderers and export. Test a draft-only source, a number introduced on the second pass, and a page promoted from summary to full text. Keep unrelated hits out of the bibliography.
+
 ### S33 · Confirm image fallback before disabling vision
 
 Bugs — nice-to-have
@@ -1697,6 +1864,9 @@ Suggested fix: Record image rejection only after the no-image retry succeeds; re
 Accept: Test both successful image fallback and a 400 that also fails without images.
 
 Where: Sources/VervellumKit/Core/Research/ChatCompletionsClient.swift:302–317. Effort: 2 hours.
+
+Implemented in open PR #234 (both flags set only after the retry answers, with the
+double-failure case pinned). Restore this entry if that PR closes unmerged.
 
 ### R01 · Retain a first-use selection seed
 
@@ -1734,6 +1904,10 @@ Accept: Retain written labels, uncertainty and accessible distinctions; informat
 
 Where: Vervellum/Views/TurnView.swift:248; PangoMarkup.notices.
 
+Implemented in open PR #240 (a shared `NoticeTone` in Core, used by both renderers;
+informational notices use the secondary text colour). Restore this entry if that PR
+closes unmerged.
+
 ### R04 · Normalize common publication-date spellings
 
 Visual issues and layout problems — nice-to-have
@@ -1758,17 +1932,17 @@ Accept: Complete configured names without provider calls or exposing credentials
 
 Where: Sources/VervellumKit/Core/Text/ComposerCommand.swift:136.
 
-### R06 · Profile large-library search before hiding results
+### R06 · Measure history search latency
 
-Performance problems, stuttering, and jank — nice-to-have
+ThreadLibrary scans questions and full answers on each query edit, up to 2,000 threads. The matcher also checks findings, limitations, follow-ups and sources. A missing phrase across 200 one-turn threads with 8,200-character answers took 0.56–1.07 seconds per scan in a local debug build on arm64. [The single-scan change](https://github.com/L-K-M/Vervellum/pull/213) shares the result for the rows and empty state. Compare release-build input latency at the default and maximum library sizes.
 
-ThreadLibrary scans questions and full answers on each query edit, up to 2,000 threads. The walk is allocation-light, not indexed or debounced. Open #144 adds searchable fields, not an index or debounce.
+The #198 fixture took median times of 730 ms and 5.97 s for an unsuccessful query over 200 and 2,000 threads respectively (one 4.3 KB answer per thread, nine debug scans on a busy Mac). That PR removes full-text scanning from the UI thread. Measure time to first useful result and memory on release builds before adding an index or a roughly 150 ms debounce. Preserve all search fields and newest-first ordering. A questions-only early return would need an explicit scope choice from the reader.
 
-Suggested fix: Profile a roughly 150 ms debounce or an index with correct invalidation. The concurrent review suggested questions-first with an answer fallback only for a small question set; that changes result completeness and needs an explicit scope decision, not a silent optimization.
+Where: ThreadLibrary, HistoryView and the macOS history matcher in #198.
 
-Accept: Preserve answer matches, ordering and live library changes unless the reader chooses a narrower search scope.
+A no-match fixture of 2,000 one-turn threads with about 4 KB of answer text each took 1.1–1.9 seconds per scan across three optimized runs on a busy arm64 Mac (3.8–5.6 seconds in Debug). The fixture times ThreadLibrary.search, excluding rendering. Record end-to-end release keystroke latency for early, late and missing matches, then run matching off the UI thread against immutable library snapshots. Cancel obsolete work, key results to both query and library revision, and test deletion or a streamed update during a search. A query-only cache can leave a removed thread on screen.
 
-Where: Sources/VervellumKit/Core/Store/ThreadLibrary.swift:118–126; Vervellum/Views/HistoryView.swift:25.
+Prototype a bounded excerpt from the first matching field so a URL or finding match explains why an otherwise unrelated title appears. Reuse that scan and render plain text. Test composed characters, a match near the end of a long answer, VoiceOver and clearing the filter.
 
 ### G01 · Let Linux level controls wrap
 
@@ -1832,8 +2006,9 @@ Where: Sources/VervellumKit/Linux/LinuxPanel.swift:213–225.
 
 Novel, delightful, or quirky ideas worth trying — nice-to-have
 
-Open #142 exposes the saved draft. A changed-passages view could avoid comparing
-two complete walls of text.
+The reader can expand the complete saved draft. Prototype a changed-paragraph view
+that keeps source buttons usable in both versions and retains access to both full texts
+when paragraph alignment is ambiguous.
 
 Suggested fix: Diff draftAnswer against the displayed answer locally, using the
 existing Markdown views. A line-based diff is a starting point, not a claim of
@@ -1842,15 +2017,17 @@ sentence-level alignment.
 Accept: No model call; bound work on long answers, retain both complete versions,
 and say which prose the findings assessed.
 
+Prototype a local “Find in assessed answer” action when a finding has one verbatim match. Use the assessment target to select the draft or displayed answer, reveal the passage, and preserve the return position. Suppress the jump for paraphrases and repeated matches. Exercise a regather followed by correction and keyboard focus after disclosure.
+
 ### N01 · Flag a single-domain evidence set
 
 Novel, delightful, or quirky ideas worth trying — nice-to-have
 
-All cited sources can come from one domain without a visible cue.
-
-Suggested fix: Show an accessible monoculture flag from existing source metadata; do not equate domain diversity with truth.
-
-Accept: Use existing data and explicit user actions; no silent model call or privacy expansion.
+Implemented in open PR #247: `ResearchTurn.citesSingleDomain(using:)` derives the
+cue from the same `Source.domain` the harvester's diversity cap uses, and the runner
+adds a `singleDomain` notice when two or more cited sources share one domain. One
+cited source, no citations and a varied set do not fire it; the message is a fact
+about the evidence, not a verdict.
 
 Historical score: 7.3 · 7/7/8 · S.
 
@@ -1925,6 +2102,8 @@ Suggested fix: Plan a String Catalog, locale-aware dates and a portable Core loc
 Accept: Use existing data and explicit user actions; no silent model call or privacy expansion.
 
 Historical score: 2.7 · 3/2/3 · L.
+
+Give the submit chord one localized spoken name shared by the first-use hint and live VoiceOver announcements, with a separate compact visual keycap.
 
 ### N08 · Open cited sources by number key
 
@@ -2007,3 +2186,1248 @@ Suggested fix: Read queue state when building the menu and observe queue changes
 Accept: Use existing AppDelegate/engine data; no question text or extra provider calls are needed.
 
 Where: Vervellum/App/AppDelegate.swift:387.
+
+### M01 · Do not let notice markdown eat literal filename characters
+
+Bugs — nice-to-have
+
+Attachment refusals and progress notices embed user filenames and are rendered
+through `MarkdownBody` (`NoticesView`). A file named `*draft*.md` or `**bold**.png`
+loses its asterisks to emphasis in the message that explains why it was refused.
+
+Suggested fix: render refusal/progress lines as plain text (the `/help` and `/model`
+notices deliberately use markdown and should keep it), or escape filenames when the
+message is built.
+
+Accept: a filename with `*`, `**`, `_`, `` ` ``, `[` or `#` survives verbatim in
+its refusal notice; the markdown-capable notices still render.
+
+Where: Vervellum/Views/TurnView.swift (`NoticesView`), the refusal message builders
+in `Vervellum/Views/PanelRootView.swift`. Effort: 1 hour.
+
+### M02 · Name the answering model when only one provider is configured
+
+Usability: speed, convenience, clarity — nice-to-have
+
+The composer model chip only appears with `profiles.count > 1`, so a single-provider
+setup cannot see which model answers without opening Settings. The turn footer does
+print it — but only after the fact.
+
+Suggested fix: show a read-only model label on the empty state or beside the level
+chip when exactly one profile exists; keep the picker interactive when there are
+two or more.
+
+Accept: a one-provider user can identify the model before asking; no new picker or
+extra settings surface.
+
+Where: Vervellum/Views/PanelRootView.swift (`modelPicker`). Effort: 1 hour.
+
+### M03 · Show a drop affordance while dragging onto the composer
+
+Usability: speed, convenience, clarity — nice-to-have
+
+`ComposerTextView` accepts file and image drops, but nothing highlights the
+composer as a target — users discover drop support only by trying it. The empty
+state now names the feature; a visual target would complete the affordance.
+
+Suggested fix: have `draggingEntered`/`draggingExited`/`performDragOperation` flip
+a flag that draws an accent ring or tint over the composer (bridge the state into
+SwiftUI via the coordinator, or overlay a border in `ComposerView`).
+
+Accept: the highlight appears only while a valid payload is over the composer and
+clears on exit/completion; no per-frame work added to the streaming path.
+
+Where: Vervellum/Views/ComposerView.swift:341+; Vervellum/Views/PanelRootView.swift
+(composer section). Effort: 2 hours.
+
+### M04 · Tint the panel glass and separate the composer visually
+
+Aesthetics and theming — nice-to-have
+
+The panel uses the untinted `.regular` material/glass and a hairline between
+scrolling content and composer. Against macOS 26 glass this is honest but spare:
+the theme's surface colour never reaches the backdrop, and the composer does not
+read as a distinct surface over a long answer.
+
+Suggested fix: tint the glass subtly with `PanelPalette.surface` (glass APIs accept
+a tint on both NSGlassEffectView and `.glassEffect`), and evaluate a soft top
+shadow on the composer divider. Keep `.floating` level, material fallback, and all
+contrast/adaptation behaviour intact; measure both appearances.
+
+Accept: Increase Contrast and Reduce Transparency still readable; no window-level
+change; screenshots in light and dark.
+
+Where: Vervellum/Views/PanelBackground.swift; Vervellum/Panel/ResearchPanel.swift;
+the composer divider in PanelRootView. Effort: half a day.
+
+### M05 · Show the global hotkey chords in the status menu
+
+Usability: speed, convenience, clarity — nice-to-have
+
+"Ask Vervellum…" and "Research the Selection…" in the status menu carry no hint of
+their registered shortcuts — the single most important interaction in the app is
+undiscoverable from its own menu.
+
+Suggested fix: display the recorded `HotkeyBinding.displayString` beside the items
+(right-aligned text or the key-equivalent column, taking care that assigning
+`keyEquivalent` also makes the chord fire while the menu tracks — same action, but
+verify).
+
+Accept: the menu shows the live configured chords and updates when a shortcut is
+re-recorded; no double invocation.
+
+Where: Vervellum/App/AppDelegate.swift (`makeMenu`). Effort: 1 hour.
+
+### M06 · Cycle threads with ⌘[ / ⌘]
+
+Usability: speed, convenience, clarity — nice-to-have
+
+Keyboard users can open History (⌘Y) but cannot move between threads without the
+pointer; ⌘[ / ⌘] back/forward through history order matches both Safari and the
+panel's existing shortcut vocabulary.
+
+Suggested fix: handle the pair in `ResearchPanel.performKeyEquivalent` like the
+other panel chords, mapping to `openThread` on the previous/next entry in
+`library.threads` order. Coordinate with A28's list-key model and N13's citation
+stepping so the chords do not collide.
+
+Accept: cycles across the visible ordering only while a thread view is shown; no
+interception while the history search field or composer has marked text.
+
+Where: Vervellum/Panel/ResearchPanel.swift (`performKeyEquivalent`);
+Vervellum/Views/PanelRootView.swift (`openThread`). Effort: 2 hours.
+
+### M07 · Panel-UX smalls
+
+General issues — nice-to-have
+
+Two marginal items from the same pass, held here so they are not lost:
+
+- The level picker only dismisses via Escape, its chip, or a selection — clicking
+  the thread area leaves it open. Harmless (the fixed composer never overlaps),
+  but a click-away dismiss would match macOS convention.
+- `PanelRootView` reads `preferences.textScale` at the root, so a settings-slider
+  drag republishes the whole tree per tick. Profile before changing observation. The root injects the scale for
+  its children, so an environment lookup at the root reads its parent’s value.
+  Isolate scale-dependent chrome in a descendant if profiling warrants it.
+
+Where: `showsLevelPicker` in Vervellum/Views/PanelRootView.swift; `textScale` at
+PanelRootView root. Effort: 1–2 hours.
+
+### H01 · Reveal why a history result matched
+
+HistoryRow shows a title, turn count and age even when the only matching text is
+buried in a finding several turns back. Prototype a single excerpt labeled by
+field and open the thread at the matching turn. Have ThreadLibrary's existing
+search return the match location as part of its walk. Generate the excerpt only
+where it is displayed. Preserve result ordering, normal unfiltered reopening and
+the session identity of detached live threads. Exercise a claim-only hit in an
+older turn, a source-title-only match, mixed-script input and a cleared query. Announce the matching field and excerpt with the row, and test keyboard opening, a changing answer, and deletion during search. Measure together with R06.
+
+### H02 · Distinguish retrieved and cited domains in follow-up context
+
+ResearchContext.historyEntry removes old citation numbers, then populates
+`source_domains` from every retrieved source. Its documentation describes these
+as the domains backing the previous answer. Compare payloads for a two-turn
+fixture with an answer citation, an assessment-only source and an unused result.
+Decide whether the following planner needs search coverage separately from
+citation provenance. Name the fields for their actual meaning, retain the budget
+and trimming notices, and keep earlier citation numbers out of subsequent prose.
+
+## Codex pass 2026-11-21
+
+Reviewed against `origin/main` at `e90efc3`. Full read of the macOS front end, the
+shared Core pipeline, persistence, the text layer and the Linux/GTK front end; the
+macOS suite passes (1043 tests) and a Debug build runs without runtime warnings.
+Four small fixes from this pass are open in PRs #233 (range citations), #234
+(image-retry state), #236 (negative attachment size) and #240 (notice tones); their
+slices are annotated in place above and are not repeated here. Concurrent branches
+and other agents' PRs were not inspected.
+
+### C01 · `/clear` leaves the redaction banner on an empty composer
+
+Bugs — nice-to-have
+
+`PanelRootView.newThread()` resets `notice`, `queueFullNote`, `attachments`,
+`draft` and `recallIndex`, but not `redactionNote`
+(`Vervellum/Views/PanelRootView.swift:1170`, state at `:58`, banner at `:354`).
+After `/clear`, `/new` or the header's new-thread button, "N credential-shaped
+values removed from the captured text." keeps showing above an empty composer.
+
+Suggested fix: clear `redactionNote` in `newThread()`. `showsLevelPicker` is reset
+by `submit` but not by the header's new-thread button; both entry points should go
+through the same reset.
+
+The same reset gap exists on dismissal: `.vervellumPanelWillHide` resets history,
+notice and recall but not `showsLevelPicker`, so a panel dismissed with the list
+open reopens with it still expanded; `queueFullNote` survives until the next
+submission even after the queue has drained itself.
+
+Accept: `/clear` by command and by the header button both leave no banner; a
+selection-seeded draft still shows its count; a resummon opens on the thread with
+no stale list or queue warning.
+
+### C02 · Attaching a file clears whatever notice is showing
+
+Bugs — nice-to-have
+
+`PanelRootView.receive(_:restoring:)` does `notice = nil` whenever an attachment
+is accepted (`Vervellum/Views/PanelRootView.swift:1002`). A "Finish the command
+name" notice, or a refusal from an earlier drop, is discarded by an unrelated
+attachment. The chips are visible on their own; the notice is the only record of
+the other event.
+
+Suggested fix: do not clear `notice` here. If a clear is wanted, clear only the
+attachment-related notices this view itself posts.
+
+Accept: a refusal or command notice survives a later attach; an attach-specific
+notice is still replaced by a newer attach result.
+
+### C03 · `/history` and `/settings` clear the words but leave the bytes armed
+
+General issues — nice-to-have
+
+`submit` handles `.openHistory` and `.openSettings` by setting `draft = ""` and
+nothing else (`Vervellum/Views/PanelRootView.swift:925`). `attachments` survives.
+`openThread` deliberately documents that the composer is global and keeps its
+words and attachments while earlier work is consulted, so persisting across
+History may be intended — but the two commands clear the words and keep the bytes,
+so a screenshot attached for one question silently rides the next one asked from
+History.
+
+Suggested fix: decide it explicitly. If the bytes travel with the draft, clear
+both; if they persist, stop clearing the draft in these two branches. Record the
+decision in the comment beside `openThread`.
+
+Accept: a question asked straight after `/history` either carries the attachment
+deliberately and says so, or does not carry it; the choice is documented.
+
+### C04 · Attachment bytes are written synchronously on the main thread
+
+Performance — nice-to-have
+
+`ResearchSession.start` writes every pending attachment with
+`attachmentStore.write` before appending the turn
+(`Sources/VervellumKit/Core/Research/ResearchSession.swift`, in `start`). `start`
+is reached from `ResearchEngine.ask`, which the panel calls on the main thread, so
+up to 4 × 4 MB of file writes block the UI before the turn exists. The comment
+justifies the synchronous order, and the order is real — the bytes must exist
+before a save names them — but it does not require the write to be on the calling
+thread.
+
+Suggested fix: perform the writes off the main thread and append/publish the turn
+when they finish, keeping the pre-append ordering. `AttachmentStore.sweep`'s grace
+window already covers the gap between a write and the save that names it.
+
+Accept: a 4 × 4 MB attach does not stall the composer; a crash between the write
+and the save still leaves bytes the sweep collects; a failed write still raises
+`attachmentNotStored`.
+
+### C06 · Header buttons have a fixed hit area that ignores the text-size preference
+
+Visual / accessibility — nice-to-have
+
+`HeaderButton` draws its symbol at `PanelTheme.Font.at(10.5, textScale)` inside a
+fixed `frame(width: 20, height: 18)` (`Vervellum/Views/PanelHeaderView.swift`). At
+140 % text the glyph is 14.7 pt in an 18 pt frame and the touch target stays
+20 × 18 pt, well below the 44 pt guideline. The five controls also crowd at the
+right edge with no padding. Open PR #205 fixes the target size; this entry is the
+scaling half — verify against #205 before implementing. PR #230 (Mistral Vibe
+pass) independently grows the hit target to 26×26 via real-frame padding, which
+covers the fixed-size half here as well; the textScale-scaling half remains open.
+
+Suggested fix: scale the frame with `textScale`, or use a minimum 44 pt hit area
+with centre alignment, and keep the glyph centred.
+
+Accept: 140 % text shows no clipped glyph; every header control meets the target
+guideline at both ends of the text-size range.
+
+### C07 · Profile transcript equality alongside rendering
+
+`TurnView.==` compares a growing answer, sources and findings on the coalescer's 10 Hz delivery path. Profile equality separately from MarkdownBody reparsing the whole answer on each publish and ComposerView.height(for:) constructing a fresh TextKit stack (A20/S14). Before narrowing the comparison, test an unchanged-length answer correction, newly arrived evidence, notices and findings. Each can change the visible row without a stage transition.
+
+For large-library matching use R06's fixture. For session retention use A83. These measure different costs and need separate before/after measurements.
+
+### L01 · The composer is marked dirty ten times a second while an answer streams
+
+Performance — nice-to-have
+
+`ComposerView.updateNSView` ends with an unconditional `textView.needsDisplay = true`
+(`Vervellum/Views/ComposerView.swift`). The composer representable is rebuilt on every
+publish from `PanelRootView`, and the coalescer publishes at about 10 Hz while an answer
+streams, so the text view is told to redraw itself ten times a second even when its
+text, font and selection have not changed. The two assignments that can actually
+change its contents (`string` and `font`) already invalidate it.
+
+Suggested fix: delete the line, or guard it behind the same "did anything change"
+condition as the text and font writes. Profile a long answer before and after; the win
+is small but it is free, and the composer is on the hottest path in the panel.
+
+Accept: the composer still redraws on text, font, selection and placeholder changes;
+no visible difference.
+
+### L02 · `PLAN.md`'s known limits and the README dependency bullet contradict the code
+
+Documentation — nice-to-have
+
+`PLAN.md` §8 still says "**One provider each.**" and "**No page fetching.** Vervellum
+never retrieves a source's full text." Both are false: the app has multi-provider model
+chains, search fan-out across engines, and page reading is a default-on feature with
+three modes. `README.md` says "no third-party dependencies" in the same bullet that
+names the Updraft and Keycap packages; `AGENTS.md` says those two first-party packages
+are the only exception.
+
+Suggested fix: rewrite §8's stale bullets to match the code and qualify the README
+bullet. State what is implemented, never what is aspirational.
+
+Accept: a reader comparing `PLAN.md` §8 and `README.md` to the code finds no
+contradiction.
+
+### L03 · Attachment text capping re-measures the whole payload per cut
+
+Performance — nice-to-have
+
+`ResearchContext.cappingAttachmentText` calls `measure(capped)` — a full JSON
+serialization of the payload — on every loop iteration, and the loop runs once per
+character removed. A four-file payload at the 60 KB cap is a few hundred serializations.
+It is once per turn, not on a hot path, so this is a note rather than a redesign.
+
+Suggested fix: track the payload's measured size as entries are cut, or compute the cut
+from the entry sizes already known. Keep the visible `\n[…]` marker and the `changed`
+flag.
+
+Accept: the same payloads cap to the same bytes; the `attachmentTrimmed` notice still
+fires exactly when something was cut.
+
+### L05 · Copy a finding's citations from its chip
+
+Novel, delightful, or quirky — nice-to-have
+
+The findings chip already names its sources. Copying `[3, 7]` (or the source titles)
+would let a reader paste the provenance into an email or a notes app without opening the
+panel's Copy, which carries the whole answer.
+
+Suggested fix: a small copy affordance on the chip, or a ⌘-click, writing the citation
+list to the pasteboard. Reuse the existing pasteboard helper; no new format.
+
+Accept: the copied text is exactly the cited numbers; no answer text is copied by
+accident.
+
+## Codex pass 2026-11-21 (second)
+
+### V01 · Surface a failed thread write
+
+Bugs — nice-to-have
+
+`ThreadArchive.writeNow` catches every write and rotation error and writes one line
+to stderr. It sets neither `readFailure` nor `eraseFailure`, so `scheduleSave`'s gate
+keeps believing the last save succeeded and Settings keeps showing history as
+healthy. A full disk, a read-only folder or a permission regression is exactly when
+the user needs to know their threads are not being kept. A14 covers backup rotation
+and concurrent erase/flush; this is the primary write path.
+
+Suggested fix: record a `saveFailure` beside `eraseFailure`, surface it through
+`ThreadStore.eraseFailure` and Settings, and test that a failed write is reported
+without blocking the next save attempt.
+
+Accept: a forced write failure reaches the UI in Vervellum's own words; a later
+successful save clears it; no path or foreign error text is shown.
+
+Where: `Sources/VervellumKit/Core/Store/ThreadArchive.swift:391–420`;
+`Vervellum/Store/ThreadStore.swift` (`eraseFailure`). Effort: half a day.
+
+Implemented in open PR #242: `saveFailure` and `backupFailure` are recorded in
+Vervellum's own words, a failed write keeps its snapshot pending for a real retry,
+and Settings shows one storage warning with a **Try Again** button. Restore this
+entry if that PR closes unmerged.
+
+### V02 · Time `ResearchTrace.stage` with the injected clock
+
+General issues — nice-to-have
+
+`ResearchTrace.init` takes `now:` and uses it for `started`/`elapsed`, but `stage`
+and the completion logs call `Date()` directly. A test that injects a clock can
+predict `elapsed` but not the per-stage figures, so the trace's per-stage timings
+cannot be fixture-tested.
+
+Suggested fix: store the injected clock and use it for `stage` and the completion
+logs as well.
+
+Accept: a fixture clock produces deterministic stage durations; live behaviour is
+unchanged.
+
+Addressed in open PR #237: `ResearchTrace` now uses `ProcessInfo.processInfo.systemUptime`
+rather than `Date()`, so a mid-turn wall-clock adjustment cannot produce a negative or
+inflated duration, and the unused `now:` injection is gone. Restore this entry if that
+PR closes unmerged.
+
+Where: `Sources/VervellumKit/Core/Research/ResearchTrace.swift:33–45`. Effort: under
+one hour.
+
+## Mistral Vibe pass 2026-11-21
+
+Reviewed against `origin/main` at `1ed52ba`. Full write-up with method and the
+"genuinely good" list is in `tmp.md`; three helper deep-reads (core pipeline,
+store/text, macOS views/settings) were merged into it. Findings below were
+cross-checked against the entries above; existing IDs are cited instead of
+duplicating them.
+
+### Implemented in this pass (open PRs; restore the finding if a PR closes unmerged)
+
+- #230 `review/larger-header-hit-areas` — header-button hit target grown from the
+  20×18 glyph frame to 26×26 by padding the button's real frame
+  (pad → `contentShape(Rectangle())` → inverse pad), derived from
+  `PanelTheme.Space.small / 2` so neighbours never overlap; `PanelHeaderViewTests`.
+  Covers the target-size half of C06.
+- #239 `review/thread-scroll-shortcuts` — ⌘↑/⌘↓ scroll the thread to top/bottom
+  while the composer holds first responder (`performKeyEquivalent` → new
+  `PanelCommand.scrollToTop/scrollToBottom`, boxed `ScrollViewReader` proxy, top
+  anchor); help text; `PanelCommandTests`. Slice of A65.
+- #241 `review/redactor-case-insensitive-scheme` — `SecretRedactor.urlUserInfo`
+  scheme class is `(?i)`, so `HTTPS://u:p@host` is redacted. Redactor slice adjacent
+  to A63.
+- #244 `review/composer-whitespace-consistency` — `ComposerCommand.parse` and
+  `commandWord` share one `whitespace` set / `isWhitespace(_:)` (U+200B diverged).
+- #246 `review/about-version-string` — About pane reads
+  `CFBundleShortVersionString` via pure `AboutView.versionText(_:)`; no more
+  `Optional("0.3.1")`.
+- #250 `review/citation-regex-unbounded-digits` — citation pattern is `\d+`, so
+  `[1000]` renders as a chip and is flagged out-of-range instead of passing as
+  plain text.
+- #251 `review/strip-hostile-source-fields` — `HostileText.stripped` applied to
+  `publishedAt` and to `linkTitle` (whose path percent-decodes RLO overrides).
+- #253 `review/theme-restyle-open-thread` — `TurnView` carries and compares the
+  palette, `MarkdownBody` passes font/colour explicitly to every `MarkdownText`,
+  and `AnswerTextView` refreshes `linkTextAttributes` only when the accent moved;
+  the open thread restyles live on a theme change.
+
+### A87 · Re-throw non-parse provider failures in the agent loop
+
+Bugs — important
+
+`ResearchRunner.swift:1229` wraps the follow-up call in `try?`, so a total provider
+outage becomes "no usable sources" and the blame lands on the question. Only parse
+failures should degrade to a skip.
+
+Suggested fix: catch `ResearchError` and re-throw unless it is the parse case;
+keep the soft path for genuinely empty evidence.
+
+Accept: a provider outage surfaces as a provider error, not as
+"the question found nothing".
+
+Where: `Sources/VervellumKit/Core/Research/ResearchRunner.swift:1229`. Effort:
+under one hour.
+
+### A88 · Report `contextTrimmed` on deep follow-up and regather payloads
+
+Bugs — important
+
+The answer-stage `assemble` reports trimming, but the deep follow-up, regather and
+assessment payloads (`ResearchRunner.swift:1030,1225,1636`) can drop history
+without the `contextTrimmed` notice — against the never-truncate-silently rule
+(A07's contract).
+
+Suggested fix: emit the notice after every `assemble`, not just the answer stage.
+
+Accept: any payload that dropped turns carries the notice in the turn/transcript.
+
+Where: `Sources/VervellumKit/Core/Research/ResearchRunner.swift:1030,1225,1636`.
+Effort: under one hour.
+
+### A89 · Measure `fixedContent` per stage, not the empty reading block
+
+Bugs — nice-to-have
+
+`ResearchRunner.swift:585` / `ResearchContext.swift:235`: the answer and assessment
+payloads measure `fixedContent` against reading/`searches_run` blocks that are
+empty at that point, so a long reading can push the assessment past the cap and
+fail soft instead of trimming history first.
+
+Suggested fix: measure the real per-stage blocks (sources actually included).
+
+Accept: a long-reading thread trims history with a notice before the assessment
+fails soft.
+
+Where: `Sources/VervellumKit/Core/Research/ResearchRunner.swift:585`;
+`ResearchContext.swift:235`. Effort: half a day.
+
+### A90 · Treat an empty `searchProfiles` as not ready
+
+Bugs — important
+
+`ProviderSettings.problems` (`ProviderSettings.swift:650,675`) never checks
+`searchProfiles.isEmpty`, so readiness says "ready" while the runner throws "no
+search provider configured".
+
+Suggested fix: add the empty-list case to `problems` with a settings deep-link.
+
+Accept: Settings shows "no search provider" instead of "ready" when the list is
+empty but present.
+
+Where: `Sources/VervellumKit/Core/Providers/ProviderSettings.swift:650,675`.
+Effort: under one hour.
+
+### A91 · Verify a gateway's completion signal before accepting a missing finish reason
+
+Some local gateways reportedly omit `finish_reason` on successful answers. The earlier proposal to accept nil unconditionally conflicts with the explicit-completion contract in PR-REVIEW.md and the partial-stream fixtures. Capture a content-free fixture for the specific gateway and identify a documented positive completion signal. Evaluate compatibility only for that response shape. Pair the successful fixture with a truncated response ending on the same last content token, an idle disconnect and a length-limited answer. Preserve partial prose and its interruption notice whenever the two outcomes are indistinguishable.
+
+Where: Sources/VervellumKit/Core/Research/ChatCompletionsClient.swift, checkFinishReason. Earlier estimate for the narrow compatibility change was under one hour.
+
+### A92 · Reject malformed tool-call arguments
+
+Bugs — nice-to-have
+
+`ResponseParsers.swift:72`: a present-but-not-a-dictionary `arguments` value falls
+back to the raw entry instead of failing, so a malformed call can reach the
+planner as garbage.
+
+Suggested fix: throw invalid-plan for a non-dict `arguments`.
+
+Accept: a malformed arguments fixture is rejected, not passed through.
+
+Where: `Sources/VervellumKit/Core/Research/ResponseParsers.swift:72`. Effort:
+under one hour.
+
+### A93 · Never surface foreign error text from the credential commit
+
+Bugs — important (security)
+
+`ProviderCredentialCommit.swift:66`: `secretWriteAfterCommit` appends
+`error.localizedDescription` to the user-facing message. A foreign (OS/keychain)
+error string can carry paths or account details into the UI.
+
+Suggested fix: a fixed sentence naming the account/provider only; details stay in
+logs.
+
+Accept: a forced secret-store failure shows Vervellum's own words only; no
+`localizedDescription` reaches any view.
+
+Where: `Sources/VervellumKit/Core/Providers/ProviderCredentialCommit.swift:66`.
+Effort: under one hour.
+
+### A94 · Guard `eraseEverything` in read-only archives
+
+Bugs — important
+
+`ThreadArchive.swift:261`: `eraseEverything()` has no `isReadOnly` guard, so the
+history toggle can delete a newer-version document and the archive stays read-only
+forever. Overlaps A12/A14 — coordinate with them.
+
+Suggested fix: refuse erase while read-only, with the same sanitized explanation
+A12 proposes for the UI.
+
+Accept: a read-only archive cannot be erased from the panel; the refusal is
+explained in Vervellum's words.
+
+Where: `Sources/VervellumKit/Core/Store/ThreadArchive.swift:261`. Effort: under
+one hour.
+
+### A95 · Don't let the launch trim delete attachments of recoverable threads
+
+Bugs — important (data loss)
+
+`ThreadArchive.swift:206` + `AttachmentStore.swift:194`: lowering the thread limit
+trims in memory only, but the launch sweep deletes the trimmed threads' attachments
+while the threads themselves come back on relaunch — pictures vanish from threads
+that are still shown.
+
+Suggested fix: sweep only attachments of threads that are gone from the archive
+after the trim is persisted, or keep the grace window until the trim is committed.
+
+Accept: lowering the limit never deletes pictures of threads that still exist.
+
+Where: `Sources/VervellumKit/Core/Store/ThreadArchive.swift:206`;
+`AttachmentStore.swift:194`. Effort: half a day.
+
+### A96 · Distinguish an absent provider list from an empty one
+
+Bugs — nice-to-have
+
+`CorePreferences.swift:243`: a present-but-empty provider list decodes as "no
+list", so deleting the last provider resurrects the defaults on relaunch.
+
+Suggested fix: distinguish key absence (defaults) from `[]` (explicitly none).
+
+Accept: an explicitly emptied provider list stays empty across relaunch.
+
+Where: `Sources/VervellumKit/Core/CorePreferences.swift:243`. Effort: under one
+hour.
+
+### A97 · Don't restore activation on Settings close when the app wasn't active
+
+Bugs — nice-to-have
+
+`SettingsWindowController.swift:94`: `windowWillClose` restores activation
+unconditionally; `PanelController` guards with `NSApp.isActive`. Match it (related
+to A77).
+
+Suggested fix: guard the activation restore the same way.
+
+Accept: closing Settings while the app is inactive does not steal activation.
+
+Where: `Vervellum/Settings/SettingsWindowController.swift:94`. Effort: under one
+hour.
+
+### A98 · Don't pin the current appearance when switching Automatic → explicit
+
+Visual — nice-to-have
+
+`AppearanceView.swift:299`: the fallback resolves the semantic colour against the
+*current* appearance and stores it, so ticking Text on in Dark Mode pins white text
+after a later switch to Light.
+
+Suggested fix: store the semantic choice, resolve at render time; or resolve
+against the effective appearance on every change.
+
+Accept: Automatic → explicit never freezes a literal colour that later mode
+switches contradict.
+
+Where: `Vervellum/Settings/AppearanceView.swift:299`. Effort: half a day.
+
+### A99 · Keep the source popover open across streamed replacements
+
+Visual / usability — nice-to-have
+
+`AnswerTextView.swift:101`: the popover closes on every streamed storage swap
+under a resting pointer.
+
+Suggested fix: re-evaluate the chip under the last pointer location after each
+swap instead of closing.
+
+Accept: a streaming answer does not dismiss an open source preview.
+
+Where: `Vervellum/Views/AnswerTextView.swift:101`. Effort: half a day.
+
+### N15 · Give the providers model menu unambiguous identity
+
+Bugs — nice-to-have
+
+`ProvidersView.swift:342`: `ForEach(models, id: \.self)` — duplicate aliases from
+an endpoint make identity ambiguous.
+
+Suggested fix: enumerated ids (`id: \.offset`).
+
+Accept: a model list with duplicate names renders and selects correctly.
+
+Where: `Vervellum/Settings/ProvidersView.swift:342`. Effort: under one hour.
+
+### N16 · Cancel model-list tasks when the pane disappears
+
+Bugs — nice-to-have
+
+`ProvidersView.swift:410`: model-list tasks can write state after the pane is
+gone. Related to A18b (unsaved provider edits).
+
+Suggested fix: cancel on `onDisappear` as well as on replace.
+
+Accept: no state write lands after the pane is gone.
+
+Where: `Vervellum/Settings/ProvidersView.swift:410`. Effort: under one hour.
+
+### N17 · Line-limit the code-block language label
+
+Visual — nice-to-have
+
+`MarkdownText.swift:405`: a long fence info string grows the code-block header.
+
+Suggested fix: `.lineLimit(1)` + truncation.
+
+Accept: a 200-character info string renders one truncated line.
+
+Where: `Vervellum/Views/MarkdownText.swift:405`. Effort: minutes.
+
+### N18 · Rebuild the sources-by-URL index only when sources change
+
+Performance — nice-to-have
+
+`AnswerTextView.swift:69`: `sourcesByURL` is rebuilt on every streamed chunk.
+
+Suggested fix: memoize on `sources` identity/equality.
+
+Accept: streaming publishes no longer rebuild the index per chunk.
+
+Where: `Vervellum/Views/AnswerTextView.swift:69`. Effort: under one hour.
+
+### N19 · Track the citation substitution cursor
+
+Performance — nice-to-have
+
+`MarkdownText.swift:316`: each citation does `range(of:)` from the start of the
+block — O(n·m) over a long answer. Related to A20/C07 (re-parse per chunk).
+
+Suggested fix: scan once, advancing a cursor past each substitution.
+
+Accept: a 50-citation answer substitutes in one pass.
+
+Where: `Vervellum/Views/MarkdownText.swift:316`. Effort: under one hour.
+
+### N20 · Pin and cache the relative-date formatter
+
+General — nice-to-have
+
+`Formatting.swift:44`: `relativeDate` uses an unpinned `DateFormatter` (a
+non-Gregorian locale yields a Buddhist year) and allocates one per row.
+
+Suggested fix: pin locale/calendar, cache behind a lock.
+
+Accept: a non-Gregorian locale renders Gregorian years; no per-row allocation.
+
+Where: `Sources/VervellumKit/Core/Text/Formatting.swift:44` (or the macOS-side
+equivalent). Effort: under one hour.
+
+### N21 · Remove the original filename in the attachment sweep on Linux
+
+Bugs — nice-to-have (Linux)
+
+`AttachmentStore.swift:231`: the sweep parses `UUID(uuidString:)` but removes
+`url(for: id)` (the canonical lowercase form), so uppercase-UUID filenames survive
+on Linux filesystems.
+
+Suggested fix: remove the directory entry's original name.
+
+Accept: an uppercase-UUID attachment file is swept on Linux.
+
+Where: `Sources/VervellumKit/Core/Store/AttachmentStore.swift:231`. Effort:
+under one hour.
+
+### N22 · Reject wrong JSON types in the settings store
+
+Bugs — nice-to-have
+
+`SettingsStore.swift:71,67`: `{"keptThreads": true}` bridges to the number 10 via
+Any bridging.
+
+Suggested fix: type-check before casting; ignore or coerce explicitly.
+
+Accept: a bool where a number is expected is rejected, not bridged to 10.
+
+Where: `Sources/VervellumKit/Core/SettingsStore.swift:67,71`. Effort: under one
+hour.
+
+### N23 · Make `removeAll` delete only attachment files
+
+Bugs — nice-to-have
+
+`AttachmentStore.swift:204`: erase removes anything in the directory, not just
+UUID-named attachment files.
+
+Suggested fix: skip entries that are not attachment filenames.
+
+Accept: a foreign file dropped in the attachments directory survives erase.
+
+Where: `Sources/VervellumKit/Core/Store/AttachmentStore.swift:204`. Effort:
+under one hour.
+
+### N24 · Don't trust launch-time trustworthiness for backup rotation
+
+Bugs — nice-to-have
+
+`ThreadArchive.swift:376`: rotation trusts that the primary was trustworthy at
+launch, so an externally replaced primary is copied over the good `.bak`.
+Overlaps A14.
+
+Suggested fix: re-verify the primary before rotating it into the backup slot.
+
+Accept: a tampered primary never overwrites the last good backup.
+
+Where: `Sources/VervellumKit/Core/Store/ThreadArchive.swift:376`. Effort: half a
+day.
+
+### D01 · Keyboard citation peek with labelled chips
+
+Delight / accessibility — nice-to-have
+
+Tab into the answer, arrows across citation chips, Return presents the same
+`SourcePreview` the pointer gets; chips get accessibility labels ("Source 1, title").
+Closes the VoiceOver gap found in review. Related: N13, A64, A66.
+
+Accept: every citation is reachable and readable without a pointer.
+
+Where: `Vervellum/Views/AnswerTextView.swift`, `MarkdownText.swift` chip view.
+Effort: one day.
+
+### D02 · Cross-highlight citations and source rows
+
+Delight — nice-to-have
+
+Hovering `[7]` underlines source row 7; hovering a row highlights its chips in the
+answer. Pure view state, Reduce-Motion safe.
+
+Accept: both directions highlight; no layout shift.
+
+Where: `Vervellum/Views/AnswerTextView.swift`, source list view. Effort: half a day.
+
+### D03 · Answer-footer micro-metrics
+
+Delight — nice-to-have
+
+Word count, reading time and citation count next to the model name — a pure
+function over `turn.answer`/`turn.sources`, testable in `Formatting`.
+
+Accept: metrics update on stream completion; pure function unit-tested.
+
+Where: `Vervellum/Views/TurnView.swift` footer; `Formatting`. Effort: half a day.
+
+### D04 · Copy-the-question affordance
+
+Delight — nice-to-have
+
+A hover copy button on each question row, complementing Copy-answer. Related: A36.
+
+Accept: one click copies the question; confirmation matches A36's tone.
+
+Where: `Vervellum/Views/TurnView.swift` question row. Effort: under one hour.
+
+### D05 · Status-item pulse when a detached run finishes
+
+Delight — nice-to-have (macOS)
+
+A one-shot status-item pulse when a run finishes while the panel is hidden — the
+macOS half of A36e.
+
+Accept: a detached run's completion is visible from the menu bar once.
+
+Where: `Vervellum/App/` status item + `ResearchPanel` completion hook. Effort:
+half a day.
+
+### D06 · Inline live theme mock in Appearance
+
+Delight — nice-to-have
+
+A small flat-fill panel preview in Appearance animating live with the sliders —
+never nested glass, honouring Reduce Transparency.
+
+Accept: the mock reflects accent/text-size immediately; flat under Reduce
+Transparency.
+
+Where: `Vervellum/Settings/AppearanceView.swift`. Effort: one day.
+
+### D07 · Source provenance chips
+
+Delight — nice-to-have
+
+Show which planned query/round produced each source — the data is already in
+`PlannedSearch`/`Source`.
+
+Accept: each source row names its producing query; pure mapping, testable.
+
+Where: source list view; `Sources/VervellumKit/Core/Research/` plan model.
+Effort: one day.
+
+### D08 · "Not settled" section with one-click re-ask
+
+Delight — nice-to-have
+
+Surface `insufficient` findings as a "Not settled" section with a one-click re-ask
+of that sub-question.
+
+Accept: an insufficient finding is re-askable in one click; the new turn links
+back.
+
+Where: findings disclosure in `TurnView`; runner follow-up path. Effort: one day.
+
+## Verification gaps
+
+Verification gaps noted by this pass: static review cannot confirm Liquid Glass on
+macOS 26, real VoiceOver order, IME composition, frame times on long threads or
+full-screen placement; CI (macOS + Linux + automated GLM review) is the gate and GUI
+QA remains manual.
+
+
+## Mistral Vibe pass 2026-11-21 (second, worktree 0jlhruyq)
+
+Reviewed against `origin/main` at `fc5da67` — a full read of the macOS app, panel,
+store, settings window and shared Core, plus four delegated read-only review passes
+(macOS views; settings/keychain/pasteboard; panel/engine/store; networking and the
+research pipeline). The full write-up with method, per-entry locations and
+confidence is in `tmp.md`; findings below were cross-checked against the entries
+above and existing IDs are cited instead of duplicating them. Concurrent branches
+and other agents' PRs were not inspected during this review.
+
+### Implemented in this pass (open PRs; restore the finding if a PR closes unmerged)
+
+- #258 `vibe-0jlhruyq/preview-ownership` — `show(takingFocus: true)` clears
+  `isPreviewing`, so a user-summoned panel is no longer hidden when Settings closes.
+- #259 `vibe-0jlhruyq/sweep-gating` — attachment sweeps gate on the archive being
+  writable (`!isReadOnly`, `eraseFailure == nil`); regression test in
+  `AttachmentFlowTests` (fails without the fix).
+- #260 `vibe-0jlhruyq/dragged-position` — an open panel is re-placed only when
+  side/width/height actually changed, not on any preference write.
+- #261 `vibe-0jlhruyq/first-launch-no-focus` — the first-launch panel is shown
+  without taking focus.
+- #262 `vibe-0jlhruyq/composer-theme-font` — the composer, placeholder and height
+  measurement use `PanelTheme.NativeFont.at`, so theme font designs reach the typed
+  text.
+- #263 `vibe-0jlhruyq/caret-reduce-motion` — `StreamingCaret` holds a steady opacity
+  under Reduce Motion and resumes blinking if the setting is switched off
+  mid-stream; pure opacity function pinned in `PanelMotionTests`.
+- #264 `vibe-0jlhruyq/followups-offset-ids` — follow-up rows are identified by
+  offset, not by the model-written string.
+- #265 `vibe-0jlhruyq/markdown-body-equatable` — `MarkdownBody` is Equatable (slice of
+  A20; annotated in place above).
+- #266 `vibe-0jlhruyq/jpeg-pasteboard` — JPEG clipboard images and drags are accepted
+  as-is and named off the sniffed bytes (`.jpg`), via a new
+  `AttachmentIntake.name(forPastedImage:sniffing:)`.
+- #267 `vibe-0jlhruyq/delete-all-wording` — the Delete All confirmation names the
+  stored attachment bytes too.
+- #268 `vibe-0jlhruyq/providers-close-reset` — the providers pane reloads on
+  `.vervellumSettingsDidClose`, so typed keys, an armed Clear and a stale status do
+  not survive close/reopen.
+- #269 `vibe-0jlhruyq/deep-followup-json-only` — `ResearchPrompts.deepFollowUp` ends in
+  `\(jsonOnly)` like the other four JSON prompts; pinned by `ResearchPromptsTests`.
+- #270 `vibe-0jlhruyq/searxng-cheap-budget` — SearXNG searches carry a 30 s budget on
+  both clocks (the SearXNG half of A22; annotated in place above).
+
+### A100 · The MCP page reader has no per-page deadline
+
+Bugs — important
+
+`ReaderMCPClient.read` loops over sources calling `session.callTool`, whose deadline
+defaults to the transport's 600 s; `DirectPageReader` bounds each page at 12 s, the
+reader path has no equivalent. Up to 8 pages per deep turn can hold a turn for ~80
+minutes on a stalled reader service, with no visible "hung" vs "slow" distinction.
+
+Suggested fix: thread a `deadline` through `MCPSession.call`/`callTool` (or a
+`read(_:within:)` requirement on `PageReading`), budget per batch by subtracting
+elapsed time across the loop, sized near `DirectPageReader`'s per-page bound. Pure
+Foundation/Dispatch. Where: ReaderMCPClient.swift:68-84, MCPSession.swift:100-102,
+HTTPTransporting.swift:63-69. Effort: S-M.
+
+### A101 · Reader plain text is mangled by the HTML extractor
+
+Bugs — important
+
+`ReaderMCPClient.pageText` always runs `HTMLTextExtractor.text(from:)`, so a reader
+returning plain text containing code (`a < b`, `<div>`, `&amp;`, `&#169;`) gets tags
+stripped and entities decoded before becoming evidence — lossy on the path whose
+purpose is fidelity. Suggested fix: detect markup vs plain text and add a lossless
+plain-text mode (only `HostileText.stripped` + whitespace normalization + the length
+cap); pure and unit-testable. Where: ReaderMCPClient.swift:138-146,
+HTMLTextExtractor.swift:238-303. Effort: S-M.
+
+### A102 · Page reading fails open on a missing Content-Type
+
+Bugs — important
+
+`PageReader` accepts an empty Content-Type and its decode falls back to Latin-1,
+which cannot fail, so a host serving binary without a type has its bytes decoded into
+"page text". Suggested fix: fail closed on an absent type, or reject decoded text
+containing NUL / a high control-character ratio (mirror `Attachment.text(from:)`).
+Where: PageReader.swift:201-207, 459-475. Effort: S.
+
+### A103 · Unbounded model-written metadata can fail a healthy turn
+
+Bugs — important
+
+`purpose`, `displayQuery`, `reading`, `subquestions`, `claim`, `reasoning` and
+`followups` enter later payloads uncapped; `encodeUserContent` hard-fails past
+`maxCharacters` with the non-retryable `invalidContext`, so one verbose model reply
+kills an otherwise healthy turn at the answer or revision stage, blamed on the
+question. Suggested fix: cap each value where it enters a payload
+(`PlanParser`/`AssessmentParser`, `searches_run` total) and raise the existing
+`contextTrimmed` notice when a cap fires. Related A06. Where: ResearchRunner.swift:729-735,
+ResearchModels.swift:78-90, ResponseParsers.swift:52-95, 220-260. Effort: M.
+
+### A104 · `noPagesRead` can be suppressed by reads for trimmed-away sources
+
+Bugs — important
+
+`alreadyRead` is derived from `plannedReads` before the evidence trim, so a page read
+for a source the trim drops still counts and the "no page could be read" notice stays
+silent on a snippets-only turn. Suggested fix: derive from the final kept sources
+(`sources.filter { $0.wasRead }.count`) or prune `plannedReads` to kept numbers.
+Where: ResearchRunner.swift:646, 678, 690. Effort: S.
+
+### A105 · Historic `unsettled` findings describe the draft, not the revised answer
+
+Bugs — important
+
+When a revision landed, history carries the revised answer but findings that graded
+the draft, so a follow-up can be answered against claims about prose the model never
+saw. Suggested fix: include the shortened, citation-stripped draft beside the revised
+answer in `historyEntry`, or mark `unsettled` as grading the draft. Where:
+ResearchContext.swift:136-140, ResearchModels.swift (`draftAnswer`). Effort: S-M.
+
+### A106 · A failed turn records a model that never produced an answer
+
+Bugs — important
+
+`ResearchSession.start` sets `turn.model` up front; `recordAnsweringModel` overwrites
+only on success, so a turn that failed during planning keeps the configured name next
+to an error, contradicting the field's documentation. Suggested fix: leave `model`
+empty until `recordAnsweringModel` runs. Where: ResearchSession.swift:259. Effort: S.
+
+### A107 · The revision payload can exceed the context ceiling for long answers
+
+Bugs — important
+
+`answerContextReserve` (20 000) covers the assessment payload only; `revise` sends
+answer + evidence + reading + findings, so the longest answers — the ones most worth
+correcting — fail with `revisionUnavailable`. Suggested fix: reserve for the answer
+in the revision payload too (drop lowest-ranked evidence for that call only), or state
+the limit in the notice. Related A06. Where: ResearchContext.swift:39,
+ResearchRunner.swift:2039-2075. Effort: M.
+
+### A108 · The reader endpoint is never validated in Settings readiness
+
+Bugs — important
+
+`ProviderSettings.problems` checks the model endpoint and the search provider but
+never `readerEndpoint` when `pageReading == .reader`; a typo surfaces mid-turn as a
+vague notice, repeatedly. Suggested fix: validate `readerEndpoint` (and require the
+reader key) in `problems`, plumb a `hasReaderKey` parameter. Where:
+ProviderSettings.swift:650-709, 417-420. Effort: S-M.
+
+### A109 · Every streamed delta copies the whole answer
+
+Performance problems, stuttering, and jank — important
+
+`update` copies the turn and `turn.answer += chunk` copy-on-writes the entire answer
+per delta — quadratic over a long stream — plus a full-turn `Equatable` per chunk in
+the coalescer. Suggested fix: a delta fast path mutating stored state directly, with
+the coalescer owning the publish cadence. Where: ResearchRunner.swift:319-325, 1851.
+Effort: M.
+
+### A110 · History assembly runs the full forbidden-link scanner for nothing
+
+Performance problems, stuttering, and jank — important
+
+`withoutCitationMarkers` calls `CitationValidator.validate` (eleven regexes plus a
+markdown-link walk) and uses only `.spans`, once per historic turn per `assemble`.
+Suggested fix: a spans-only scope/helper in `CitationValidator`. Where:
+ResearchContext.swift:211-219, CitationValidator.swift:46-49. Effort: S.
+
+### A111 · History is re-summarized from scratch on every model call
+
+Performance problems, stuttering, and jank — important
+
+Each `assemble` re-parses markdown, re-parses URLs and re-encodes JSON for every
+completed turn, at every stage of every round. Suggested fix: cache per-turn summaries
+keyed by turn id, invalidated on mutation, keeping the drop-oldest budget arithmetic
+in `assemble`. Where: ResearchContext.swift:74-160. Effort: M.
+
+### A112 · The MCP reader handshakes once per read batch
+
+Performance problems, stuttering, and jank — important
+
+`readLinkedPages`, `performReads` and `readPlannedPages` each build a fresh reader
+and `connect()` (three round trips) — at least three handshakes per deep turn, plus
+`tools/list` per turn in `SearchMCPClient`. Suggested fix: one connected reader per
+turn (keyed by the endpoint), or a short turn-scoped cache; never persist a session
+id. Where: ResearchRunner.swift:2312, 2518-2527; SearchMCPClient.swift:65-75. Effort: M.
+
+### A113 · Streaming republishes `ThreadStore.library` at snapshot rate
+
+Performance problems, stuttering, and jank — important
+
+Every save calls `archive.onChange`, which assigns the `@Published library` that
+`PanelRootView` observes, so the whole panel body re-evaluates at the coalesced
+stream rate (~10 Hz) even with history closed. Suggested fix: move the library mirror
+into a nested `ObservableObject` observed only by `HistoryView`. Where:
+ThreadStore.swift:14, 70-77; ResearchEngine.swift:203-215; PanelRootView.swift:23.
+Adjacent A20/N03. Effort: M.
+
+### A114 · `HTMLTextExtractor` runs nine whole-document regex passes plus a greedy match
+
+Performance problems, stuttering, and jank — important
+
+One `NSRegularExpression` per never-prose name over up to 800 KB, then a greedy
+`(.*)` article match with `dotMatchesLineSeparators`. Suggested fix: measure first;
+combine the never-prose names into one alternation and/or replace the greedy article
+match with the existing linear helpers. Where: HTMLTextExtractor.swift:61-223.
+Effort: M.
+
+### A115 · Read targeting is recomputed and re-logged per source per pass
+
+Performance problems, stuttering, and jank — important
+
+`readableTargets` re-parses and re-logs every source on every round, and
+`readPlannedPages` matches requests with `numbers.contains` (O(n·m)). Suggested fix:
+compute the readable set once per source-list rebuild and use a `Set<Int>`. Where:
+ResearchRunner.swift:2460-2518. Effort: S.
+
+### A116 · Attachment intake is synchronous multi-megabyte I/O with no async form
+
+Performance problems, stuttering, and jank — important
+
+Core's `AttachmentIntake.read` does all file reads synchronously and both front ends
+call it from UI-adjacent paths; the macOS pasteboard additionally re-encodes TIFF and
+reads up to 16 MiB files mid-gesture. The write/read of stored bytes at submit/retry
+is C04. Suggested fix: add an async intake entry point that performs the reads off the
+calling actor, keeping the pure policy unchanged. Where: AttachmentIntake.swift:104-220;
+PasteboardIntake.swift:195-205. Effort: M.
+
+### A117 · The progress label says "Searching the web · N of N" while pages are read
+
+Bugs — important
+
+With all searches complete and pages outstanding, `runningProgressLabel` falls
+through to the finished-search label; a link-only plan shows the bare stage label for
+the whole read. Suggested fix: label "Reading pages · N of M" from
+`pagesAttempted`/`pagesRead` when the search stage is done; keep it a computed label
+(no new stage case — old builds must still decode). Where: ResearchModels.swift:609-640.
+Effort: S.
+
+### A118 · The Shortcuts pane never records the selection grant
+
+Bugs — important
+
+`SelectedTextReader.rememberGrant()` is not called from the Shortcuts pane, so the
+row cannot distinguish "never granted" from "reset by an update"
+(`grantWasRevoked()` is only used in the summon alert). Suggested fix: call
+`rememberGrant()` from the pane and use `grantWasRevoked()` in the row. Where:
+ShortcutsView.swift:155. Adjacent A45. Effort: S.
+
+### N25 · Decide the popover policy on the non-activating panel
+
+UX and accessibility — nice-to-have
+
+The citation hover preview uses SwiftUI `.popover` (MarkdownText.swift:142) while
+`PanelRootView` deliberately avoids popovers on the panel. Either popovers are safe
+there (then the level-picker comment overstates the risk) or they are not (then
+citation previews break over full-screen apps). Adjacent A99. Effort: S (decision +
+verification in a full-screen Space).
+
+### N26 · Copy-link on source rows; snippet in the accessibility value
+
+UX and accessibility — nice-to-have
+
+Source rows open the URL on click with only a hover tooltip, and the hover-only
+snippet is invisible to keyboard and VoiceOver. Suggested fix: a hover copy-link
+affordance and `accessibilityValue` carrying the snippet/caveat. Where:
+SourcesView.swift:178-197. Row stability itself is A25. Effort: S.
+
+### N27 · Autocorrection off on the endpoint fields
+
+UX and accessibility — nice-to-have
+
+The model and reader endpoint TextFields lack `.autocorrectionDisabled(true)` (the
+search endpoint has it). Where: ProvidersView.swift:236, 178. Effort: XS.
+
+### N28 · Reveal toggle for the typed key entry only
+
+UX and accessibility — nice-to-have
+
+A typed key cannot be inspected, and a save that fails after the fixed slot was
+deleted leaves the field's text gone. Suggested fix: reveal only the typed entry,
+never the stored secret. Where: ProvidersView.swift:537-545, 620-630. The Test
+action is A55. Effort: S.
+
+### N29 · Settings as a NavigationSplitView sidebar
+
+Visual issues and layout problems — nice-to-have
+
+Five panes in a 560×520 TabView read as an iOS-style window; macOS System Settings
+uses a sidebar. Suggested fix: `NavigationSplitView` with symbol + title rows, no
+behavioural change. Where: SettingsView.swift:18-35. Effort: M.
+
+### N30 · Preview panel on the opposite edge from the Settings window
+
+Visual issues and layout problems — nice-to-have
+
+The Settings live-preview panel can cover the Settings window it is meant to be
+watched from. Suggested fix: place the preview on the opposite screen edge.
+Effort: S.
+
+### N31 · Middle-truncate the header title
+
+Visual issues and layout problems — nice-to-have
+
+Long thread titles lose their beginning under `.tail`; middle truncation reads better
+for questions. Where: PanelHeaderView. Effort: XS.
+
+### N32 · Respect the pinned-to-bottom flag when a turn is added
+
+UX and accessibility — nice-to-have
+
+The answer-change scroll checks `isPinnedToBottom` but the turn-count handler scrolls
+unconditionally, so a retry while scrolled up yanks the view down. Where:
+PanelRootView turn-count `onChange`. Effort: XS.
+
+### N33 · Say "Saved." before the problems list; clear the status on edit
+
+UX and accessibility — nice-to-have
+
+A save-with-problems status shows only the problem text, never "Saved.", and is not
+cleared when a field changes. Where: ProvidersView.swift:702-706. Effort: XS.
+
+### N34 · Save is the window's default action while a Clear can be armed
+
+Bugs — nice-to-have
+
+`Button("Save").keyboardShortcut(.defaultAction)` means Return in a field can commit
+an armed key Clear. Suggested fix: drop the default-action shortcut or guard commit
+while a Clear is armed. Where: ProvidersView.swift:202. Effort: XS.
+
+### N35 · Give the disabled Ask button a reason when the draft is blank
+
+UX and accessibility — nice-to-have
+
+`askDisabledHelp` returns nil for a plain blank draft, so VoiceOver hears only "Ask,
+dimmed". Suggested fix: "Type a question to ask" as help/hint. Where:
+PanelRootView.swift:496-499, 545-551. Effort: XS.
+
+### N36 · Re-ask a turn at a different level
+
+Missing features — nice-to-have
+
+"Ask again" always retries at the stored level. Suggested fix: an "Ask again ▸" menu
+with the four levels on the turn footer. Where: ResearchSession.retry, TurnView
+footer. (D08 is the "not settled" re-ask — different.) Effort: S.
+
+### N37 · Quote the selected answer passage into a follow-up
+
+Missing features — nice-to-have
+
+The answer prose is selectable and the composer-seed notification path exists with
+redaction metadata; there is no gesture that turns a selected sentence into a
+follow-up. Suggested fix: a context-menu item / `PanelCommand` posting the seed
+notification with the selected substring; submission stays explicit. Where:
+TurnView.swift:186-205, PanelRootView.swift:200-215. Effort: M.
+
+### D10 · Live evidence-budget meter in the panel header
+
+Delight — nice-to-have
+
+"12/18 sources · 3/5 pages · 70k chars" derived from existing turn fields makes the
+level choice legible and turns an invisible constant into a visible spend. Where:
+ResearchRunner.swift:690-710 (droppedSources, withheldPageText, pagesRead/Attempted);
+render in ProcessTrailView. Effort: M.
+
+### D11 · Draft-vs-revised diff toggle
+
+Delight — nice-to-have
+
+A pure line/word diff over `draftAnswer` vs `answer`, rendered as an expandable
+secondary view — the most compact proof the check-and-revise stage ran. Where:
+ResearchModels.swift, ResearchRunner.swift:2039-2110. Effort: M.
+
+### D12 · ⌘1..⌘4 to cycle the research level in the panel
+
+Delight — nice-to-have
+
+Currently only the chip or a typed command. Effort: S.
+
+### N38 · Surface the load-time prune in the app, not only on stderr
+
+UX and accessibility — nice-to-have
+
+Lowering `keptThreads` between launches trims the in-memory library and explains the
+recovery path only through `FileHandle.standardError` (ThreadArchive.swift:214) —
+a Dock-launched app has no terminal, so "where did my threads go" is unanswerable in
+the app, on the one destructive path with no user gesture behind it. Suggested fix:
+carry a `trimmedOnLoadCount` on the archive and show it beside the History/Settings
+thread counter with the "raise the limit and relaunch" guidance. Adjacent A12.
+Effort: S.
+
+### D13 · Warn on a duplicate question and offer the earlier answer
+
+Delight — nice-to-have
+
+Before spending a run, a normalized exact/near-exact question match against
+`ThreadLibrary` could offer "You asked this on <date> — reopen, or compare" instead of
+producing two slightly different answers to the same question. Suggested fix:
+match on a case/whitespace/punctuation-folded question across threads; on a hit show
+a non-blocking Reopen / Ask anyway / Compare prompt. Never auto-send or silently
+substitute the old answer. Where: ThreadLibrary.swift:118, ResearchEngine ask path.
+Effort: M.
