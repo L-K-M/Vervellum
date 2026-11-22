@@ -186,32 +186,20 @@ final class HotkeyBindingTests: XCTestCase {
         }
     }
 
-    /// Option and Option-Shift are how accented and alternate characters are
-    /// typed, so a global registration on them would eat text composition
-    /// everywhere. Function keys and Command/Control combinations are safe.
-    func testOptionOnlyCharacterChordsAreRefused() {
+    /// Option-only chords type characters in some apps and are also common summon
+    /// shortcuts. They stay registerable, so a saved ⌥Space survives an upgrade.
+    func testOptionOnlyShortcutsStayAllowed() {
         let option = UInt32(optionKey)
         for modifiers in [option, option | UInt32(shiftKey)] {
-            let binding = HotkeyBinding(keyCode: KeyCode.c, modifiers: modifiers,
-                                        keyLabel: "C", enabled: true)
-            XCTAssertFalse(binding.isValid)
-            XCTAssertTrue(binding.isOptionOnlyCharacterShortcut)
-            XCTAssertNotNil(binding.registrationProblem)
+            for keyCode in [UInt32(kVK_Space), KeyCode.c, KeyCode.leftArrow] {
+                let saved = HotkeyBinding(keyCode: keyCode, modifiers: modifiers,
+                                          keyLabel: "X", enabled: true)
+                let decoded = HotkeyBinding.decode(saved.jsonString, fallback: .defaultSummon)
+                XCTAssertEqual(decoded, saved)
+                XCTAssertTrue(decoded.isValid, "\(modifiers) \(keyCode) should stay allowed")
+                XCTAssertNil(decoded.registrationProblem)
+            }
         }
-        XCTAssertTrue(HotkeyBinding(keyCode: KeyCode.f12, modifiers: option,
-                                    keyLabel: "F12", enabled: true).isValid,
-                      "⌥F12 does not type a character")
-        XCTAssertFalse(HotkeyBinding(keyCode: KeyCode.leftArrow, modifiers: option,
-                                     keyLabel: "←", enabled: true).isValid,
-                       "⌥← is word-wise navigation, not a command")
-        XCTAssertTrue(HotkeyBinding(keyCode: KeyCode.c,
-                                    modifiers: option | UInt32(cmdKey),
-                                    keyLabel: "C", enabled: true).isValid,
-                      "⌥⌘C is not a typing chord")
-        XCTAssertTrue(HotkeyBinding(keyCode: KeyCode.leftArrow,
-                                    modifiers: option | UInt32(cmdKey),
-                                    keyLabel: "←", enabled: true).isValid,
-                      "⌥⌘← is not a typing chord")
     }
 
     /// The property that refuses a chord and the sentence the pane shows for it are
@@ -240,7 +228,7 @@ final class HotkeyBindingTests: XCTestCase {
         let groundTruth: [(modifiers: UInt32, key: UInt32, expectedValid: Bool)] = [
             (UInt32(cmdKey), KeyCode.c, false),              // ⌘C is a system editing chord
             (UInt32(shiftKey), KeyCode.a, false),            // ⇧A is ordinary typing
-            (UInt32(optionKey), KeyCode.c, false),           // ⌥C types a character
+            (UInt32(optionKey), KeyCode.c, true),            // Option-only stays allowed
             (UInt32(controlKey | cmdKey), KeyCode.c, true),  // ⌃⌘C collides with nothing
             (UInt32(0), KeyCode.f12, true),                  // bare F-key stays registerable
         ]

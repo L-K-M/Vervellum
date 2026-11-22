@@ -40,10 +40,14 @@ struct HotkeyBinding: Codable, Equatable {
     /// rule refuses the OS-owned ⌘Q/W/H/M/Space/Tab (and ⇧⌘3–6) so a registration
     /// cannot swallow them, and accepts bare F1–F20 because function keys do not
     /// collide with typing. A Shift-only chord is still ordinary text.
-    /// Vervellum adds two rules of its own on top of Keycap's, because a global
+    /// Vervellum adds one rule of its own on top of Keycap's, because a global
     /// hotkey is registered with Carbon for the whole system rather than for this
-    /// app: a chord that an editor treats as ordinary typing would be swallowed
-    /// everywhere, not only while the panel is open.
+    /// app: an editing command would be swallowed everywhere, not only while the
+    /// panel is open.
+    ///
+    /// Option-only chords stay allowed, though some of them type a character. They
+    /// are common summon shortcuts (⌥Space), and refusing them would switch off
+    /// shortcuts people already have saved, with a warning only Settings shows.
     ///
     /// Derived from `registrationProblem` rather than re-listing the rules, so the
     /// property that refuses a chord and the sentence the Shortcuts pane shows for
@@ -69,21 +73,6 @@ struct HotkeyBinding: Codable, Equatable {
         return Self.protectedEditingKeys.contains(keyCode)
     }
 
-    /// Whether this is Option, alone or with Shift, on a non-function key.
-    ///
-    /// Option is a *typing* modifier: ⌥← and ⌥C are text composition and
-    /// deletion, not commands. Capturing one globally would quietly eat those
-    /// keys in every app, and ⌥⇧ letters are accented characters on many
-    /// layouts. Option with Command or Control, or on a function key, does not
-    /// collide with typing and stays allowed.
-    var isOptionOnlyCharacterShortcut: Bool {
-        let modifiers = combo.modifiers
-        guard modifiers.contains(.option),
-              modifiers.intersection([.command, .control]).isEmpty
-        else { return false }
-        return !KeyCode.isFunctionKey(keyCode)
-    }
-
     /// Why this binding cannot be registered, in words the Shortcuts pane can
     /// show; nil when it can be registered. The recorder is Keycap's, so it
     /// accepts a combo this property refuses — the warning beside it is what
@@ -93,10 +82,6 @@ struct HotkeyBinding: Codable, Equatable {
         if isProtectedEditingShortcut {
             return "\(displayString) is a system editing shortcut, so Vervellum doesn't "
                 + "register it globally. Record a different one."
-        }
-        if isOptionOnlyCharacterShortcut {
-            return "\(displayString) types a character with the Option key, so Vervellum "
-                + "doesn't register it globally. Record a different one."
         }
         if !combo.isUsableGlobalHotkey {
             return "\(displayString) can't be used as a global shortcut, so Vervellum "

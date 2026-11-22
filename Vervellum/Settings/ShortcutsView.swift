@@ -98,7 +98,7 @@ struct ShortcutsView: View {
     /// Why a stored shortcut is not registered even though the system would take it.
     ///
     /// `HotkeyBinding.registrationProblem` names every rule this app applies,
-    /// including the editing and Option-typing chords Keycap's rule allows. A
+    /// including the editing chords Keycap's rule allows. A
     /// binding those rules refuse is never attempted, and the registration state
     /// says nothing about it — without this line the shortcut looks configured and
     /// silently never fires.
