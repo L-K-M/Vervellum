@@ -2253,11 +2253,15 @@ final class ResearchRunner: ResearchRunning {
     /// introduce fetched text into a field the URL already answers.
     static func linkTitle(for url: String) -> String {
         guard let components = URLComponents(string: url), let host = components.host else {
-            return ResearchContext.shorten(url, to: 120)
+            return HostileText.stripped(ResearchContext.shorten(url, to: 120))
         }
         let name = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
         let path = components.path
-        return ResearchContext.shorten(path.isEmpty || path == "/" ? name : name + path, to: 120)
+        // `components.path` percent-decodes, so a pasted link can smuggle a bidi override
+        // (…%E2%80%AE) or a NUL into the title through the path; strip like every other
+        // displayed field. The title is what the source list shows, never a fetch target.
+        return HostileText.stripped(
+            ResearchContext.shorten(path.isEmpty || path == "/" ? name : name + path, to: 120))
     }
 
     /// Reads the pages the question linked to, and turns the ones that answered into
