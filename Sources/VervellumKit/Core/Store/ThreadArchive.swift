@@ -305,6 +305,14 @@ final class ThreadArchive {
                 // bytes that no longer exist. Drop it here rather than letting a
                 // later retry act on a warning the erase made moot.
                 recordFailures(save: nil, backup: nil)
+                // A staging copy left by a failed rotation holds the pre-erase
+                // primary: finishing it later would move deleted threads back
+                // into the backup, and a stale slot would make the next
+                // rotation report a failure that never happened. Removed even
+                // when the in-memory slot is nil, because a crash can leave the
+                // file without the slot.
+                try? fileManager.removeItem(at: backupURL.appendingPathExtension("tmp"))
+                pendingBackupStaging = nil
             }
         }
         // Reported, not swallowed. "History off means the bytes are gone" is a promise

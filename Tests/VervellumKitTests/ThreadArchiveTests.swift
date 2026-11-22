@@ -834,11 +834,16 @@ final class ThreadArchiveTests: XCTestCase {
         store.save(thread("three"))
         store.flush()
         XCTAssertNotNil(store.storageFailures().backup, "the rotation should have failed")
+        XCTAssertNil(store.storageFailures().save,
+                     "the threads themselves were written; only the backup failed")
 
         manager.deniedPaths.removeAll()
         store.deleteAll()
         XCTAssertNil(store.storageFailures().backup,
                      "the erased document's backup warning is moot")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: fileURL.appendingPathExtension("bak.tmp").path),
+                       "a staging copy holding deleted threads must not outlive the erase")
     }
 
     /// When no staging copy survived, the retry falls back to rotating the current
