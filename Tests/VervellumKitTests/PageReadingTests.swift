@@ -625,9 +625,11 @@ final class PageReadingTests: XCTestCase {
 
     /// A bogus `xcharset=` token is skipped in favour of the real parameter that follows.
     func testARealCharsetParameterAfterABogusTokenIsHonoured() {
-        let text = "<p>ok</p>"
-        XCTAssertEqual(DirectPageReader.decode(Data(text.utf8),
-                                              contentType: "text/html; xcharset=utf-16le; charset=utf-8"),
+        // BOM-less UTF-16LE bytes: the UTF-8-first sniffing fallback would return a
+        // NUL-filled string, so only honouring the real `charset=utf-16le` passes.
+        let bytes = "<p>ok</p>".data(using: .utf16LittleEndian)!
+        XCTAssertEqual(DirectPageReader.decode(bytes,
+                                              contentType: "text/html; xcharset=utf-8; charset=utf-16le"),
                        "<p>ok</p>")
     }
 
