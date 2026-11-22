@@ -7,6 +7,8 @@ extension Notification.Name {
     /// summon. The hosting view is reused between summons and SwiftUI's `.onAppear`
     /// does not reliably re-fire for a view that never left the hierarchy.
     static let vervellumPanelDidShow = Notification.Name("VervellumPanelDidShowNotification")
+    /// History closed while the panel is still visible; the composer takes focus back.
+    static let vervellumComposerShouldClaimFocus = Notification.Name("VervellumComposerShouldClaimFocusNotification")
     /// Posted when the panel is about to hide, so views can drop transient state.
     static let vervellumPanelWillHide = Notification.Name("VervellumPanelWillHideNotification")
 }
@@ -34,6 +36,7 @@ final class PanelController {
     private var panel: ResearchPanel?
     private var keyMonitor: Any?
     private var resignObserver: NSObjectProtocol?
+    private var becomeKeyObserver: NSObjectProtocol?
     private weak var appToRestoreOnClose: NSRunningApplication?
     /// Whether `show()` captured an app to restore. Distinguishes "the captured app
     /// quit while the panel was open" (restore is nil but this is true → fall back to
@@ -76,6 +79,11 @@ final class PanelController {
     /// multi-display desk.
     func toggle() {
         guard isOpen, let panel else { show(); return }
+        // A previewing panel is visible but unfocused — the user has never been
+        // *in* it, so "visible" cannot mean "summoned, dismiss it". The summon
+        // gesture on a preview means "let me use this": take focus. `focus` ends
+        // the preview, so Settings closing later will not hide a panel in use.
+        if isPreviewing { focus(panel); return }
         let target = Self.screenUnderPointer()
         if let target, panel.screen !== target {
             place(panel, on: target, animated: true)
@@ -121,11 +129,19 @@ final class PanelController {
         if !isOpen {
             installKeyMonitor()
             installResignObserver(for: panel)
+            installBecomeKeyObserver(for: panel)
             isOpen = true
         }
     }
 
     // MARK: Live settings
+
+    /// The side/width/height the open panel was last placed with. After a header drag
+    /// the panel's frame no longer matches the preference-derived one, so comparing
+    /// frames — as `preferencesDidChange` used to — would snap the dragged position
+    /// back on every unrelated preference write. Comparing the geometry instead
+    /// re-places only when a placement preference actually changed.
+    private var placedGeometry: (side: PanelSide, width: CGFloat, height: CGFloat)?
 
     /// Re-places an open panel from the current preferences.
     ///
@@ -133,16 +149,21 @@ final class PanelController {
     /// the only way to see what a width slider did was to close the panel and summon it
     /// again — which is exactly the moment the comparison is no longer in front of you.
     ///
-    /// Unanimated, and a no-op when the frame is unchanged. A slider drag emits a change
-    /// per pixel; animating each one leaves several animations fighting over the same
-    /// window, and re-setting an identical frame makes AppKit redraw the hosted SwiftUI
-    /// tree for nothing.
+    /// Unanimated, and a no-op when neither the placement preferences nor the frame
+    /// changed. A slider drag emits a change per pixel; animating each one leaves
+    /// several animations fighting over the same window, and re-setting an identical
+    /// frame makes AppKit redraw the hosted SwiftUI tree for nothing.
     func preferencesDidChange() {
         guard isOpen, let panel, let screen = panel.screen ?? NSScreen.main else { return }
+        let geometry = (side: preferences.panelSide,
+                        width: preferences.panelWidth,
+                        height: preferences.panelHeight)
+        if let placed = placedGeometry, placed == geometry { return }
+        placedGeometry = geometry
         let frame = PanelPlacement.frame(in: screen.visibleFrame,
-                                         side: preferences.panelSide,
-                                         width: preferences.panelWidth,
-                                         height: preferences.panelHeight)
+                                         side: geometry.side,
+                                         width: geometry.width,
+                                         height: geometry.height)
         guard frame != panel.frame else { return }
         panel.setFrame(frame, display: true)
     }
@@ -230,11 +251,17 @@ final class PanelController {
 
     private func place(_ panel: ResearchPanel, on screen: NSScreen?, animated: Bool) {
         guard let screen = screen ?? NSScreen.main else { return }
-        let side = preferences.panelSide
+        // One snapshot of the placement preferences, so the recorded geometry and the
+        // applied frame can never come from two different reads.
+        let geometry = (side: preferences.panelSide,
+                        width: preferences.panelWidth,
+                        height: preferences.panelHeight)
+        let side = geometry.side
+        placedGeometry = geometry
         let frame = PanelPlacement.frame(in: screen.visibleFrame,
                                          side: side,
-                                         width: preferences.panelWidth,
-                                         height: preferences.panelHeight)
+                                         width: geometry.width,
+                                         height: geometry.height)
         guard animated else {
             panel.setFrame(frame, display: true)
             panel.alphaValue = 1
@@ -266,6 +293,9 @@ final class PanelController {
         // without this the composer would show a caret and receive nothing.
         NSApp.activate()
         panel.makeKey()
+        // `setPreviewing(false)` would hide the panel. Only transfer ownership
+        // after it really became key; the observer covers a later key transition.
+        if panel.isKeyWindow { isPreviewing = false }
         NotificationCenter.default.post(name: .vervellumPanelDidShow, object: nil)
     }
 
@@ -303,6 +333,16 @@ final class PanelController {
         }
     }
 
+    /// A preview can become key by clicking it as well as through the summon key.
+    /// Either action makes it the user's panel, so Settings closing cannot take it away.
+    private func installBecomeKeyObserver(for panel: ResearchPanel) {
+        becomeKeyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main
+        ) { [weak self] _ in
+            self?.isPreviewing = false
+        }
+    }
+
     /// Escape, and the shortcuts that only make sense while the panel is up.
     ///
     /// A local monitor rather than SwiftUI key handling: the panel hosts a text view,
@@ -332,6 +372,10 @@ final class PanelController {
         if let resignObserver {
             NotificationCenter.default.removeObserver(resignObserver)
             self.resignObserver = nil
+        }
+        if let becomeKeyObserver {
+            NotificationCenter.default.removeObserver(becomeKeyObserver)
+            self.becomeKeyObserver = nil
         }
     }
 
