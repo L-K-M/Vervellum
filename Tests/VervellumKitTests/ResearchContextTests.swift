@@ -326,4 +326,11 @@ final class ResearchContextTests: XCTestCase {
         XCTAssertEqual(text.count, 10)
         XCTAssertEqual(text.filter { $0 == "-" }.count, 2)
     }
+
+    func testMarkerStrippingHandlesWideRangesAndKeepsYears() {
+        XCTAssertEqual(ResearchContext.withoutCitationMarkers("True [1-999999999]."), "True.")
+        XCTAssertEqual(ResearchContext.withoutCitationMarkers("True [1000] [1-3]."), "True.")
+        XCTAssertEqual(ResearchContext.withoutCitationMarkers("Restated in [2023] [2]."),
+                       "Restated in [2023].")
+    }
 }

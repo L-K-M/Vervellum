@@ -101,11 +101,12 @@ final class CitationValidatorTests: XCTestCase {
     }
 
     /// An endpoint past the source list is an invented number, exactly as a bare
-    /// `[99]` is; the in-range part of the range still cites.
+    /// `[99]` is; the in-range part of the range still cites. Only the bound is
+    /// reported, so a wide range costs nothing per number it skips.
     func testFlagsAnOutOfRangeRangeEndpoint() {
         let result = CitationValidator.validate(answer: "Mixed [1-5].", sourceCount: 2)
         XCTAssertEqual(result.citedSourceIndices, [0, 1])
-        XCTAssertEqual(result.outOfRangeCitations, [3, 4, 5])
+        XCTAssertEqual(result.outOfRangeCitations, [5])
         XCTAssertFalse(result.isClean)
     }
 
@@ -156,6 +157,114 @@ final class CitationValidatorTests: XCTestCase {
         XCTAssertEqual(spaced.citedSourceIndices, [0, 1, 2])
         XCTAssertTrue(spaced.invalidCitationGroups.isEmpty)
         XCTAssertTrue(spaced.isClean)
+    }
+
+    func testRangeAllowsSpacesAroundTheDash() {
+        let result = CitationValidator.validate(answer: "Spaced [1 - 3].", sourceCount: 5)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1, 2])
+        XCTAssertTrue(result.outOfRangeCitations.isEmpty)
+    }
+
+    /// A range that reaches past the list cites the part that exists and says which
+    /// bound did not, rather than reporting every number in between.
+    func testRangePastTheSourceCountIsFlaggedAtTheBound() {
+        let result = CitationValidator.validate(answer: "Too far [1-300].", sourceCount: 5)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1, 2, 3, 4])
+        XCTAssertEqual(result.outOfRangeCitations, [300])
+    }
+
+    func testRangeBelowOneIsFlaggedAtTheBound() {
+        let result = CitationValidator.validate(answer: "From zero [0-2].", sourceCount: 2)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1])
+        XCTAssertEqual(result.outOfRangeCitations, [0])
+    }
+
+    func testRangeWithNoSourcesIsFlagged() {
+        let result = CitationValidator.validate(answer: "Nothing [1-2].", sourceCount: 0)
+        XCTAssertEqual(result.citedSourceIndices, [])
+        XCTAssertEqual(result.outOfRangeCitations, [2])
+    }
+
+    /// A marker may name a source twice, and the chip is drawn from the rendered
+    /// list — so a repeat would show `[1,2,3,2]`.
+    func testARepeatedSourceInsideAMarkerIsCitedOnce() {
+        let result = CitationValidator.validate(answer: "Overlap [1-3, 2].", sourceCount: 3)
+        XCTAssertEqual(result.citedSourceIndices, [0, 1, 2])
+        XCTAssertEqual(result.spans, [.text("Overlap "),
+                                      .citation(sourceIndices: [0, 1, 2], raw: "[1-3, 2]"),
+                                      .text(".")])
+    }
+
+    /// A marker with more digits than the source list could ever hold — `[1000]` against
+    /// 24 sources — is an invented citation too, and must be flagged, not silently left
+    /// as text. The regex used to cap numbers at three digits, so exactly these evaded
+    /// `outOfRangeCitations`.
+    func testFlagsFourDigitInventedCitations() {
+        let result = CitationValidator.validate(answer: "As shown [1000], and [2, 4321].",
+                                                sourceCount: 24)
+        XCTAssertEqual(result.outOfRangeCitations, [1000, 4321])
+        XCTAssertFalse(result.isClean)
+        // The all-invented marker degrades to plain text; the partly-valid one stays a
+        // chip for the number that is real.
+        XCTAssertTrue(result.spans.contains(.text("[1000]")))
+        XCTAssertTrue(result.spans.contains(.citation(sourceIndices: [1], raw: "[2, 4321]")))
+        XCTAssertEqual(result.citedSourceIndices, [1])
+    }
+
+    /// A four-digit marker that IS in range of a large source list must stay a valid
+    /// chip — the regex must never encode a digit-count limit of its own.
+    func testAcceptsFourDigitCitationWithinRangeOfLargeSourceList() {
+        let result = CitationValidator.validate(answer: "See [1000].", sourceCount: 5000)
+        XCTAssertEqual(result.outOfRangeCitations, [])
+        XCTAssertTrue(result.spans.contains(.citation(sourceIndices: [999], raw: "[1000]")))
+        XCTAssertEqual(result.citedSourceIndices, [999])
+    }
+
+    /// A digit run too large for `Int` (and a non-ASCII digit that ICU's `\d` matches
+    /// but `Int` rejects) are invented citations too: they must be flagged, not
+    /// silently passed as plain text.
+    func testFlagsOverflowingAndNonAsciiDigitCitations() {
+        let result = CitationValidator.validate(
+            answer: "A [99999999999999999999] and a [٣].", sourceCount: 24)
+        XCTAssertEqual(result.outOfRangeCitations, [.max, .max])
+        XCTAssertFalse(result.isClean)
+        XCTAssertTrue(result.spans.contains(.text("[99999999999999999999]")))
+        XCTAssertTrue(result.spans.contains(.text("[٣]")))
+    }
+
+    /// A bracketed year is how prose dates a work. No source list is long enough to
+    /// have a source 2023, so reading one as a citation only raises a false alarm.
+    func testBracketedYearsAreProse() {
+        for marker in ["[2023]", "[1500]", "[2100]", "[2019-2024]", "[2019–2024]",
+                       "[2019, 2021]", "[2019,\n2021]"] {
+            let answer = "As restated in \(marker)."
+            for sourceCount in [24, Int.max] {
+                let result = CitationValidator.validate(answer: answer, sourceCount: sourceCount)
+                XCTAssertEqual(result.spans, [.text(answer)], marker)
+                XCTAssertTrue(result.citedSourceIndices.isEmpty, marker)
+                XCTAssertTrue(result.isClean, marker)
+            }
+        }
+    }
+
+    /// The exemption is for years alone: a number outside the plausible span, a
+    /// backwards span, or a year sharing a marker with a source is still checked.
+    func testOnlyPlausibleYearsAloneAreExempt() {
+        for marker in ["[1499]", "[2101]", "[4321]", "[02023]", "[20231]", "[2024-2019]",
+                       "[1, 2023]", "[2023, 1]", "[1-2023]"] {
+            let result = CitationValidator.validate(answer: "Claim \(marker).", sourceCount: 24)
+            XCTAssertFalse(result.isClean, marker)
+        }
+    }
+
+    /// History stripping validates against `Int.max`, so clamping to the source count
+    /// alone would let one marker allocate for every number it spans.
+    func testARangeTooWideForAnySourceListIsBoundedAndReported() {
+        for marker in ["[1-4000000]", "[1-\(Int.max)]"] {
+            let result = CitationValidator.validate(answer: marker, sourceCount: Int.max)
+            XCTAssertEqual(result.citedSourceIndices.count, CitationValidator.maximumRangeExpansion, marker)
+            XCTAssertFalse(result.invalidCitationGroups.isEmpty, "a bounded range must not be silently cut")
+        }
     }
 
     /// An out-of-range number is a fabricated citation. It must be reported, and the

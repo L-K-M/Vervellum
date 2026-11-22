@@ -2146,17 +2146,15 @@ final class ResearchRunner: ResearchRunning {
         // draft did not. Otherwise an uncited draft and uncited rewrite evade a relative
         // "did it lose citations?" check together.
         let revisionCitedSomething = !validation.citedSourceIndices.isEmpty
-        guard validation.outOfRangeCitations.isEmpty,
-              validation.forbiddenLinks.isEmpty,
-              revisionCitedSomething
-        else {
-            // Which clause fired, because the three are different stories. Two are a
-            // reviser breaking a rule it was given; the third is the un-citing guard,
+        guard validation.isClean, revisionCitedSomething else {
+            // Which clause fired, because they are different stories. All but the last
+            // are a reviser breaking a rule it was given; the last is the un-citing guard,
             // which is the only one that can also refuse a *correct* rewrite — one that
             // weakened every flagged claim and legitimately dropped its numbers. It fails
             // soft either way, so the only way to know how often that happens is to say
             // which branch it was.
             let broken = !validation.outOfRangeCitations.isEmpty ? "a source number that does not exist"
+                : !validation.invalidCitationGroups.isEmpty ? "a citation that could not be read"
                 : !validation.forbiddenLinks.isEmpty ? "a forbidden link in the prose"
                 : "no citation at all"
             trace.warn("Revision discarded: \(broken)")
