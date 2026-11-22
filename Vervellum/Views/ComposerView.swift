@@ -91,7 +91,11 @@ struct ComposerView: NSViewRepresentable {
         textView.setAccessibilityLabel("Question")
         textView.setAccessibilityHelp(placeholder)
         textView.allowsUndo = true
-        textView.font = .systemFont(ofSize: Self.baseFontSize * Self.sane(scale))
+        // The theme's font design, not just the size: every other text surface goes
+        // through PanelTheme.NativeFont, and the composer is where the user is looking
+        // while typing — a Serif/Rounded theme that did not reach the typed text would
+        // jump face at the moment the question is submitted.
+        textView.font = PanelTheme.NativeFont.at(Self.baseFontSize, Self.sane(scale))
         textView.textContainerInset = NSSize(width: 4, height: 6)
         textView.drawsBackground = false
         textView.isVerticallyResizable = true
@@ -146,7 +150,7 @@ struct ComposerView: NSViewRepresentable {
         // from the same scale in the same frame — so if it ever did not, the box and the
         // glyphs inside it would disagree until the draft was retyped. This makes that
         // impossible to get wrong rather than relying on the setter's reach.
-        let wanted = NSFont.systemFont(ofSize: Self.baseFontSize * Self.sane(scale))
+        let wanted = PanelTheme.NativeFont.at(Self.baseFontSize, Self.sane(scale))
         if textView.font != wanted {
             textView.font = wanted
             let whole = NSRange(location: 0, length: (textView.string as NSString).length)
@@ -166,7 +170,7 @@ struct ComposerView: NSViewRepresentable {
     /// The height the composer wants for its current content, clamped.
     static func height(for text: String, width: CGFloat, scale: Double = 1.0) -> CGFloat {
         let storage = NSTextStorage(string: text.isEmpty ? " " : text,
-                                    attributes: [.font: NSFont.systemFont(ofSize: baseFontSize * sane(scale))])
+                                    attributes: [.font: PanelTheme.NativeFont.at(baseFontSize, sane(scale))])
         let container = NSTextContainer(size: NSSize(width: max(width - 8, 1),
                                                     height: .greatestFiniteMagnitude))
         container.lineFragmentPadding = 5
@@ -412,7 +416,7 @@ final class ComposerTextView: NSTextView {
         super.draw(dirtyRect)
         guard string.isEmpty, let placeholder = coordinator?.parent.placeholder else { return }
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font ?? NSFont.systemFont(ofSize: ComposerView.baseFontSize),
+            .font: font ?? PanelTheme.NativeFont.at(ComposerView.baseFontSize, 1),
             .foregroundColor: NSColor.tertiaryLabelColor,
         ]
         let origin = NSPoint(x: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 5),

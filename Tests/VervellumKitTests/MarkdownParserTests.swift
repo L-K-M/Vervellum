@@ -92,6 +92,58 @@ final class MarkdownParserTests: XCTestCase {
         XCTAssertEqual(blocks[0].text, "# not a heading\n- not a bullet")
     }
 
+    /// A longer opener is closed only by a run at least as long. A three-backtick line
+    /// inside a four-backtick fence is content, not a closer.
+    func testALongerOpenerIsNotClosedByAShorterRun() {
+        let blocks = MarkdownParser.parse("````\n```\n````")
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks[0].kind, .code(language: ""))
+        XCTAssertEqual(blocks[0].text, "```")
+    }
+
+    /// The marker must match: a tilde fence is not closed by backticks.
+    func testAFenceIsClosedOnlyByTheSameMarker() {
+        let blocks = MarkdownParser.parse("~~~\n```\n~~~")
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks[0].text, "```")
+    }
+
+    /// A closer carrying a language label is content, not a closer.
+    func testACloserWithALabelIsNotACloser() {
+        let blocks = MarkdownParser.parse("```\n```swift\n```")
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks[0].text, "```swift")
+    }
+
+    /// The info string is everything after the whole opening run. A four-backtick
+    /// opener with a language is a block in that language, not one whose language is
+    /// "`swift".
+    func testTheInfoStringFollowsTheWholeOpeningRun() {
+        let blocks = MarkdownParser.parse("````swift\nlet x = 1\n````")
+        XCTAssertEqual(blocks[0].kind, .code(language: "swift"))
+    }
+
+    /// CommonMark §4.4: a backtick fence's info string may not contain a backtick, so
+    /// a line that begins with three backticks and an inline-code span is paragraph text.
+    func testABacktickInTheInfoStringIsNotAFence() {
+        let blocks = MarkdownParser.parse("``` `lang`\nplain")
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks[0].kind, .paragraph)
+        XCTAssertTrue(blocks[0].text.contains("``` `lang`"))
+        XCTAssertTrue(blocks[0].text.contains("plain"))
+        // A tilde fence has no such rule, so the same shape is still a code block.
+        let tilde = MarkdownParser.parse("~~~ `lang`\nplain\n~~~")
+        XCTAssertEqual(tilde.count, 1)
+        XCTAssertEqual(tilde[0].kind, .code(language: "`lang`"))
+    }
+
+    /// A closer may be longer than the opening run; it still closes.
+    func testACloserMayBeLongerThanTheOpener() {
+        let blocks = MarkdownParser.parse("````\nx\n`````")
+        XCTAssertEqual(blocks.count, 1)
+        XCTAssertEqual(blocks[0].text, "x")
+    }
+
     func testParsesHorizontalRules() {
         XCTAssertEqual(MarkdownParser.parse("---").first?.kind, .rule)
         XCTAssertEqual(MarkdownParser.parse("***").first?.kind, .rule)
