@@ -124,21 +124,25 @@ struct ThreadLibrary: Codable, Equatable {
     func search(_ query: String) -> [ResearchThread] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return threads }
-        return threads.filter { thread in
-            thread.turns.contains { turn in
-                turn.question.range(of: needle, options: .caseInsensitive) != nil
-                    || turn.answer.range(of: needle, options: .caseInsensitive) != nil
-                    || turn.limitations.range(of: needle, options: .caseInsensitive) != nil
-                    || turn.followups.contains { $0.range(of: needle, options: .caseInsensitive) != nil }
-                    || turn.findings.contains { finding in
-                        finding.claim.range(of: needle, options: .caseInsensitive) != nil
-                            || finding.reasoning.range(of: needle, options: .caseInsensitive) != nil
-                    }
-                    || turn.sources.contains { source in
-                        source.title.range(of: needle, options: .caseInsensitive) != nil
-                            || source.url.range(of: needle, options: .caseInsensitive) != nil
-                    }
-            }
+        return threads.filter { Self.matches($0, needle: needle) }
+    }
+
+    /// Shared with the desktop history filter, which searches one thread at a
+    /// time so superseded queries can release the worker between threads.
+    static func matches(_ thread: ResearchThread, needle: String) -> Bool {
+        thread.turns.contains { turn in
+            turn.question.range(of: needle, options: .caseInsensitive) != nil
+                || turn.answer.range(of: needle, options: .caseInsensitive) != nil
+                || turn.limitations.range(of: needle, options: .caseInsensitive) != nil
+                || turn.followups.contains { $0.range(of: needle, options: .caseInsensitive) != nil }
+                || turn.findings.contains { finding in
+                    finding.claim.range(of: needle, options: .caseInsensitive) != nil
+                        || finding.reasoning.range(of: needle, options: .caseInsensitive) != nil
+                }
+                || turn.sources.contains { source in
+                    source.title.range(of: needle, options: .caseInsensitive) != nil
+                        || source.url.range(of: needle, options: .caseInsensitive) != nil
+                }
         }
     }
 }

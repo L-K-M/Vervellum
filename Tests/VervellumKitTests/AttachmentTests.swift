@@ -299,6 +299,21 @@ final class AttachmentTests: XCTestCase {
         XCTAssertFalse(decoded.name.isEmpty, "something has to be shown in the panel")
     }
 
+    /// A negative size is not a size. A damaged document must not be able to put
+    /// "-5 bytes" in a chip or corrupt the accounting built on `byteCount`; zero is
+    /// the honest reading of a value this build cannot trust.
+    func testANegativeByteCountDecodesAsZero() throws {
+        let id = UUID()
+        let negative = """
+            {"id":"\(id.uuidString)","kind":"image","name":"shot.png",
+             "mediaType":"image/png","byteCount":-5}
+            """
+        let decoded = try JSONDecoder().decode(Attachment.self, from: Data(negative.utf8))
+        XCTAssertEqual(decoded.byteCount, 0)
+        XCTAssertEqual(decoded.sizeDescription, "0 bytes")
+        XCTAssertEqual(decoded.name, "shot.png")
+    }
+
     /// Sanitising a sanitised name changes nothing, which is what lets the decoder run
     /// every name through `displayName` without the one it wrote coming back different.
     ///
