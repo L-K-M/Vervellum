@@ -14,7 +14,9 @@ final class PreferencesTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        defaults.removePersistentDomain(forName: suiteName)
+        SuitePlistCleanup.removeSuite(suiteName, from: defaults)
+        defaults = nil
+        suiteName = nil
     }
 
     func testDefaultsAreReturnedForAnEmptyStore() {

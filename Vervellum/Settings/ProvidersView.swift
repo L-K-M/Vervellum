@@ -420,8 +420,9 @@ struct ProvidersView: View {
         catalogues[profile.id] = .loading
         let typed = (keyEntries[profile.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let cleared = modelKeysToClear.contains(profile.id)
-        let key = cleared ? nil
-            : (typed.isEmpty ? keychain.value(for: profile.secretAccount) : typed)
+        let key = ProviderCredentialCommit.catalogKey(
+            for: profile, saved: preferences.providerSettings,
+            edit: credentialEdit(typed, cleared: cleared), secrets: keychain)
         let client = ModelCatalogClient(url: url, apiKey: key,
                                         trace: ResearchTrace(sink: SilentLog()))
         do {
