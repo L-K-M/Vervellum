@@ -89,7 +89,7 @@ struct TurnView: View, Equatable {
 
             if !turn.findings.isEmpty {
                 FindingsView(findings: turn.findings, sources: turn.sources) { source in
-                    if let url = URL(string: source.url) { NSWorkspace.shared.open(url) }
+                    if let url = SourceHarvester.openableURL(source.url) { NSWorkspace.shared.open(url) }
                 }
             } else if turn.stage == .assessing {
                 Label("Checking the answer's claims…", systemImage: "checkmark.seal")
