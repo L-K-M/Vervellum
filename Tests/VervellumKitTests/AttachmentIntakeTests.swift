@@ -44,6 +44,21 @@ final class AttachmentIntakeTests: XCTestCase {
     /// that got as far as its bytes, not one that will be kept: every one of them can
     /// still be refused when those bytes are looked at.
     ///
+    /// The name of a pasted image follows its bytes: a JPEG taken as-is is `.jpg`,
+    /// and only a JPEG is — PNG and TIFF-re-encoded-to-PNG stay `.png`.
+    func testAPastedImagesNameFollowsTheSniffedBytes() {
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data(repeating: 0, count: 8)
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0]) + Data(repeating: 0, count: 8)
+        XCTAssertEqual(AttachmentIntake.name(forPastedImage: 1, sniffing: png), "pasted image.png")
+        XCTAssertEqual(AttachmentIntake.name(forPastedImage: 2, sniffing: png), "pasted image 2.png")
+        XCTAssertEqual(AttachmentIntake.name(forPastedImage: 1, sniffing: jpeg), "pasted image.jpg")
+        XCTAssertEqual(AttachmentIntake.name(forPastedImage: 2, sniffing: jpeg), "pasted image 2.jpg")
+        // And the old spelling is untouched for the callers that hand over PNG
+        // whatever the source was.
+        XCTAssertEqual(AttachmentIntake.name(forPastedImage: 1), AttachmentIntake.pastedImageName)
+        XCTAssertEqual(AttachmentIntake.name(forPastedImage: 2), "pasted image 2.png")
+    }
+
     /// Four files this cannot attach and a fifth that would have fit. The four spent the
     /// budget, the fifth was never read, and the gesture used to say "the rest were left
     /// out" — of nothing, because the four were refused in the same breath.

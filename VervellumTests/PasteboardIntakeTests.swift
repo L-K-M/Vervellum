@@ -29,6 +29,19 @@ final class PasteboardIntakeTests: XCTestCase {
         Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data(repeating: 0, count: payload)
     }
 
+    /// The GIF magic number, for a picture the clipboard paths deliberately do not
+    /// read (a GIF *file* is sniffed and attached fine; from a clipboard the flavours
+    /// are PNG, JPEG and TIFF).
+    private func gif(_ payload: Int = 16) -> Data {
+        Data([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]) + Data(repeating: 0, count: payload)
+    }
+
+    /// The JPEG magic number plus payload — enough for the byte sniffing that
+    /// classifies an attachment, not a decodable image.
+    private func jpeg(_ payload: Int = 16) -> Data {
+        Data([0xFF, 0xD8, 0xFF, 0xE0]) + Data(repeating: 0, count: payload)
+    }
+
     @discardableResult
     private func write(_ data: Data, named name: String) throws -> URL {
         let url = directory.appendingPathComponent(name)
@@ -221,8 +234,8 @@ final class PasteboardIntakeTests: XCTestCase {
     /// the one outcome the whole file is arranged to avoid.
     func testAPictureInAFormThisCannotReadIsRefusedRatherThanIgnored() {
         XCTAssertTrue(pasteboard.setData(
-            Data([0xFF, 0xD8, 0xFF, 0xE0]),
-            forType: NSPasteboard.PasteboardType(UTType.jpeg.identifier)))
+            gif(),
+            forType: NSPasteboard.PasteboardType(UTType.gif.identifier)))
 
         let outcome = PasteboardIntake.read(pasteboard)
         XCTAssertTrue(outcome.accepted.isEmpty)
@@ -232,14 +245,41 @@ final class PasteboardIntakeTests: XCTestCase {
         XCTAssertFalse(outcome.isEmpty)
     }
 
+    /// A pasteboard carrying `public.jpeg` and nothing else — some apps offer only
+    /// that — attaches the JPEG as the bytes it is: Core sniffs it and sends it as
+    /// image/jpeg, and re-encoding a photograph to PNG just to keep a `.png` name could
+    /// push it past the attachment cap. The name follows the bytes.
+    func testAJPEGOnlyPasteboardAttachesTheJPEGAsIs() {
+        let bytes = jpeg()
+        XCTAssertTrue(pasteboard.setData(
+            bytes, forType: NSPasteboard.PasteboardType(UTType.jpeg.identifier)))
+
+        let outcome = PasteboardIntake.read(pasteboard)
+        guard let attached = outcome.accepted.first else {
+            XCTFail("nothing was attached: \(outcome.refusals)")
+            return
+        }
+        XCTAssertEqual(attached.attachment.kind, .image)
+        XCTAssertEqual(attached.attachment.mediaType, "image/jpeg")
+        XCTAssertEqual(attached.attachment.name, "pasted image.jpg")
+        XCTAssertEqual(attached.data, bytes, "no re-encode: the bytes go through as they are")
+    }
+
+    /// A dragged JPEG is accepted too — the composer registers the type for drops.
+    func testAJPEGIsAmongTheDraggedTypes() {
+        let jpeg = NSPasteboard.PasteboardType(UTType.jpeg.identifier)
+        XCTAssertTrue(PasteboardIntake.draggedTypes.contains(jpeg))
+        XCTAssertTrue(PasteboardIntake.imageTypes.contains(jpeg))
+    }
+
     /// But a picture beside words is still a paste of the words, refusal or not: the
     /// text branch answers first, and a sentence about an unreadable image would be
     /// wrong about a gesture that worked.
     func testWordsBesideAnUnreadablePictureStillPasteAsWords() {
         let item = NSPasteboardItem()
         XCTAssertTrue(item.setString("a heading and its body", forType: .string))
-        XCTAssertTrue(item.setData(Data([0xFF, 0xD8, 0xFF, 0xE0]),
-                                   forType: NSPasteboard.PasteboardType(UTType.jpeg.identifier)))
+        XCTAssertTrue(item.setData(gif(),
+                                   forType: NSPasteboard.PasteboardType(UTType.gif.identifier)))
         pasteboard.clearContents()
         XCTAssertTrue(pasteboard.writeObjects([item]))
 

@@ -223,7 +223,11 @@ struct GeneralView: View {
             Button("Delete All", role: .destructive) { store.deleteAll() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the threads file from disk. It cannot be undone.")
+            // `deleteAll` also erases the stored copies of attached pictures and
+            // files, and a destructive confirmation that understates what is deleted
+            // is the one sentence the user reads before pressing the button.
+            Text("This removes the threads file and the stored copies of attached "
+                 + "pictures and files from disk. It cannot be undone.")
         }
     }
 }
