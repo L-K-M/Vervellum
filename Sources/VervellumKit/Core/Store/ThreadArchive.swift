@@ -388,7 +388,7 @@ final class ThreadArchive {
                     // failed owner-only permission is not cleared while the
                     // saved file may still be readable by others.
                     do {
-                        try fileManager.setAttributes([.posixPermissions: 0o600],
+                        try fileManager.setAttributes(Self.ownerOnlyPermissions,
                                                       ofItemAtPath: fileURL.path)
                     } catch {
                         backup = Self.permissionFailureMessage(
@@ -397,11 +397,31 @@ final class ThreadArchive {
                 } else {
                     backup = Self.backupFailureMessage(in: directory,
                                                        file: fileURL.lastPathComponent)
+                    // A failed rotation can be the permission problem itself
+                    // (`rotateBackup` chmods the primary before copying) or
+                    // can mask one. Keep pursuing the owner-only mode here too,
+                    // rather than replacing a permission warning with a
+                    // backup-only one.
+                    if fileManager.fileExists(atPath: fileURL.path) {
+                        do {
+                            try fileManager.setAttributes(Self.ownerOnlyPermissions,
+                                                          ofItemAtPath: fileURL.path)
+                        } catch {
+                            backup = [backup, Self.permissionFailureMessage(
+                                        in: directory, file: fileURL.lastPathComponent)]
+                                .compactMap { $0 }.joined(separator: " ")
+                        }
+                    }
                 }
                 recordFailures(save: nil, backup: backup)
             }
         }
     }
+
+    /// The owner-only mode a saved file must carry, and the retry that enforces it.
+    /// Extracted so the write path, the rotation retry and the failed-rotation path
+    /// cannot drift apart on the constant.
+    private static let ownerOnlyPermissions: [FileAttributeKey: Any] = [.posixPermissions: 0o600]
 
     /// Publishes a pair of failure strings. Both nil clears a previous warning, so
     /// a successful retry cannot leave a stale one beside the file.
@@ -533,7 +553,7 @@ final class ThreadArchive {
                 // standing permission warning worth keeping.
                 if backup == nil, fileManager.fileExists(atPath: fileURL.path) {
                     do {
-                        try fileManager.setAttributes([.posixPermissions: 0o600],
+                        try fileManager.setAttributes(Self.ownerOnlyPermissions,
                                                       ofItemAtPath: fileURL.path)
                     } catch {
                         backup = Self.permissionFailureMessage(
@@ -555,7 +575,7 @@ final class ThreadArchive {
             // written. Both failures are kept, because they send the reader to two
             // different places.
             do {
-                try fileManager.setAttributes([.posixPermissions: 0o600],
+                try fileManager.setAttributes(Self.ownerOnlyPermissions,
                                               ofItemAtPath: fileURL.path)
             } catch {
                 attemptBackupFailure = [attemptBackupFailure,
@@ -604,7 +624,7 @@ final class ThreadArchive {
             // Correctness, not cleanup: a copy that inherits the umask must
             // not become the recovery copy. Failing here leaves the old backup
             // in place (it is removed only after this) and reports the problem.
-            try fileManager.setAttributes([.posixPermissions: 0o600],
+            try fileManager.setAttributes(Self.ownerOnlyPermissions,
                                           ofItemAtPath: fileURL.path)
             try fileManager.copyItem(at: fileURL, to: staging)
             // Remove the old backup only once the new copy exists, so a
@@ -635,7 +655,7 @@ final class ThreadArchive {
         do {
             // The inherited staging copy predates the write path's chmod; give
             // it the same owner-only mode before it becomes the backup.
-            try fileManager.setAttributes([.posixPermissions: 0o600],
+            try fileManager.setAttributes(Self.ownerOnlyPermissions,
                                           ofItemAtPath: staging.path)
             try? fileManager.removeItem(at: backupURL)
             try fileManager.moveItem(at: staging, to: backupURL)

@@ -157,17 +157,20 @@ final class ThreadStore: ObservableObject {
     /// them naming those bytes. A failed write or backup is retried after, because
     /// the archive keeps the exact snapshot that failed.
     func retryStorage() {
-        var erased = false
+        // Local to this tap, so the attachment sweep below cannot double-fire
+        // with the `else if` branch: that branch runs only when no erase was
+        // attempted, which leaves this false.
+        var eraseRetriedThisTap = false
         if archive.eraseFailure != nil {
             archive.retryErase()
-            erased = archive.eraseFailure == nil
+            eraseRetriedThisTap = archive.eraseFailure == nil
         } else if attachmentEraseFailure != nil {
             eraseAttachments()
         }
         // A retryErase that just succeeded means the thread file went in this
         // same tap: reclaim the attachment bytes here rather than leaving them
         // on disk until a second Try Again tap.
-        if erased && attachmentEraseFailure != nil {
+        if eraseRetriedThisTap && attachmentEraseFailure != nil {
             eraseAttachments()
         }
         // A successful erase removed the document, so a retained save snapshot
@@ -175,7 +178,7 @@ final class ThreadStore: ObservableObject {
         // The archive clears its own pending snapshot on erase; this is the
         // second half, because the published snapshot this reads may be a
         // publish behind the erase.
-        guard !erased else {
+        guard !eraseRetriedThisTap else {
             // The archive has already dropped the write failures (the erase made
             // them moot); drop the published snapshot too, so no later tap can
             // act on it and the banner clears without waiting for the hop.
