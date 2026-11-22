@@ -809,12 +809,36 @@ final class ThreadArchiveTests: XCTestCase {
         store.save(thread("two"))
         store.flush()
         XCTAssertNotNil(store.storageFailures().save)
+        // This test induces only a save failure; the backup half has its own
+        // companion below, and asserting the precondition here keeps the
+        // post-erase backup assertion from looking covered when it is not.
+        XCTAssertNil(store.storageFailures().backup)
 
         manager.deniesRemoval = false
         store.deleteAll()
         XCTAssertNil(store.storageFailures().save,
                      "the erased document's save warning is moot")
         XCTAssertNil(store.storageFailures().backup)
+    }
+
+    /// The companion to the save-warning test: a backup failure is equally
+    /// moot once the document is gone.
+    func testAnErasureClearsTheBackupWarning() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+        manager.deniedPaths.insert(fileURL.appendingPathExtension("bak").path)
+        store.save(thread("three"))
+        store.flush()
+        XCTAssertNotNil(store.storageFailures().backup, "the rotation should have failed")
+
+        manager.deniedPaths.removeAll()
+        store.deleteAll()
+        XCTAssertNil(store.storageFailures().backup,
+                     "the erased document's backup warning is moot")
     }
 
     /// When no staging copy survived, the retry falls back to rotating the current
