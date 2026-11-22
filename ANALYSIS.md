@@ -1,51 +1,58 @@
 # Vervellum research backlog
 
-Mistral Vibe pass 2026-11-21: reviewed against `origin/main` at `1ed52ba` — a full
+Mistral Vibe pass 2026-11-21: reviewed against `origin/main` at `1ed52ba`; a full
 read of the shared core, the store/text layer, the macOS views/settings and the
 composer-command layer, plus three parallel helper deep-reads (full write-up in
-`tmp.md`). Eight PRs are open: #230 (header-button hit areas; also the target-size
-half of C06), #239 (⌘↑/⌘↓ scroll the thread; a slice of A65), #241 (case-insensitive
-URL-scheme redaction; a redactor slice adjacent to A63), #244 (one shared composer
-whitespace definition), #246 (About version without the `Optional` wrapper), #250
-(unbounded citation digits), #251 (hostile characters in the published date and
-linked-page title) and #253 (restyle the open thread when the theme changes). Their
-slices are annotated in place below; restore an entry if its PR closes unmerged.
+`tmp.md`). Eight PRs were open at review time: #230 (header-button hit areas; also
+the target-size half of C06), #239 (thread scroll shortcuts; a slice of A65), #241
+(URL-scheme redaction; adjacent to A63), #244 (shared composer whitespace),
+#246 (About version string), #250 (unbounded citation digits), #251 (hostile source
+fields) and #253 (theme restyle of the open thread). #230, #239, #241, #244, #251
+and #253 merged; #250's work landed in #245; #246 closed refuted (the pinned updater
+returns a non-optional String, so the About pane never showed "Optional") and its
+finding is retired. Slices are annotated in place below.
 New findings from this pass are A87–A99, N15–N24 and the D01–D09 delight ideas,
 appended at the end. Concurrent branches and other agents' PRs were not inspected
 during this review.
 
 Codex (little-platypus) pass 2026-11-21: reviewed against `origin/main` at
-`b3a5bf1`. Three PRs are open — #231 (protected editing chords; A18's policy
-slice), #242 (storage failure reporting and retry; A13's retry slice and A14's
-reporting slice) and #247 (single-domain evidence cue; N01). Their slices are
-annotated in place below; restore an entry if its PR closes unmerged. New
-findings from the pass are A84 and A85, plus A86 (since implemented in open PR
-#255) and additions to A83, C01 and S08.
+`b3a5bf1`. Three PRs were open at review time: #231 (protected editing chords;
+A18's policy slice), #242 (storage failure reporting and retry; A13's retry slice
+and A14's reporting slice) and #247 (single-domain evidence cue; N01). All three
+merged; their slices are annotated in place below. New findings from the pass are
+A84 and A85, plus A86 (implemented in #255) and additions to A83, C01 and S08.
 
 Codex pass 2026-11-21: reviewed against `origin/main` at `e90efc3`. Four small
-fixes from this pass are open in PRs #233 (range citations, A62), #234
+fixes from this pass were carried by PRs #233 (range citations, A62), #234
 (image-retry state, S33), #236 (negative attachment size, A80) and #240 (notice
-tones, R03); their implemented slices are annotated in place and are not repeated
-here. New findings C01–C07 appear below, with C05 folded into A22. Concurrent branches and other
-agents' PRs were not inspected during this review.
+tones, R03). #234 and #240 merged; #233 closed without merging and its work
+landed in #245, and #236 in #235. Their implemented slices are annotated in place
+and are not repeated here. New findings C01–C07 appear below, with C05 folded into
+A22. Concurrent branches and other agents' PRs were not inspected during this
+review.
 
 Codex pass 2026-11-21 (little-platypus worktree): reviewed against `origin/main` at
-`d4c9c1c`, which is the code `e90efc3` still carries. Four fixes from this pass are
-open in PRs #254 (delete a committed `.orig` test artifact), #255 (one openable-URL
-predicate for every click path, and userinfo rejected at click time as well as at
-harvest time), #256 (redact pasted text; the macOS slice of A63) and #257 (end the
-recall walk when the recalled draft is edited; the recall slice of A23). Their
-implemented slices are annotated in place. New findings L01-L05 are appended at the
-end. Concurrent branches and other agents' PRs were not inspected during this review.
+`d4c9c1c`, which is the code `e90efc3` still carries. Four fixes from this pass
+were carried by PRs #254 (delete a committed `.orig` test artifact), #255 (one
+openable-URL predicate for every click path, and userinfo rejected at click time as
+well as at harvest time), #256 (redact pasted text; the macOS slice of A63) and
+#257 (end the recall walk when the recalled draft is edited; the recall slice of
+A23). #255, #256 and #257 merged; #254 closed without merging and its work landed
+in #199. Their implemented slices are annotated in place. New findings L01-L05 are
+appended at the end. Concurrent branches and other agents' PRs were not inspected
+during this review.
 
 Codex pass 2026-11-21 (second): reviewed against `origin/main` at `9c3e3d7`. Three
-fixes are open in PRs #232 (declared page encodings, A81), #237 (assessment stage
+fixes were carried by PRs #232 (declared page encodings, A81), #237 (assessment stage
 timing, A82) and #248 (fence marker/length matching and the info string, A29).
-PRs #235 and #245 additionally cover A80 and A62, which the pass above already
-records as #236 and #233. New findings V01–V02 are appended at the end. Concurrent
-branches and other agents' PRs were not inspected during this review.
+All three merged; #237 landed the monotonic stage clock only, so V02's
+fixture-clock testability criterion remains open. PRs #235 and #245 additionally
+cover A80 and A62, which the pass above records as #236 and #233; #236 and #233
+closed without merging and their work landed in #235 and #245. New findings
+V01–V02 are appended at the end. Concurrent branches and other agents' PRs were not
+inspected during this review.
 
-Panel-UX pass 2026-11-21 (Devin): thirteen focused PRs are open — #204
+Panel-UX pass 2026-11-21 (Devin): fourteen focused PRs were open: #204
 (Reduce-Motion caret), #207 and #202 (submit-key hint; S07 implemented slice),
 #211 (history delete confirmation; A28's confirmation slice), #215 (summon
 promotes a Settings preview; the visible-panel half of S08), #216 (per-turn
@@ -53,14 +60,16 @@ askedAt timestamp), #217 (status menu names the running question), #218 (Latest
 jump in finished threads), #222 (edit & re-ask), #223 (attachment preview
 popover), #225 (history search-field focus on open; A28's focus slice), #226
 (empty-state attachment hint), #227 (status-item elapsed time), #228 (first-frame
-provider readiness). Their implemented slices are omitted below; restore the
-entry if a PR closes unmerged.
+provider readiness). All but #204 and #207 merged; #204's work landed in #214 and
+#207's in #202. Their implemented slices are omitted below.
 
 Two further November 21 reviews used `d4c9c1c`. The first reconciled A09, A11a,
 A12, A17, A18a, A23, A28, A64, A77e, R03, N01, N03, N06, N10 and N13.
 It recorded #200 for source URL userinfo and #205 for panel-header hit targets
-as open at review time. Verify the header at the 360-point minimum width and
-largest text scale in a GUI session. Each review examined its own PRs.
+as open at review time; #200 merged and completed the userinfo-rejection item,
+while #205 closed without merging and its work landed in #230. Verify the header
+at the 360-point minimum width and largest text scale in a GUI session. Each
+review examined its own PRs.
 
 The second review followed the research evidence through export, history search
 and the native panel. The implementation PRs cover
@@ -69,13 +78,22 @@ and the native panel. The implementation PRs cover
 [Reduce Motion](https://github.com/L-K-M/Vervellum/pull/214),
 [citation layout](https://github.com/L-K-M/Vervellum/pull/219) and
 [deep-round evidence budgeting](https://github.com/L-K-M/Vervellum/pull/221).
-If one closes unmerged, restore its acceptance criteria here. A18a is covered by
-staged credential edits and cleanup-failure reporting. Keycap now owns Escape in
-the recorder, which retires A75c.
+#203 and #214 merged; #213, #219 and #221 closed without merging and their useful
+parts landed in #198, #220 and #209. A18a is covered by staged credential edits
+and cleanup-failure reporting. Keycap now owns Escape in the recorder, which
+retires A75c.
 
 The new checks used main at `d4c9c1c`, the repository screenshot, the macOS views and the shared runner, store and tests. A rendered 360-point fixture at 140% text confirmed that 24 citation chips lost their numbers and displaced the heading. The wrapping patch displayed every number across five lines.
 
-The following slices have implementation PRs. If a PR closes without landing, restore its task from the linked patch. [History search evaluation (#201)](https://github.com/L-K-M/Vervellum/pull/201), [composer shortcut hints (#202)](https://github.com/L-K-M/Vervellum/pull/202), [source publication metadata limits (#206)](https://github.com/L-K-M/Vervellum/pull/206), [model discovery credential ownership (#210)](https://github.com/L-K-M/Vervellum/pull/210), [wrapping finding citations (#220)](https://github.com/L-K-M/Vervellum/pull/220) and [stable source details (#224)](https://github.com/L-K-M/Vervellum/pull/224).
+The following slices have implementation PRs. [History search evaluation
+(#201)](https://github.com/L-K-M/Vervellum/pull/201) closed without merging and
+its task landed in #198; [composer shortcut hints
+(#202)](https://github.com/L-K-M/Vervellum/pull/202), [source publication
+metadata limits (#206)](https://github.com/L-K-M/Vervellum/pull/206), [model
+discovery credential ownership (#210)](https://github.com/L-K-M/Vervellum/pull/210),
+[wrapping finding citations (#220)](https://github.com/L-K-M/Vervellum/pull/220)
+and [stable source details (#224)](https://github.com/L-K-M/Vervellum/pull/224)
+merged.
 
 The November 4 review was based on `1924f01` and covered changes through #191.
 It verified Sol3 heads independently, excluded uninspected parallel work and
@@ -105,7 +123,10 @@ design decision and the ambiguous table-delimiter regression tests.
 Historical scores are mean · user/engineer/designer · effort, not new measurements.
 S means local work, M several components, L design work. Estimates are rough.
 
-The 21 November panel and research review produced PRs #198 (history search), #199 (test backup), #208 (draft labels), #209 (regather evidence), and #212 (citation wrapping). Their implemented slices are omitted below. Revisit a slice if its PR closes unmerged.
+The 21 November panel and research review produced PRs #198 (history search), #199
+(test backup), #208 (draft labels), #209 (regather evidence), and #212 (citation
+wrapping). #198, #199, #208 and #209 merged; #212 closed without merging and its
+work landed in #220. Their implemented slices are omitted below.
 
 ## Important
 
@@ -172,15 +193,14 @@ Where: Sources/VervellumKit/Core/Store/ThreadArchive.swift; Vervellum/Views/Hist
 Bugs — important
 
 `eraseFailure` is recorded and shown, tombstones prevent resurrection, launch-time
-erase runs when history is off, and deleting a thread discards its session. Two clauses
-remain: a recorded deletion failure has no retry affordance; and Linux open-session behavior after `deleteAll` still needs an integration test
-and an explicit stored-history-versus-active-session retention policy.
+erase runs when history is off, and deleting a thread discards its session.
 
-Open PR #242 implements the first clause: the Settings warning now carries a
-**Try Again** button that re-runs the erase (and any failed write) with sanitized,
-application-authored errors. Remaining: Linux open-session behavior after
-`deleteAll` still needs an integration test and an explicit
-stored-history-versus-active-session retention policy.
+#242 merged the retry clause: the Settings warning carries a **Try Again** button
+that re-runs the erase (and any failed write) with sanitized, application-authored
+errors, finishes a failed erase on retry, and saves threads started during that
+failure. Remaining: Linux open-session behavior after `deleteAll` still needs an
+integration test and an explicit stored-history-versus-active-session retention
+policy.
 
 Suggested fix: make the open-thread behavior after `deleteAll` match that explicit
 retention policy, including late callbacks.
@@ -195,8 +215,8 @@ Earlier effort: M.
 
 Bugs — important
 
-Validated backup rotation exists; the private-directory fence is covered by open #125.
-Open PR #242 reports backup removal/copy and 0600-permission failures in
+Validated backup rotation exists; the private-directory fence landed in #125.
+#242 merged and reports backup removal/copy and 0600-permission failures in
 application-authored terms, rotates through a staging copy so a failed copy
 preserves the previous `.bak`, keeps a failed write's snapshot pending for a real
 retry, and adds a Settings retry action. Remaining: concurrent erase/flush
@@ -234,21 +254,23 @@ Where: Sources/VervellumKit/Linux/LinuxSecretStore.swift; LinuxPanel.swift. Earl
 
 General issues — important
 
-Keycap rejects Shift-only bindings and several system-owned shortcuts. Common editing
-chords such as Command-C, Command-V and Command-Z still need a policy, as do
-Option-only character chords used for text composition. The policy could live in
-Keycap (release there, then update the dependency) or in Vervellum's own binding.
+Keycap rejects Shift-only bindings and several system-owned shortcuts. The
+editing-chord and Option-only policy now lives in Vervellum's `HotkeyBinding`
+rather than waiting for a Keycap release.
 
-Open PR #231 implements the policy in `HotkeyBinding` rather than waiting for a
-Keycap release: Command/Shift-Command on A/C/V/X/Z and Option/Option-Shift on a
-non-function key are refused at the registration boundary, with tests for stored
-bindings and the modifier combinations that stay allowed. The recorder itself is
-still Keycap's and accepts such a combo; the Shortcuts pane's warning names the
-reason, which is the honest half-measure until Keycap grows a validation hook.
+#231 merged and implements the policy in `HotkeyBinding` rather than waiting for
+a Keycap release: standard editing chords (Command/Shift-Command on A/C/V/X/Z)
+and otherwise unregistrable bindings are refused at the registration boundary,
+with tests for stored bindings and the modifier combinations that stay allowed.
+By the owner's decision Option-only shortcuts stay valid (Option-Space included),
+so Option/Option-Shift on a non-function key is not refused. The recorder itself
+is still Keycap's and accepts a protected combo; the Shortcuts pane's warning
+names the reason, which is the honest half-measure until Keycap grows a
+validation hook.
 
-Suggested fix: reject a documented set of protected editing chords before
-registration, define the Option-only policy explicitly, and test recorder, stored
-preferences, duplicate handling, and Carbon registration together.
+Suggested fix: keep the protected-chord rule and the owner's Option-only allowance
+documented, and test recorder, stored preferences, duplicate handling, and Carbon
+registration together.
 
 ### A22 · Absolute provider deadlines and the fixture matrix
 
@@ -261,19 +283,17 @@ evidence block legitimately takes minutes), body reads have a wall-clock check, 
 remainder is provider-side: streaming exchanges have no exchange-wide absolute
 deadline through the response head; the ten-minute check runs only on arriving
 chunks and starts after the head, so a stalled or trickling provider exchange can
-hold a call far longer than intended. Cheap SearXNG JSON requests also inherit a
-model-generation-sized allowance instead of the existing cheap-request budget
-(S31). The deadline fixture matrix is still open.
+hold a call far longer than intended. Cheap SearXNG JSON requests now use the
+existing cheap-request budget (#270). The deadline fixture matrix is still open.
 
 Suggested fix: enforce an independent monotonic per-exchange deadline for provider
 JSON and streaming calls that cancels the URL task, running from request start
 through the response head and body, while preserving the legitimate
-slow-local-model behavior the 600 s interval protects; route cheap SearXNG calls
-through the existing cheap-JSON budget helper with cancellation coverage.
+slow-local-model behavior the 600 s interval protects.
 
-The SearXNG half is implemented in open PR #270 (`vibe-0jlhruyq/searxng-cheap-budget`):
-`SearXNGClient.search` now uses `sendCheapJSON` with a 30 s budget on both clocks,
-pinned by a `SearXNGClientTests` case. Restore that half if the PR closes unmerged.
+The SearXNG half is implemented in #270 (`vibe-0jlhruyq/searxng-cheap-budget`),
+which merged: `SearXNGClient.search` uses `sendCheapJSON` with a 30 s budget on
+both clocks, pinned by a `SearXNGClientTests` case.
 
 Accept: no headers, idle body, trickle-versus-keepalive, cancellation before
 registration, early matching MCP response, refused redirects, and producer-cap
@@ -290,13 +310,16 @@ C05 adds the buffered JSON path to this fixture. In `HTTPTransport.swift`, `fetc
 
 Bugs — important
 
-Editing a recalled question must end recall mode; otherwise arrows can replace the edited text. Clicking a follow-up replaces a nonempty draft, while programmatic NSTextView.string assignment does not provide the undo the comment promises.
+Clicking a follow-up replaces a nonempty draft, while programmatic
+NSTextView.string assignment does not provide the undo the comment promises.
 
-Suggested fix: Make suggestion replacement reversible or explicitly confirm it. End recall after user edits and use undo-cooperative shouldChangeText/didChangeText updates.
+Suggested fix: Make suggestion replacement reversible or explicitly confirm it,
+and use undo-cooperative shouldChangeText/didChangeText updates.
 
-Open PR #257 carries the recall slice: the walk records the text it put on screen and
-a draft that no longer equals it ends the walk, so an edited recalled question is not
-replaced by the next arrow press. The suggestion-replacement and undo halves remain.
+#257 merged the recall slice: the walk records the text it put on screen and a
+draft that no longer equals it ends the walk, so an edited recalled question is
+not replaced by the next arrow press. The suggestion-replacement and undo halves
+remain.
 
 Accept: Cover multiline drafts, edited recalled text, suggestions during runs, undo, keypad/modified Return and CJK composition. Verify hasMarkedText routing before consuming composition-confirming Return. No unintended send or draft/attachment loss.
 
@@ -354,24 +377,25 @@ Where: release workflows, the pinned Updraft package and Vervellum/App/AppDelega
 
 Bugs — important
 
-Only Accessibility-captured text is redacted; ⌘V goes straight through the composer,
-and a `.env` line pasted in a hurry is exactly the case `SecretRedactor` exists
-for.
+On macOS, ⌘V now goes through `SecretRedactor` under the existing preference
+(#256); the Linux Ctrl-V path still sends paste straight to the composer, and a
+`.env` line pasted in a hurry is exactly the case `SecretRedactor` exists for.
 
-Suggested fix: route paste through the same redaction and the same banner as the
-selection path, building on A07 (redact before truncation, before display); keep
-plain prose untouched.
+Suggested fix: route the Linux paste through the same redaction and the same
+banner as the selection path, building on A07 (redact before truncation, before
+display); keep plain prose untouched.
 
-Open PR #256 carries the macOS slice: `ComposerView.route` sends a text paste through
-`SecretRedactor` under the existing preference, inserts the redacted text undoably and
-raises the same banner. The Linux Ctrl-V slice remains; it needs a GTK clipboard-text
-read, which the shim does not expose yet.
+#256 merged and carries the macOS slice: `ComposerView.route` sends a text paste
+through `SecretRedactor` under the existing preference, inserts the redacted text
+undoably and raises the same banner; it also corrected README, SECURITY and
+PRIVACY. The Linux Ctrl-V slice remains; it needs a GTK clipboard-text read, which
+the shim does not expose yet.
 
 Accept: a pasted key is replaced and the banner names the count; redaction is
 visible before Return, never applied silently on send; no false positives beyond
 `SecretRedactor`'s documented conservative bias.
 
-Redactor slice implemented in open PR #241 (Mistral Vibe pass): the URL-userinfo
+Redactor slice implemented in #241 (Mistral Vibe pass, merged): the URL-userinfo
 pattern is now case-insensitive, so `HTTPS://user:pass@host` is redacted too.
 
 Earlier effort: S.
@@ -498,8 +522,11 @@ Coalescing, Equatable turn views and SelectableText exist. The Linux renderer pr
 GTK widgets during answer-only growth; stage, source and notice changes still
 rebuild the thread. Native MarkdownBody still parses the growing answer per
 evaluation, and composer measurement repeats when its inputs have not changed.
-`MarkdownBody` itself is now Equatable (open PR #265, `vibe-0jlhruyq/markdown-body-equatable`),
-so unchanged notice/draft blocks are no longer re-parsed at the snapshot rate.
+`MarkdownBody` equality caching was attempted in #265
+(`vibe-0jlhruyq/markdown-body-equatable`) and closed without landing: it measured
+no gain (2 body evaluations in 11 updates with and without it), so `MarkdownBody`
+is not Equatable and unchanged notice/draft blocks are still re-parsed at the
+snapshot rate. This slice of A20 remains open.
 
 Profile a stream containing tables, code and grouped citations with older turns visible. Record main-thread time and snapshot count. Preserve code masking when reusing completed blocks.
 
@@ -619,24 +646,16 @@ For a repeatable contrast fixture, render the same completed turn over neutral l
 
 Visual issues and layout problems — nice-to-have
 
-Tables, ATX closing-sequence handling and literal citations in code exist. Fences
-still close on a three-backtick or three-tilde prefix without matching the
-opener's marker and length. Native code already scrolls horizontally; Linux
-long-line handling and code-copy actions remain.
+Tables, ATX closing-sequence handling, literal citations in code and matched
+fence markers/lengths exist (#248). Native code already scrolls horizontally;
+Linux long-line handling and code-copy actions remain.
 
-Suggested fix: Track the opening marker/length; a closer needs the same marker,
-at least that length and only trailing whitespace. Keep an unterminated remainder
-as code through end-of-stream. Add code-copy actions and Linux long-line handling
-where absent, preserving the native scroll view.
+Suggested fix: Add code-copy actions and Linux long-line handling where absent,
+preserving the native scroll view.
 
-Accept: Mismatched, shorter/longer and nested fences; incomplete streaming prefixes;
-long lines. Align render/parser and citation-code masks. No dependency or HTML
+Accept: long lines render without breaking the native scroll view; copied code is
+exact. Align render/parser and citation-code masks. No dependency or HTML
 renderer. Pango nested emphasis is A29a; range citations are A62.
-
-The fence half is implemented in open PR #248 (the opener's marker and run length
-are carried; a closer needs the same marker, at least that length and only trailing
-whitespace; the info string follows the whole opening run). Code-copy actions and
-Linux long-line handling remain. Restore the fence half if that PR closes unmerged.
 
 Earlier effort: M.
 
@@ -1404,19 +1423,14 @@ Earlier effort: S.
 
 Bugs — nice-to-have
 
-`[1-3]`, `[1–3]` and `[2—4]` match nothing in the digits-and-commas citation
-regex, so they stay literal text, contribute no cited sources and are not flagged —
-the turn reads as clean when it is not.
-
-Suggested fix: accept `\d+\s*[-–—]\s*\d+` inside the brackets and expand it bounded
-by `sourceCount`, or flag an unparseable digit group as `invalidCitation`.
+`[1-3]`, `[1–3]` and `[2—4]` used to match nothing in the digits-and-commas
+citation regex, leaving a turn looking clean when it was not. #245 replaced #233
+and accepts `\d+\s*[-–—]\s*\d+` inside the brackets, expanding it bounded by
+`sourceCount`; reversed and oversized ranges are flagged, markers made only of
+plausible years (1500 to 2100) are prose, and expansion is capped.
 
 Accept: `[1-3]` renders chips for 1, 2, 3 and marks them cited; `[9-2]` and
 `[1-300]` are flagged; code spans stay ignored.
-
-Implemented in open PR #233 (three dash spellings, bounded expansion, reversed and
-oversized ranges flagged, renderer and transcript unchanged). Restore this entry if
-that PR closes unmerged.
 
 Earlier effort: S.
 
@@ -1463,8 +1477,9 @@ visible in both schemes; Escape returns focus to the composer before its usual
 back-out order; find highlights update as the answer streams without restarting
 the search.
 
-Scroll slice implemented in open PR #239 (Mistral Vibe pass): ⌘↑/⌘↓ scroll the
-thread to its top/bottom while the composer holds first responder.
+Scroll slice implemented in #239 (Mistral Vibe pass, merged): ⌘↑/⌘↓ scroll the
+thread to its top/bottom; while the composer holds text they stay with the
+composer.
 
 Historical traversal: 6.3 · 8/4/7 · M; find: 5.3 · 6/5/5 · M.
 
@@ -1474,7 +1489,7 @@ Earlier effort: M.
 
 Usability: speed, convenience, clarity — nice-to-have
 
-Stage announcements and some heading traits exist; native composer labeling is covered. Generic SectionLabel still needs heading semantics for Claims, Limitations and Next, plus the question. Real VoiceOver behavior during per-chunk updates remains unverified. Finding-source action exposure is covered by open #145.
+Stage announcements and some heading traits exist; native composer labeling is covered. Generic SectionLabel still needs heading semantics for Claims, Limitations and Next, plus the question. Real VoiceOver behavior during per-chunk updates remains unverified. Finding-source action exposure is covered by merged #145.
 
 Suggested fix: Add missing heading traits. Verify whether streamed answer updates restart reading; if they do, expose block-boundary accessibility updates rather than per-token value changes.
 
@@ -1679,51 +1694,33 @@ Earlier effort: S.
 
 Bugs — nice-to-have
 
-`Attachment` accepts a negative decoded `byteCount`, so a damaged archive can display
-nonsensical sizes and corrupt accounting even though the rest of the turn is
-recoverable.
-
-Suggested fix: clamp legacy negative values to zero or discard only the invalid
-attachment while preserving the containing turn, with tolerant-decoding tests.
-
-Implemented in open PR #236 (clamped on decode, record kept). Restore this entry if
-that PR closes unmerged.
+#235 replaced #236 and clamps a negative decoded `byteCount` on decode while
+keeping the record, so a damaged archive cannot display nonsensical sizes or
+corrupt accounting. Tolerant-decoding tests pin the behaviour.
 
 ### A81 · Decode declared legacy page encodings accurately
 
 Bugs — nice-to-have
 
-At `Sources/VervellumKit/Core/Research/PageReader.swift:450–470`, `DirectPageReader`
-tries UTF-8 before the declared charset, maps Windows-1252 to ISO-8859-1, and maps
-explicit UTF-16LE/UTF-16BE declarations to the BOM-sensitive native UTF-16 decoder.
-Older pages can therefore arrive with garbled punctuation and euro characters, while
-BOM-less UTF-16 containing ASCII can be accepted as NUL-filled UTF-8 and yield no useful
-page text. This weakens the evidence available to every research mode that reads them.
+Before #232, `DirectPageReader` tried UTF-8 before the declared charset, mapped
+Windows-1252 to ISO-8859-1, and mapped explicit UTF-16LE/UTF-16BE declarations to
+the BOM-sensitive native UTF-16 decoder, so older pages could arrive with garbled
+punctuation and euro characters, while BOM-less UTF-16 containing ASCII was
+accepted as NUL-filled UTF-8 and yielded no useful page text.
 
-Suggested fix: honor recognized declared charsets before the generic UTF-8 fallback;
-use `.windowsCP1252`, `.utf16LittleEndian`, and `.utf16BigEndian`, with byte fixtures
-that distinguish each encoding. Rough effort: about one hour.
-
-Implemented in open PR #232 (an explicit UTF-16 endianness is acted on before the
-generic fallback, a declared Windows-1252 page uses the Windows codec, and a strict
-UTF-8 decode still wins for the single-byte charsets so a mislabelled UTF-8 page
-reads correctly). Restore this entry if that PR closes unmerged.
+#232 resolves it: an explicit UTF-16 endianness is acted on before the generic
+fallback, a declared Windows-1252 page uses the Windows codec, and a strict UTF-8
+decode still wins for the single-byte charsets so a mislabelled UTF-8 page reads
+correctly. Byte fixtures distinguish each encoding. Rough effort: about one hour.
 
 ### A82 · Measure the assessment stage rather than the whole turn
 
 General issues — nice-to-have
 
-At `Sources/VervellumKit/Core/Research/ResearchRunner.swift:1788–1800`, the assessment
-trace records elapsed time from the beginning of the research turn, so its duration
-includes planning, search, page reading, and answer generation. Maintainers diagnosing
-a slow assessment provider are shown a plausible but incorrect stage time; end users
-are unaffected.
-
-Suggested fix: capture a monotonic stage start immediately before assessment, as the
-revision path already does, and report only the assessment interval. Rough effort:
-under one hour.
-
-Implemented in open PR #237. Restore this entry if that PR closes unmerged.
+#237 resolved this: the assessment trace captures a start immediately before the
+assessment and reports only that interval, using a monotonic clock. Maintainers
+diagnosing a slow assessment provider now see the assessment duration; end users
+are unaffected. Rough effort: under one hour.
 
 ### A83 · Evict idle research sessions
 
@@ -1789,18 +1786,10 @@ Sources/VervellumKit/Core/Research/ResearchSession.swift:336–360. Effort: M.
 
 General issues — nice-to-have
 
-`SourceRow` and the `FindingsView` chip call `NSWorkspace.shared.open` directly,
-while citation chips go through `CitationText.openable`, which refuses every scheme
-but http(s) with a host. Sources are http(s) by construction today, so this is
-defence in depth rather than a live hole — but the funnel exists precisely because a
-view should not trust upstream filtering.
-
-Suggested fix: expose the existing `openable` check and route both call sites
-through it.
-
-Implemented in open PR #255: one openable-URL predicate is shared by the citation
-chip, the source row and the finding chip, and userinfo is refused at click time as
-well as at harvest time. Restore this entry if that PR closes unmerged.
+#255 resolved this: `SourceRow` and the `FindingsView` chip now route through the
+same openable-URL predicate as the citation chip, which refuses every scheme but
+http(s) with a host, and userinfo is refused at click time as well as at harvest
+time. Sources are http(s) by construction today, so this was defence in depth.
 
 Accept: no behaviour change for a real source; a malformed stored URL cannot launch
 another scheme.
@@ -1857,16 +1846,15 @@ Bind saved draft citations to the evidence available when that draft was generat
 
 Bugs — nice-to-have
 
-Any image-bearing HTTP 400 can be attributed to missing vision, even when a wrong model name caused the failure. This costs a retry and can suppress later images for that provider.
-
-Suggested fix: Record image rejection only after the no-image retry succeeds; retain sanitized errors and per-provider state.
+Before #234, any image-bearing HTTP 400 could be attributed to missing vision,
+even when a wrong model name caused the failure, costing a retry and potentially
+suppressing later images for that provider. #234 records image rejection only after
+the no-image retry answers, retaining sanitized errors and per-provider state, with
+the double-failure case pinned.
 
 Accept: Test both successful image fallback and a 400 that also fails without images.
 
 Where: Sources/VervellumKit/Core/Research/ChatCompletionsClient.swift:302–317. Effort: 2 hours.
-
-Implemented in open PR #234 (both flags set only after the retry answers, with the
-double-failure case pinned). Restore this entry if that PR closes unmerged.
 
 ### R01 · Retain a first-use selection seed
 
@@ -1896,17 +1884,14 @@ Where: Tests/VervellumKitTests/ThreadArchiveTests.swift:263–276, assertion :27
 
 Aesthetics and theming — nice-to-have
 
-NoticesView uses the same mixed-color warning triangle for every TurnNotice, including answerRegathered and other informational events.
-
-Suggested fix: Map notices to a tone and symbol, reused by native and optionally Pango rendering.
+Before #240, NoticesView used the same mixed-color warning triangle for every
+TurnNotice, including answerRegathered and other informational events. #240 maps
+notices to a shared `NoticeTone` in Core, used by both renderers, with
+informational notices using the secondary text colour.
 
 Accept: Retain written labels, uncertainty and accessible distinctions; informational styling must not become a truth seal.
 
 Where: Vervellum/Views/TurnView.swift:248; PangoMarkup.notices.
-
-Implemented in open PR #240 (a shared `NoticeTone` in Core, used by both renderers;
-informational notices use the secondary text colour). Restore this entry if that PR
-closes unmerged.
 
 ### R04 · Normalize common publication-date spellings
 
@@ -2023,7 +2008,7 @@ Prototype a local “Find in assessed answer” action when a finding has one ve
 
 Novel, delightful, or quirky ideas worth trying — nice-to-have
 
-Implemented in open PR #247: `ResearchTurn.citesSingleDomain(using:)` derives the
+Implemented in #247 (merged): `ResearchTurn.citesSingleDomain(using:)` derives the
 cue from the same `Source.domain` the harvester's diversity cap uses, and the runner
 adds a `singleDomain` notice when two or more cited sources share one domain. One
 cited source, no citations and a varied set do not fire it; the message is a fact
@@ -2339,8 +2324,9 @@ and trimming notices, and keep earlier citation numbers out of subsequent prose.
 Reviewed against `origin/main` at `e90efc3`. Full read of the macOS front end, the
 shared Core pipeline, persistence, the text layer and the Linux/GTK front end; the
 macOS suite passes (1043 tests) and a Debug build runs without runtime warnings.
-Four small fixes from this pass are open in PRs #233 (range citations), #234
-(image-retry state), #236 (negative attachment size) and #240 (notice tones); their
+Four small fixes from this pass were carried by PRs #233 (range citations), #234
+(image-retry state), #236 (negative attachment size) and #240 (notice tones).
+#234 and #240 merged; #233's work landed in #245 and #236's in #235. Their
 slices are annotated in place above and are not repeated here. Concurrent branches
 and other agents' PRs were not inspected.
 
@@ -2431,13 +2417,13 @@ Visual / accessibility — nice-to-have
 fixed `frame(width: 20, height: 18)` (`Vervellum/Views/PanelHeaderView.swift`). At
 140 % text the glyph is 14.7 pt in an 18 pt frame and the touch target stays
 20 × 18 pt, well below the 44 pt guideline. The five controls also crowd at the
-right edge with no padding. Open PR #205 fixes the target size; this entry is the
-scaling half — verify against #205 before implementing. PR #230 (Mistral Vibe
-pass) independently grows the hit target to 26×26 via real-frame padding, which
-covers the fixed-size half here as well; the textScale-scaling half remains open.
+right edge with no padding. #205 closed without merging and its work landed in
+#230 (merged), which grows the hit target to 26×26 via real-frame padding and
+covers the fixed-size half here; the textScale-scaling half remains open.
 
-Suggested fix: scale the frame with `textScale`, or use a minimum 44 pt hit area
-with centre alignment, and keep the glyph centred.
+Suggested fix: scale the frame with `textScale` while preserving the enlarged
+hit target from #230, or use a minimum 44 pt hit area with centre alignment, and
+keep the glyph centred.
 
 Accept: 140 % text shows no clipped glyph; every header control meets the target
 guideline at both ends of the text-size range.
@@ -2519,16 +2505,17 @@ accident.
 
 Bugs — nice-to-have
 
-`ThreadArchive.writeNow` catches every write and rotation error and writes one line
-to stderr. It sets neither `readFailure` nor `eraseFailure`, so `scheduleSave`'s gate
-keeps believing the last save succeeded and Settings keeps showing history as
-healthy. A full disk, a read-only folder or a permission regression is exactly when
-the user needs to know their threads are not being kept. A14 covers backup rotation
-and concurrent erase/flush; this is the primary write path.
+Before #242, `ThreadArchive.writeNow` caught every write and rotation error and
+wrote one line to stderr without setting `readFailure` or `eraseFailure`, so
+`scheduleSave`'s gate kept believing the last save succeeded and Settings kept
+showing history as healthy. A full disk, a read-only folder or a permission
+regression is exactly when the user needs to know their threads are not being kept.
+A14 covers backup rotation and concurrent erase/flush; this is the primary write
+path.
 
-Suggested fix: record a `saveFailure` beside `eraseFailure`, surface it through
-`ThreadStore.eraseFailure` and Settings, and test that a failed write is reported
-without blocking the next save attempt.
+#242 resolves it: `saveFailure` and `backupFailure` are recorded in Vervellum's own
+words, a failed write keeps its snapshot pending for a real retry, and Settings
+shows one storage warning with a **Try Again** button.
 
 Accept: a forced write failure reaches the UI in Vervellum's own words; a later
 successful save clears it; no path or foreign error text is shown.
@@ -2536,30 +2523,20 @@ successful save clears it; no path or foreign error text is shown.
 Where: `Sources/VervellumKit/Core/Store/ThreadArchive.swift:391–420`;
 `Vervellum/Store/ThreadStore.swift` (`eraseFailure`). Effort: half a day.
 
-Implemented in open PR #242: `saveFailure` and `backupFailure` are recorded in
-Vervellum's own words, a failed write keeps its snapshot pending for a real retry,
-and Settings shows one storage warning with a **Try Again** button. Restore this
-entry if that PR closes unmerged.
-
 ### V02 · Time `ResearchTrace.stage` with the injected clock
 
 General issues — nice-to-have
 
-`ResearchTrace.init` takes `now:` and uses it for `started`/`elapsed`, but `stage`
-and the completion logs call `Date()` directly. A test that injects a clock can
-predict `elapsed` but not the per-stage figures, so the trace's per-stage timings
-cannot be fixture-tested.
+#237 landed the monotonic stage clock: `ResearchTrace` reads
+`ProcessInfo.processInfo.systemUptime` through an injected closure, so a mid-turn
+wall-clock adjustment cannot produce a negative or inflated duration, and
+`stage`, `elapsed` and the completion logs all use it. What remains is the fixture
+test: no case pins deterministic per-stage durations.
 
-Suggested fix: store the injected clock and use it for `stage` and the completion
-logs as well.
+Suggested fix: add a fixture-clock test that predicts each stage duration.
 
 Accept: a fixture clock produces deterministic stage durations; live behaviour is
 unchanged.
-
-Addressed in open PR #237: `ResearchTrace` now uses `ProcessInfo.processInfo.systemUptime`
-rather than `Date()`, so a mid-turn wall-clock adjustment cannot produce a negative or
-inflated duration, and the unused `now:` injection is gone. Restore this entry if that
-PR closes unmerged.
 
 Where: `Sources/VervellumKit/Core/Research/ResearchTrace.swift:33–45`. Effort: under
 one hour.
@@ -2572,31 +2549,33 @@ store/text, macOS views/settings) were merged into it. Findings below were
 cross-checked against the entries above; existing IDs are cited instead of
 duplicating them.
 
-### Implemented in this pass (open PRs; restore the finding if a PR closes unmerged)
+### Implemented in this pass (merged, closed or superseded)
 
-- #230 `review/larger-header-hit-areas` — header-button hit target grown from the
-  20×18 glyph frame to 26×26 by padding the button's real frame
+- #230 `review/larger-header-hit-areas` (merged): header-button hit target grown
+  from the 20×18 glyph frame to 26×26 by padding the button's real frame
   (pad → `contentShape(Rectangle())` → inverse pad), derived from
   `PanelTheme.Space.small / 2` so neighbours never overlap; `PanelHeaderViewTests`.
   Covers the target-size half of C06.
-- #239 `review/thread-scroll-shortcuts` — ⌘↑/⌘↓ scroll the thread to top/bottom
-  while the composer holds first responder (`performKeyEquivalent` → new
-  `PanelCommand.scrollToTop/scrollToBottom`, boxed `ScrollViewReader` proxy, top
-  anchor); help text; `PanelCommandTests`. Slice of A65.
-- #241 `review/redactor-case-insensitive-scheme` — `SecretRedactor.urlUserInfo`
+- #239 `review/thread-scroll-shortcuts` (merged): ⌘↑/⌘↓ scroll the thread to
+  top/bottom; while the composer holds text they stay with the composer
+  (`performKeyEquivalent` → new `PanelCommand.scrollToTop/scrollToBottom`, boxed
+  `ScrollViewReader` proxy, top anchor); help text; `PanelCommandTests`. Slice of
+  A65.
+- #241 `review/redactor-case-insensitive-scheme` (merged): `SecretRedactor.urlUserInfo`
   scheme class is `(?i)`, so `HTTPS://u:p@host` is redacted. Redactor slice adjacent
   to A63.
-- #244 `review/composer-whitespace-consistency` — `ComposerCommand.parse` and
-  `commandWord` share one `whitespace` set / `isWhitespace(_:)` (U+200B diverged).
-- #246 `review/about-version-string` — About pane reads
-  `CFBundleShortVersionString` via pure `AboutView.versionText(_:)`; no more
-  `Optional("0.3.1")`.
-- #250 `review/citation-regex-unbounded-digits` — citation pattern is `\d+`, so
-  `[1000]` renders as a chip and is flagged out-of-range instead of passing as
-  plain text.
-- #251 `review/strip-hostile-source-fields` — `HostileText.stripped` applied to
+- #244 `review/composer-whitespace-consistency` (merged): `ComposerCommand.parse`
+  and `commandWord` share one `whitespace` set / `isWhitespace(_:)` (U+200B diverged).
+- #246 `review/about-version-string` (closed refuted): the pinned updater returns a
+  non-optional String, so the About pane never showed `Optional("0.3.1")`; the
+  finding is retired.
+- #250 `review/citation-regex-unbounded-digits` (closed; work landed in #245):
+  citation pattern is `\d+`, so `[1000]` renders as a chip and is flagged
+  out-of-range instead of passing as plain text; #245 treats markers made only of
+  plausible years (1500 to 2100) as prose and caps range expansion.
+- #251 `review/strip-hostile-source-fields` (merged): `HostileText.stripped` applied to
   `publishedAt` and to `linkTitle` (whose path percent-decodes RLO overrides).
-- #253 `review/theme-restyle-open-thread` — `TurnView` carries and compares the
+- #253 `review/theme-restyle-open-thread` (merged): `TurnView` carries and compares the
   palette, `MarkdownBody` passes font/colour explicitly to every `MarkdownText`,
   and `AnswerTextView` refreshes `linkTextAttributes` only when the accent moved;
   the open thread restyles live on a theme change.
@@ -2868,7 +2847,8 @@ General — nice-to-have
 `Formatting.swift:44`: `relativeDate` uses an unpinned `DateFormatter` (a
 non-Gregorian locale yields a Buddhist year) and allocates one per row.
 
-Suggested fix: pin locale/calendar, cache behind a lock.
+Suggested fix: pin the calendar only, keep the user's locale, and cache behind a
+lock.
 
 Accept: a non-Gregorian locale renders Gregorian years; no per-row allocation.
 
@@ -3044,39 +3024,43 @@ confidence is in `tmp.md`; findings below were cross-checked against the entries
 above and existing IDs are cited instead of duplicating them. Concurrent branches
 and other agents' PRs were not inspected during this review.
 
-### Implemented in this pass (open PRs; restore the finding if a PR closes unmerged)
+### Implemented in this pass (merged, closed or superseded)
 
-- #258 `vibe-0jlhruyq/preview-ownership` — `show(takingFocus: true)` clears
-  `isPreviewing`, so a user-summoned panel is no longer hidden when Settings closes.
-- #259 `vibe-0jlhruyq/sweep-gating` — attachment sweeps gate on the archive being
-  writable (`!isReadOnly`, `eraseFailure == nil`); regression test in
+- #258 `vibe-0jlhruyq/preview-ownership` (closed; work landed in #215):
+  `show(takingFocus: true)` clears `isPreviewing`, so a user-summoned panel is no
+  longer hidden when Settings closes.
+- #259 `vibe-0jlhruyq/sweep-gating` (merged): attachment sweeps gate on the archive
+  being writable (`!isReadOnly`, `eraseFailure == nil`); regression test in
   `AttachmentFlowTests` (fails without the fix).
-- #260 `vibe-0jlhruyq/dragged-position` — an open panel is re-placed only when
-  side/width/height actually changed, not on any preference write.
-- #261 `vibe-0jlhruyq/first-launch-no-focus` — the first-launch panel is shown
-  without taking focus.
-- #262 `vibe-0jlhruyq/composer-theme-font` — the composer, placeholder and height
-  measurement use `PanelTheme.NativeFont.at`, so theme font designs reach the typed
-  text.
-- #263 `vibe-0jlhruyq/caret-reduce-motion` — `StreamingCaret` holds a steady opacity
-  under Reduce Motion and resumes blinking if the setting is switched off
-  mid-stream; pure opacity function pinned in `PanelMotionTests`.
-- #264 `vibe-0jlhruyq/followups-offset-ids` — follow-up rows are identified by
-  offset, not by the model-written string.
-- #265 `vibe-0jlhruyq/markdown-body-equatable` — `MarkdownBody` is Equatable (slice of
-  A20; annotated in place above).
-- #266 `vibe-0jlhruyq/jpeg-pasteboard` — JPEG clipboard images and drags are accepted
-  as-is and named off the sniffed bytes (`.jpg`), via a new
+- #260 `vibe-0jlhruyq/dragged-position` (merged): an open panel is re-placed only
+  when side/width/height actually changed, not on any preference write.
+- #261 `vibe-0jlhruyq/first-launch-no-focus` (merged): the first-launch panel is
+  shown without taking focus.
+- #262 `vibe-0jlhruyq/composer-theme-font` (merged): the composer, placeholder and
+  height measurement use `PanelTheme.NativeFont.at`, so theme font designs reach
+  the typed text.
+- #263 `vibe-0jlhruyq/caret-reduce-motion` (closed; work landed in #214):
+  `StreamingCaret` holds a steady opacity under Reduce Motion and resumes blinking
+  if the setting is switched off mid-stream; pure opacity function pinned in
+  `PanelMotionTests`.
+- #264 `vibe-0jlhruyq/followups-offset-ids` (merged): follow-up rows are identified
+  by offset, not by the model-written string.
+- #265 `vibe-0jlhruyq/markdown-body-equatable` (closed; measured no gain, slice of
+  A20 not implemented): 2 body evaluations in 11 updates with and without it, so
+  `MarkdownBody` is not Equatable and the work stays open.
+- #266 `vibe-0jlhruyq/jpeg-pasteboard` (merged): JPEG clipboard images and drags are
+  accepted as-is and named off the sniffed bytes (`.jpg`), via a new
   `AttachmentIntake.name(forPastedImage:sniffing:)`.
-- #267 `vibe-0jlhruyq/delete-all-wording` — the Delete All confirmation names the
-  stored attachment bytes too.
-- #268 `vibe-0jlhruyq/providers-close-reset` — the providers pane reloads on
+- #267 `vibe-0jlhruyq/delete-all-wording` (merged): the Delete All confirmation names
+  the stored attachment bytes too.
+- #268 `vibe-0jlhruyq/providers-close-reset` (merged): the providers pane reloads on
   `.vervellumSettingsDidClose`, so typed keys, an armed Clear and a stale status do
   not survive close/reopen.
-- #269 `vibe-0jlhruyq/deep-followup-json-only` — `ResearchPrompts.deepFollowUp` ends in
-  `\(jsonOnly)` like the other four JSON prompts; pinned by `ResearchPromptsTests`.
-- #270 `vibe-0jlhruyq/searxng-cheap-budget` — SearXNG searches carry a 30 s budget on
-  both clocks (the SearXNG half of A22; annotated in place above).
+- #269 `vibe-0jlhruyq/deep-followup-json-only` (merged): `ResearchPrompts.deepFollowUp`
+  ends in `\(jsonOnly)` like the other four JSON prompts; pinned by
+  `ResearchPromptsTests`.
+- #270 `vibe-0jlhruyq/searxng-cheap-budget` (merged): SearXNG searches carry a 30 s
+  budget on both clocks (the SearXNG half of A22; annotated in place above).
 
 ### A100 · The MCP page reader has no per-page deadline
 
@@ -3431,3 +3415,158 @@ match on a case/whitespace/punctuation-folded question across threads; on a hit 
 a non-blocking Reopen / Ask anyway / Compare prompt. Never auto-send or silently
 substitute the old answer. Where: ThreadLibrary.swift:118, ResearchEngine ask path.
 Effort: M.
+
+## Follow-ups from the 22 November merge pass
+
+### M01 · Sweep attachments only after the removing save succeeds
+
+Bugs — important
+
+Delete and prune sweep attachments before their debounced save lands. If that
+save fails, threads.json still names attachments whose bytes are gone, and the
+thread returns at the next launch without them. #259 gated this only for a
+read-only archive or a failed erase. Found by reading; not reproduced.
+
+Where: ThreadStore.sweepAttachments, ThreadArchive. Effort: M.
+
+### M02 · Report failed test-plist cleanup
+
+General issues — nice-to-have
+
+Suite cleanup deletes plists with a silent `try?`, and PreferencesTests teardown
+force-unwraps values that are unset when setUp fails.
+
+Where: VervellumTests/SuitePlistCleanup.swift,
+VervellumTests/PreferencesTests.swift. Effort: S.
+
+### M03 · Separate critical Linux notices from contradicted verdicts
+
+Visual issues and layout problems — nice-to-have
+
+On Linux a critical notice uses the same glyph and colour as a contradicted
+verdict.
+
+Where: Sources/VervellumKit/Linux/PangoMarkup.swift. Effort: S.
+
+### M04 · Export citations that appear only in finding prose
+
+Bugs — nice-to-have
+
+Transcript export does not harvest citations that appear only in finding prose.
+Found while reviewing #203.
+
+Where: TranscriptFormatter. Effort: S.
+
+### M05 · Name the review workflow correctly in CICD.md
+
+General issues — nice-to-have
+
+CICD.md lists `.github/workflows/glm-review.yml`; the file is
+`zai-code-review.yml`.
+
+Where: CICD.md. Effort: S.
+
+### M06 · Redact URL passwords that have no user name
+
+Bugs — important
+
+URL credential redaction requires a user name, so `scheme://:password@host` is
+not redacted.
+
+Where: Sources/VervellumKit/Core/Platform/SecretRedactor.swift. Effort: S.
+
+### M07 · Share the scheme and host predicate
+
+General issues — nice-to-have
+
+ForbiddenLinkScanner copies SourceHarvester's scheme and host predicate, and the
+openableURL comment misplaces the userinfo check. Share the predicate with an
+explicit userinfo rule and correct the comment.
+
+Where: ForbiddenLinkScanner, SourceHarvester. Effort: S.
+
+### M08 · Clear first-answer warnings after a clean regather
+
+Bugs — nice-to-have
+
+Citation and link warnings raised for a first answer stay after a clean
+regathered answer replaces it. Found by reading; not reproduced.
+
+Where: ResearchRunner.regather. Effort: S.
+
+### M09 · Run the pending hands-on checks
+
+General issues — important
+
+The merged changes had no hands-on GUI, VoiceOver, live-provider,
+release-workflow, Wayland or real-clipboard check.
+
+Where: PLAN.md verification gates. Effort: M.
+
+### M10 · Stop the serial Linux test run crashing without a display
+
+Bugs — nice-to-have
+
+`swift test` without `--parallel` and without a display crashed with signal 11
+in LinuxPanel initialization, on `1e4fc72` and on the merged tree. CI's parallel
+and Xvfb steps pass.
+
+Where: Tests/VervellumKitTests/LinuxPanelLifecycleTests.swift. Effort: S.
+
+### M11 · Report citation markers with broken separators
+
+Bugs — nice-to-have
+
+Markers such as `[1--3]`, `[1-,2]` and `[1, 2, 3,]` are neither cited nor
+reported as invalid, so a revision containing one still counts as clean.
+
+Where: CitationValidator. Effort: S.
+
+### M12 · Enforce owner-only permissions on an unchanged save
+
+Bugs — nice-to-have
+
+ThreadArchive returns early when the bytes are unchanged and does not reapply
+mode 0600. Found by reading; not reproduced.
+
+Where: ThreadArchive.writeNow. Effort: S.
+
+### M13 · Recover from a staged backup
+
+Bugs — nice-to-have
+
+Loading considers the primary and `.bak`, but not a `.bak.tmp` left by a failed
+rotation, and a later rotation deletes that copy. Found by reading; not
+reproduced.
+
+Where: ThreadArchive.load. Effort: S.
+
+### M14 · Define thread-scroll keys while History is open
+
+UX and accessibility — nice-to-have
+
+With History open and an empty composer, Command-Up and Command-Down are
+consumed and scroll nothing, although help presents them as thread shortcuts.
+
+Where: PanelRootView.scrollToEdge, ResearchPanel. Effort: S.
+
+### M15 · Validate citations inside the renderer's block boundaries
+
+Bugs — nice-to-have
+
+A marker split across blocks, such as `[1,\n\n2]` or `[1\n- 2]`, counts as
+cited in document validation but renders as literal text with no chip.
+
+Where: CitationValidator, CitationMask, MarkdownParser. Effort: M.
+
+### M16 · Rescue UTF-8 pages mislabelled UTF-16
+
+Bugs — nice-to-have
+
+Since #232, a BOM-less UTF-8 body declared as `charset=utf-16` decodes to
+unrelated characters and still counts as a successful read. Before it, the
+strict UTF-8 attempt recovered the text. Browsers honour the header too, so
+decide whether evidence reading should be more lenient before changing it.
+Found by review and reading; not reproduced.
+
+Where: DirectPageReader.decode. Effort: S.
