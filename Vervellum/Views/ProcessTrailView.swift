@@ -25,6 +25,8 @@ struct ProcessTrailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let turn: ResearchTurn
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     @Binding var isExpanded: Bool
 
     private var isRunning: Bool { !turn.stage.isTerminal }

@@ -37,12 +37,24 @@ struct TurnView: View, Equatable {
 
     static func == (lhs: TurnView, rhs: TurnView) -> Bool {
         lhs.turn == rhs.turn && lhs.showsProcessTrail == rhs.showsProcessTrail
+            && lhs.palette == rhs.palette
     }
 
     @Environment(\.panelTextScale) private var textScale
 
     let turn: ResearchTurn
     let showsProcessTrail: Bool
+    /// The palette the row was last rendered with. Part of `==` because the theme is a
+    /// global (`PanelTheme.palette`), not an input any parent passes down: without this,
+    /// a theme change re-renders the panel chrome but every `TurnView` compares equal to
+    /// its predecessor and the rendered answer, findings and sources keep the old colours
+    /// until their text changes. A value captured here makes the change an input.
+    ///
+    /// The same holds one level down. Getting this body run again restyles only what it
+    /// draws itself, and SwiftUI skips a child whose stored inputs did not change, so
+    /// every themed view a turn contains stores the palette too, defaulted where it is
+    /// built. `TurnThemeRenderingTests` fails when one of them does not.
+    let palette: PanelPalette
     var onRetry: () -> Void
     var onAskFollowup: (String) -> Void
 
@@ -249,6 +261,8 @@ struct TurnView: View, Equatable {
 
 /// A blinking caret for the moment between the last search and the first token.
 struct StreamingCaret: View {
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The caret's opacity for a brightness tick. Under Reduce Motion it is held
@@ -289,6 +303,8 @@ struct NoticesView: View {
     @Environment(\.panelTextScale) private var textScale
 
     let notices: [TurnNotice]
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
@@ -327,6 +343,8 @@ struct LimitationsView: View {
     @Environment(\.panelTextScale) private var textScale
 
     let text: String
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
@@ -344,6 +362,8 @@ struct FollowupsView: View {
     @Environment(\.panelTextScale) private var textScale
 
     let followups: [String]
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     var onSelect: (String) -> Void
 
     var body: some View {
@@ -382,6 +402,8 @@ struct FailureView: View {
     @Environment(\.panelTextScale) private var textScale
 
     let message: String
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     var onRetry: () -> Void
 
     var body: some View {

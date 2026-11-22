@@ -308,6 +308,7 @@ struct PanelRootView: View {
                         // `TurnView`'s own docs for the whole story.
                         TurnView(turn: turn,
                                  showsProcessTrail: preferences.showProcessTrail,
+                                 palette: PanelTheme.palette,
                                  onRetry: { engine.retry(turn.id) },
                                  onAskFollowup: askFollowup)
                             .equatable()
