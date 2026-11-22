@@ -183,6 +183,25 @@ final class QuestionLinkTests: XCTestCase {
         // rule removes on every other turn. Pinned so it stays a decision.
         XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/a?utm_source=news"),
                        "example.com/a")
+        // `URLComponents.path` percent-decodes, so %E2%80%AE (a bidi RLO) arrives as a real
+        // override character — stripped like every other displayed field. NUL (C0) and a
+        // bidi isolate (U+2067 RLI) are the same class of smuggling vector; pin that they
+        // are stripped too.
+        XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/%E2%80%AE/admin"),
+                       "example.com//admin")
+        XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/%00/admin"),
+                       "example.com//admin")
+        XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/%E2%81%A7/admin"),
+                       "example.com//admin")
+        // Pin the whole bidi class, not just the RLO/RLI samples above: a stripper
+        // scoped to individual characters would pass them while LRE/LRO/FSI/PDI stay open.
+        for raw: UInt32 in [0x202A...0x202E, 0x2066...0x2069].joined() {
+            let pct = String(Unicode.Scalar(raw)!)
+                .addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
+            XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/\(pct)/admin"),
+                           "example.com//admin",
+                           "did not strip U+\(String(raw, radix: 16))")
+        }
         XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com/a#results"),
                        "example.com/a")
         XCTAssertEqual(ResearchRunner.linkTitle(for: "https://example.com:8443/a"),
