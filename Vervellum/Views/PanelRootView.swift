@@ -263,6 +263,7 @@ struct PanelRootView: View {
                     if engine.thread.isEmpty && notice == nil {
                         EmptyStateView(configurationProblems: configurationProblems,
                                        searches: preferences.researchLevel.searches,
+                                       submitOnReturn: preferences.submitOnReturn,
                                        summonShortcut: preferences.summonHotkey.displayString,
                                        onOpenSettings: onOpenSettings,
                                        onSeedComposer: { draft = $0 })
@@ -1166,7 +1167,7 @@ struct PanelRootView: View {
             // field the reader cannot see is a button that did nothing to anyone
             // listening rather than looking.
             if !attachments.isEmpty {
-                announce("Put in the composer — Return sends it with the attachment"
+                announce("Put in the composer — \(preferences.submitKeyName) sends it with the attachment"
                          + (attachments.count == 1 ? "" : "s"))
             }
             return
@@ -1391,7 +1392,7 @@ struct PanelRootView: View {
               ComposerCommand.isHalfTypedCommand(new),
               reopened || ComposerCommand.completions(for: old) == nil
         else { return }
-        let key = preferences.submitOnReturn ? "Return" : "Command-Return"
+        let key = preferences.submitKeyName
         announce("Command list, \(opened.count) \(opened.count == 1 ? "match" : "matches"). "
                  + "\(key) completes the highlighted one.")
     }
