@@ -202,6 +202,13 @@ preserves the previous `.bak`, keeps a failed write's snapshot pending for a rea
 retry, and adds a Settings retry action. Remaining: concurrent erase/flush
 behavior needs regression proof.
 
+The rotation is remove-then-move, not `replaceItemAt`: a crash in that window
+leaves the staging copy but no `.bak`, and the next launch does not finish the
+rotation. `replaceItemAt` would close the window but cannot be overridden in the
+shared Linux test target (corelibs has no `AutoreleasingUnsafeMutablePointer`),
+so the atomic swap was reverted for portability. A future cross-platform test
+seam for the rotation would allow it.
+
 Suggested fix: test failure during recovery, backup rotation and concurrent
 erase/flush before changing synchronization.
 
