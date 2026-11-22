@@ -177,6 +177,29 @@ final class ComposerCommandTests: XCTestCase {
         XCTAssertNil(ComposerCommand.completions(for: "/zzz"))
     }
 
+    /// `parse` and the completion-list predicate must agree on what whitespace is, on
+    /// every platform. The historical definitions disagreed on U+200B (in Darwin's
+    /// `whitespacesAndNewlines`, absent from the Linux set, and never `isWhitespace`),
+    /// so this test pins the explicit union of invisible format characters into the
+    /// shared set: a pasted ZWSP separates the command word for `parse`, `commandWord`
+    /// and the trim alike, on macOS and Linux.
+    func testParseAndCommandWordShareOneWhitespaceDefinition() {
+        let zwsp = "\u{200B}"
+        // Interior: the character is a separator for both paths now — `parse` splits the
+        // word there, and the bare-word test rejects the input — so a command carrying
+        // one cannot parse as a command while completing as nothing (or vice versa).
+        XCTAssertEqual(ComposerCommand.parse("/model\(zwsp)gpt-4o"), .selectModel("gpt-4o"))
+        XCTAssertNil(ComposerCommand.completions(for: "/h\(zwsp)x"))
+        XCTAssertFalse(ComposerCommand.isBareCommandWord("/h\(zwsp)x"))
+        // Edge: it trims exactly like a space, so the completion list is the same.
+        XCTAssertEqual(ComposerCommand.completions(for: "/h\(zwsp)")?.map(\.name),
+                       ["history", "help"])
+        XCTAssertTrue(ComposerCommand.isBareCommandWord("/h\(zwsp)"))
+        // An ordinary space behaves the same both ways.
+        XCTAssertEqual(ComposerCommand.parse("/model gpt-4o"), .selectModel("gpt-4o"))
+        XCTAssertEqual(ComposerCommand.completions(for: "/h")?.map(\.name), ["history", "help"])
+    }
+
     func testHelpTextListsEveryCommand() {
         for command in ComposerCommand.catalogue {
             XCTAssertTrue(ComposerCommand.helpText.contains("/\(command.name)"),
