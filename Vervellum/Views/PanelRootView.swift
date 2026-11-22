@@ -310,7 +310,8 @@ struct PanelRootView: View {
                                  showsProcessTrail: preferences.showProcessTrail,
                                  palette: PanelTheme.palette,
                                  onRetry: { engine.retry(turn.id) },
-                                 onAskFollowup: askFollowup)
+                                 onAskFollowup: askFollowup,
+                                 attachmentData: { store.attachmentData(for: $0) })
                             .equatable()
                             .id(turn.id)
                     }

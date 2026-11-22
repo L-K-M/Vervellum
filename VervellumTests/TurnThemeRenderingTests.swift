@@ -23,7 +23,8 @@ final class TurnThemeRenderingTests: XCTestCase {
 
         var body: some View {
             TurnView(turn: turn, showsProcessTrail: true, palette: theme.palette,
-                     onRetry: {}, onAskFollowup: { _ in })
+                     onRetry: {}, onAskFollowup: { _ in },
+                     attachmentData: { _ in nil })
                 .equatable()
                 .frame(width: TurnThemeRenderingTests.size.width,
                        height: TurnThemeRenderingTests.size.height, alignment: .top)
