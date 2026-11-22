@@ -516,7 +516,10 @@ final class ThreadArchive {
                 // this attempt reported no backup problem, re-run the chmod
                 // rather than clearing a standing permission warning.
                 var backup = attemptBackupFailure
-                if backup == nil {
+                // Only re-check when there is a file to check: a first save
+                // that never produced a primary has no mode to fix and no
+                // standing permission warning worth keeping.
+                if backup == nil, fileManager.fileExists(atPath: fileURL.path) {
                     do {
                         try fileManager.setAttributes([.posixPermissions: 0o600],
                                                       ofItemAtPath: fileURL.path)

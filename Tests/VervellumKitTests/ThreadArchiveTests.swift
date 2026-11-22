@@ -656,6 +656,30 @@ final class ThreadArchiveTests: XCTestCase {
         }
     }
 
+    /// Fails directory creation once (a failed write) and refuses removals (a
+    /// failed erase), standing in for a folder that became read-only.
+    private final class CompoundFileManager: FileManager {
+        var createDirectoryFailures = 1
+        var deniesRemoval = true
+
+        override func createDirectory(at URL: URL,
+                                      withIntermediateDirectories: Bool,
+                                      attributes: [FileAttributeKey: Any]?) throws {
+            if createDirectoryFailures > 0 {
+                createDirectoryFailures -= 1
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            try super.createDirectory(at: URL,
+                                      withIntermediateDirectories: withIntermediateDirectories,
+                                      attributes: attributes)
+        }
+
+        override func removeItem(at URL: URL) throws {
+            guard deniesRemoval else { return try super.removeItem(at: URL) }
+            throw CocoaError(.fileWriteNoPermission)
+        }
+    }
+
     /// "History off means the bytes are gone" is a promise; when the file system
     /// breaks it, the archive has to say so rather than let the toggle claim success.
     func testAFailedEraseIsReportedNotSwallowed() {
@@ -741,6 +765,36 @@ final class ThreadArchiveTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
         XCTAssertTrue(store.library.threads.isEmpty,
                       "a retried erase must also clear the in-memory library")
+    }
+
+    /// A retried erase must not be followed by a save retry that puts the erased
+    /// document back on disk: "history off means the bytes are gone".
+    func testRetryingAfterAnErasureDoesNotResurrectTheDocument() throws {
+        let manager = CompoundFileManager()
+        manager.createDirectoryFailures = 0
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+
+        // The second write fails after the snapshot is queued, so a retry has
+        // something to resurrect — and the old document is still on disk.
+        manager.createDirectoryFailures = 1
+        store.save(thread("two"))
+        store.flush()
+        XCTAssertNotNil(store.storageFailures().save, "the second write should fail")
+
+        store.deleteAll()
+        XCTAssertNotNil(store.eraseFailure,
+                        "the erase should fail while the folder is read-only")
+
+        manager.createDirectoryFailures = 0
+        manager.deniesRemoval = false
+        store.retryErase()
+        store.retrySave()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path),
+                       "a retried save must not rewrite the erased document")
+        XCTAssertTrue(store.library.threads.isEmpty)
     }
 
     /// When no staging copy survived, the retry falls back to rotating the current

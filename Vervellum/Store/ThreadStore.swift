@@ -157,11 +157,19 @@ final class ThreadStore: ObservableObject {
     /// them naming those bytes. A failed write or backup is retried after, because
     /// the archive keeps the exact snapshot that failed.
     func retryStorage() {
+        var erased = false
         if archive.eraseFailure != nil {
             archive.retryErase()
+            erased = archive.eraseFailure == nil
         } else if attachmentEraseFailure != nil {
             eraseAttachments()
         }
+        // A successful erase removed the document, so a retained save snapshot
+        // must not be rewritten over it — "history off means the bytes are gone".
+        // The archive clears its own pending snapshot on erase; this is the
+        // second half, because the published snapshot this reads may be a
+        // publish behind the erase.
+        guard !erased else { return }
         // The snapshot, not the queue: this runs from a button tap, and the
         // warning the reader is answering was published through it.
         let writeFailures = publishedWriteFailures
