@@ -280,16 +280,9 @@ enum CitationText {
     /// and simply does not open. The source list under the answer is where its address
     /// is read either way.
     private static func openable(_ address: String) -> URL? {
-        // A host as well as the scheme. `URL(string:)` will build `https:` — a scheme
-        // and nothing else — and that passes a check that asks only what it starts
-        // with. Nothing is opened by it, but this is the funnel that decides what a
-        // click may reach, and a funnel that admits what it cannot describe is one
-        // nobody can reason about later.
-        guard let url = URL(string: address),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              url.host?.isEmpty == false else { return nil }
-        return url
+        // The shared predicate, so the answer's chips, the source rows and the finding
+        // chips all open exactly the same set of addresses. See `SourceHarvester.openableURL`.
+        SourceHarvester.openableURL(address)
     }
 
     // MARK: Inline parsing
