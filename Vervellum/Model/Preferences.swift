@@ -158,6 +158,8 @@ final class Preferences: ObservableObject {
         set { core.showProcessTrail = newValue }
     }
 
+    var submitKeyName: String { submitOnReturn ? "Return" : "Command-Return" }
+
     var submitOnReturn: Bool {
         get { core.submitOnReturn }
         set { core.submitOnReturn = newValue }

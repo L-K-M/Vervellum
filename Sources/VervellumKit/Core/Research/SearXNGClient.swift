@@ -99,6 +99,12 @@ final class SearXNGClient: SearchBackend {
 
     // MARK: SearchBackend
 
+    /// The budget for one search GET, in seconds. Not the transport's default: that one
+    /// is ten minutes, sized for a local model generating an answer, while a search is
+    /// a small JSON document a server either has or does not. `sendCheapJSON` sets both
+    /// clocks (idle timeout and wall-clock deadline) from this one number.
+    static let searchTimeout: TimeInterval = 30
+
     /// Each call is one stateless GET; the instance answers as many in parallel as it
     /// is configured for, which is the instance operator's throttle rather than ours.
     let supportsConcurrentCalls = true
@@ -130,11 +136,16 @@ final class SearXNGClient: SearchBackend {
 
         var headers: [String: String] = [:]
         if let apiKey { headers["Authorization"] = "Bearer " + apiKey }
-        let request = HTTPTransport.getRequest(url: url, headers: headers)
 
         do {
             let (_, body) = try await trace.stage("SearXNG search") {
-                try await self.transport.sendJSON(request)
+                // The cheap budget, not the transport's ten-minute default: a search
+                // is one small JSON document a server either has or does not, and a
+                // stalled instance must not hold the turn for a generation-sized
+                // allowance. `sendCheapJSON` sets both the idle timeout and the wall
+                // clock from the one number.
+                try await self.transport.sendCheapJSON(url: url, headers: headers,
+                                                       within: Self.searchTimeout)
             }
             return body
         } catch let error as ResearchError where error == ResearchError.rejectedCredential(403) {

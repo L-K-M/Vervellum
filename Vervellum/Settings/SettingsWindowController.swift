@@ -29,6 +29,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let store: ThreadStore
     private let updateChecker: UpdateChecker
     private let onShortcutsChanged: () -> Void
+    /// A preview promoted into a real panel owns focus when Settings closes.
+    var shouldRestoreActivation: () -> Bool = { true }
 
     private weak var appToRestoreOnClose: NSRunningApplication?
 
@@ -91,7 +93,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let restore = appToRestoreOnClose
         appToRestoreOnClose = nil
         NSApp.revertToAccessoryIfNoOrdinaryWindows(excluding: window)
-        if let restore, !restore.isTerminated {
+        if shouldRestoreActivation(), let restore, !restore.isTerminated {
             NSApp.restoreActivation(to: restore)
         }
     }

@@ -260,6 +260,22 @@ final class PangoMarkupTests: XCTestCase {
         let href = String(markup[start..<markup.index(before: end)])
         XCTAssertEqual(href.removingPercentEncoding, "What <next>?")
     }
+
+    /// The tone mapping is shared with macOS, so a status change is not drawn in the
+    /// warning colour and an unchecked answer is.
+    func testNoticesUseTheirToneColourAndGlyph() {
+        let status = PangoMarkup.notices([.answerRevised])!
+        XCTAssertTrue(status.contains(PangoMarkup.Colour.secondary), status)
+        XCTAssertTrue(status.contains("ℹ"), status)
+
+        let caveat = PangoMarkup.notices([.contextTrimmed])!
+        XCTAssertTrue(caveat.contains(PangoMarkup.Colour.mixed), caveat)
+        XCTAssertTrue(caveat.contains("⚠"), caveat)
+
+        let critical = PangoMarkup.notices([.assessmentUnavailable])!
+        XCTAssertTrue(critical.contains(PangoMarkup.Colour.contradicted), critical)
+        XCTAssertTrue(critical.contains("✗"), critical)
+    }
 }
 #endif
 
