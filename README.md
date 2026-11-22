@@ -63,7 +63,9 @@ runs the searches and answers based on current sources.
   limit and relaunching brings the threads back. Be aware how small "until something is
   saved" is, though: asking one question writes the trimmed list, and that is what makes
   it permanent. The write rotates the previous file to `threads.json.bak` first, so
-  there is one more chance after that and no more. Active turns are checkpointed;
+  there is one more chance after that and no more. (The copy is staged as
+  `threads.json.bak.tmp`, which stays until a failed rotation can be finished.)
+  Active turns are checkpointed;
   interrupted work reopens as incomplete, with its partial answer retained.
 - **Keyboard-first.** `Return` asks, `Esc` clears then closes, `↑`/`↓` walk back
   through earlier questions, `/` opens commands. Everything in the header is also a

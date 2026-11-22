@@ -389,13 +389,16 @@ final class ThreadArchive {
                     // A rotation completed through the staging copy never
                     // re-attempts the primary's chmod. Retry it here so a
                     // failed owner-only permission is not cleared while the
-                    // saved file may still be readable by others.
-                    do {
-                        try fileManager.setAttributes(Self.ownerOnlyPermissions,
-                                                      ofItemAtPath: fileURL.path)
-                    } catch {
-                        backup = Self.permissionFailureMessage(
-                            in: directory, file: fileURL.lastPathComponent)
+                    // saved file may still be readable by others. An erase can have
+                    // taken the primary, and then there is no mode to enforce.
+                    if fileManager.fileExists(atPath: fileURL.path) {
+                        do {
+                            try fileManager.setAttributes(Self.ownerOnlyPermissions,
+                                                          ofItemAtPath: fileURL.path)
+                        } catch {
+                            backup = Self.permissionFailureMessage(
+                                in: directory, file: fileURL.lastPathComponent)
+                        }
                     }
                 } else {
                     backup = Self.backupFailureMessage(in: directory,

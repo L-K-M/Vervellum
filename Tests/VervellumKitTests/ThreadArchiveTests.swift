@@ -785,6 +785,28 @@ final class ThreadArchiveTests: XCTestCase {
         XCTAssertEqual(backup.library.threads.map(\.title), ["three", "two", "one"])
     }
 
+    /// A half-finished erase can take the primary and leave the backup. Retrying must
+    /// not then claim that a file which is gone may be readable by others.
+    func testARetryWithoutAPrimaryClaimsNoPermissionProblem() {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        for title in ["one", "two"] {
+            store.save(thread(title))
+            store.flush()
+        }
+        manager.deniedPaths.insert(fileURL.appendingPathExtension("bak").path)
+        store.save(thread("three"))
+        store.flush()
+        store.deleteAll()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path), "the erase must take the primary")
+        XCTAssertNotNil(store.eraseFailure, "and fail on the backup")
+
+        store.retrySave()
+
+        let warning = store.storageFailures().backup ?? ""
+        XCTAssertFalse(warning.contains("readable"), warning)
+    }
+
     /// The erase warning's retry is the difference between a refusal the reader
     /// can act on and one they can only report.
     func testRetryEraseClearsTheFailure() throws {
