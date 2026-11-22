@@ -51,7 +51,8 @@ struct FindingsView: View {
                 .accessibilityLabel(finding.verdict.label)
 
             VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
-                HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
+                BaselineFlowLayout(spacing: PanelTheme.Space.small,
+                                   lineSpacing: PanelTheme.Space.tight) {
                     Text(finding.verdict.label.uppercased())
                         .font(PanelTheme.Font.label(textScale))
                         .tracking(0.7)
