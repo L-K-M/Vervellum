@@ -1172,21 +1172,31 @@ struct PanelRootView: View {
         submit(question)
     }
 
-    /// Loads text into the composer for editing — never submits. The same
-    /// gesture the empty state's examples use, offered on finished turns as
-    /// "Edit & re-ask".
-    private func seedComposer(_ question: String) {
+    /// Loads a finished turn's question and attachments into the composer for
+    /// editing — never submits. Offered as "Edit & re-ask", and like "Ask again" it
+    /// asks with what the question was asked with, or says what is missing.
+    private func seedComposer(_ turn: ResearchTurn) {
         guard draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               attachments.isEmpty else {
             notice = "Send or clear your current draft and attachments before editing an earlier question."
             announce("Current draft and attachments kept. Send or clear them before editing an earlier question.")
             return
         }
-        draft = question
+        draft = turn.question
         recallIndex = nil
-        // Seeding is silent on screen but invisible to a VoiceOver user, so it
-        // is said out loud — the same reason `askFollowup` announces its load.
-        announce("Question loaded into the composer")
+        guard !turn.attachments.isEmpty else {
+            // Seeding is silent on screen but invisible to a VoiceOver user, so it
+            // is said out loud — the same reason `askFollowup` announces its load.
+            announce("Question loaded into the composer")
+            return
+        }
+        // `receive` does the announcing here: what came back, and what could not.
+        let restored = engine.restoredAttachments(for: turn)
+        let missing = turn.attachments.count - restored.count
+        let refusals = missing == 0 ? [] : ["\(missing) attachment\(missing == 1 ? "" : "s") "
+            + "from that question could not be brought back, so \(missing == 1 ? "it was" : "they were") "
+            + "left out."]
+        receive(AttachmentIntake.Outcome(accepted: restored, refusals: refusals), restoring: true)
     }
 
     private func newThread() {

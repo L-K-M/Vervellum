@@ -57,9 +57,9 @@ struct TurnView: View, Equatable {
     let palette: PanelPalette
     var onRetry: () -> Void
     var onAskFollowup: (String) -> Void
-    /// Loads a question back into the composer for editing — seeding, not
-    /// submitting, so a typo can be fixed rather than re-run verbatim.
-    var onSeedComposer: (String) -> Void = { _ in }
+    /// Loads a question and its attachments back into the composer for editing —
+    /// seeding, not submitting, so a typo can be fixed rather than re-run verbatim.
+    var onSeedComposer: (ResearchTurn) -> Void = { _ in }
     /// Reads back one attachment's stored bytes — called only when a preview is
     /// opened, never per frame: the row itself still shows names alone.
     var attachmentData: (Attachment) -> Data?
@@ -285,7 +285,7 @@ struct TurnView: View, Equatable {
 
                 // Distinct from Ask again, which re-runs the question verbatim:
                 // this one goes back into the composer to be changed first.
-                Button { onSeedComposer(turn.question) } label: {
+                Button { onSeedComposer(turn) } label: {
                     Label("Edit & re-ask", systemImage: "pencil")
                         .font(PanelTheme.Font.caption(textScale))
                 }
