@@ -26,7 +26,7 @@ Codex pass 2026-11-21: reviewed against `origin/main` at `e90efc3`. Four small
 fixes from this pass are open in PRs #233 (range citations, A62), #234
 (image-retry state, S33), #236 (negative attachment size, A80) and #240 (notice
 tones, R03); their implemented slices are annotated in place and are not repeated
-here. New findings C01–C07 are appended at the end. Concurrent branches and other
+here. New findings C01–C07 appear below, with C05 folded into A22. Concurrent branches and other
 agents' PRs were not inspected during this review.
 
 Codex pass 2026-11-21 (little-platypus worktree): reviewed against `origin/main` at
@@ -73,6 +73,10 @@ If one closes unmerged, restore its acceptance criteria here. A18a is covered by
 staged credential edits and cleanup-failure reporting. Keycap now owns Escape in
 the recorder, which retires A75c.
 
+The new checks used main at `d4c9c1c`, the repository screenshot, the macOS views and the shared runner, store and tests. A rendered 360-point fixture at 140% text confirmed that 24 citation chips lost their numbers and displaced the heading. The wrapping patch displayed every number across five lines.
+
+The following slices have implementation PRs. If a PR closes without landing, restore its task from the linked patch. [History search evaluation (#201)](https://github.com/L-K-M/Vervellum/pull/201), [composer shortcut hints (#202)](https://github.com/L-K-M/Vervellum/pull/202), [source publication metadata limits (#206)](https://github.com/L-K-M/Vervellum/pull/206), [model discovery credential ownership (#210)](https://github.com/L-K-M/Vervellum/pull/210), [wrapping finding citations (#220)](https://github.com/L-K-M/Vervellum/pull/220) and [stable source details (#224)](https://github.com/L-K-M/Vervellum/pull/224).
+
 The November 4 review was based on `1924f01` and covered changes through #191.
 It verified Sol3 heads independently, excluded uninspected parallel work and
 flagged #138's proposed code-URL exemption as incompatible with the citation
@@ -101,6 +105,8 @@ design decision and the ambiguous table-delimiter regression tests.
 Historical scores are mean · user/engineer/designer · effort, not new measurements.
 S means local work, M several components, L design work. Estimates are rough.
 
+The 21 November panel and research review produced PRs #198 (history search), #199 (test backup), #208 (draft labels), #209 (regather evidence), and #212 (citation wrapping). Their implemented slices are omitted below. Revisit a slice if its PR closes unmerged.
+
 ## Important
 
 ### A09 · Describe only the searches that actually ran
@@ -124,6 +130,10 @@ as successful. Publish stable intermediate evidence and show a compact
 Plan → Search → Answer → Assess timeline.
 
 Historical progress options: 8.3 · 9/7/9 · M; live query counts 8.0 · 8/8/8 · S; stage timeline 5.7 · 5/5/7 · S.
+
+Earlier effort: M.
+
+Exercise both the initial answer payload and the post-assessment regather payload. Track each planned query through all attempted engines. A successful empty response and a query that failed on every engine need distinct outcomes. Cover a query that succeeds on one engine and fails on another before choosing the persisted representation.
 
 Earlier effort: M.
 
@@ -192,12 +202,21 @@ preserves the previous `.bak`, keeps a failed write's snapshot pending for a rea
 retry, and adds a Settings retry action. Remaining: concurrent erase/flush
 behavior needs regression proof.
 
+The rotation is remove-then-move, not `replaceItemAt`: a crash in that window
+leaves the staging copy but no `.bak`, and the next launch does not finish the
+rotation. `replaceItemAt` would close the window but cannot be overridden in the
+shared Linux test target (corelibs has no `AutoreleasingUnsafeMutablePointer`),
+so the atomic swap was reverted for portability. A future cross-platform test
+seam for the rotation would allow it.
+
 Suggested fix: test failure during recovery, backup rotation and concurrent
 erase/flush before changing synchronization.
 
 Accept: Recovery followed by a failed write must preserve a usable backup. Read-only archives remain untouched. Keep permission-before-content proof. Current writes use queued immutable snapshots; do not reintroduce the obsolete claim that writeNow reads mutable isHistoryEnabled.
 
 Where: Sources/VervellumKit/Core/Store/ThreadArchive.swift:303–337. Earlier effort: M.
+
+Exercise recovery with attachments. ThreadArchive rotates the previous JSON into its backup, while ThreadStore and LinuxEnvironment collect old blobs using the live library. Age a fixture attachment past the collection grace period, prune its thread, flush, damage the primary, and reopen from backup. Decide whether prune promises a recoverable attachment or an explicit missing-file state. Test user-requested deletion and Erase All separately before extending retention.
 
 ### A17 · Make credential acquisition nonblocking and erasure truthful
 
@@ -252,6 +271,10 @@ through the response head and body, while preserving the legitimate
 slow-local-model behavior the 600 s interval protects; route cheap SearXNG calls
 through the existing cheap-JSON budget helper with cancellation coverage.
 
+The SearXNG half is implemented in open PR #270 (`vibe-0jlhruyq/searxng-cheap-budget`):
+`SearXNGClient.search` now uses `sendCheapJSON` with a 30 s budget on both clocks,
+pinned by a `SearXNGClientTests` case. Restore that half if the PR closes unmerged.
+
 Accept: no headers, idle body, trickle-versus-keepalive, cancellation before
 registration, early matching MCP response, refused redirects, and producer-cap
 fixtures; inject clocks/transport at the service boundary or use loopback fixtures,
@@ -260,6 +283,8 @@ never live providers.
 Cheap-call location: Sources/VervellumKit/Core/Research/SearXNGClient.swift:123–128. Cheap-budget effort: 2 hours (S31).
 
 Earlier effort: M.
+
+C05 adds the buffered JSON path to this fixture. In `HTTPTransport.swift`, `fetch` races the open-and-collect pair against a timer, while `sendJSON` awaits the head before starting its body clock. MCP and cheap JSON use that path. Cover a delayed head within a longer idle allowance (120 seconds in the original example), a slow body and cancellation. Preserve the existing credential-free fetch behavior.
 
 ### A23 · Preserve edited drafts during recall and suggestions
 
@@ -473,6 +498,8 @@ Coalescing, Equatable turn views and SelectableText exist. The Linux renderer pr
 GTK widgets during answer-only growth; stage, source and notice changes still
 rebuild the thread. Native MarkdownBody still parses the growing answer per
 evaluation, and composer measurement repeats when its inputs have not changed.
+`MarkdownBody` itself is now Equatable (open PR #265, `vibe-0jlhruyq/markdown-body-equatable`),
+so unchanged notice/draft blocks are no longer re-parsed at the snapshot rate.
 
 Profile a stream containing tables, code and grouped citations with older turns visible. Record main-thread time and snapshot count. Preserve code masking when reusing completed blocks.
 
@@ -531,31 +558,15 @@ no unintended send, cancellation or unrelated editing-key interception. Quit is 
 
 Earlier effort: M.
 
-### A25 · Evidence card stability and grouped sources
+### A25 · Expose each member of a grouped citation
 
-Visual issues and layout problems — nice-to-have
+A grouped citation such as `[2, 5]` exposes only the first source from the answer. Give each number an individually accessible action that resolves through the turn's own source list. Retain the summary/page-read caveat, title, date and domain. Show the external-open affordance on keyboard focus. Verify each source with keyboard and VoiceOver, check invalid numbers and ensure a single action opens only the chosen page.
 
-The `SourcePreview` popover with its permanent summary/page-read caveat and
-domain/date rows exists. Remaining: revealing a summary still changes row height,
-moving later sources under the pointer and hiding the summary from keyboard users
-(S19; explicit disclosure or a stable-size inspector, with keyboard activation);
-a grouped citation `[2, 5]` opens or exposes only the first source; expose every
-grouped source (one chip per number is the smaller change, B86); opening several
-tabs must never be an implicit group action.
+The stable source-list details work is tracked in the November 21 implementation. Test both entry points at 140% with a long snippet and the panel against either screen edge. After dismissing Details, keyboard focus should return to its button. Earlier group-chip estimate B86, source-row estimate S19 (half a day), historical score 7.7 · 7/7/9 · S.
 
-Suggested fix: fixed-height rows with explicit disclosure; keyboard-activatable
-preview; per-number chips that each resolve to their own source. Show the browser
-glyph on keyboard focus, not only hover. Put the snippet/caveat in the accessibility
-value and a permanent summary/page-read tag beside the number.
+D09 proposed an inline first-click preview and a second click to open the page (half-day estimate). Compare the explicit Details and Open controls in #224 with that alternative on a narrow panel before changing primary-click behavior. Verify both actions from the keyboard alongside D01.
 
-Accept: keyboard and screen-reader inspection of every source's domain, date,
-snippet and "Search summary; not the full page" caveat; hover never changes
-transcript height; group citations expose all members; the app-owned numbered-citation
-rule is preserved.
-
-Where: Vervellum/Views/SourcesView.swift:181–197. Effort: half a day (S19). Historical score: 7.7 · 7/7/9 · S.
-
-Earlier effort: M.
+Compare SourcePreview at its fixed 300-point width with a screen-bounded width at 100% and 140% text, with long titles and dates in both appearances. Try a neutral document accent for page availability. Verify that a read page with a contradicted claim remains visually distinct from a supported verdict and that the full title remains inspectable.
 
 ### A26 · Verify the remaining narrow-panel layouts
 
@@ -565,6 +576,8 @@ displays at minimum width and 140% type, including long model, domain and date
 strings, RTL and CJK text. Capture the failing layout before changing it. Every
 essential label and action should stay readable and reachable. Historical B87/S20
 estimate for evidence wrapping was half a day.
+
+The November 21 reviews include a second implementation and a rendered 24-source fixture. The hosted #212 fixture verified wrapping at 360 points, 140% text and both layout directions. Check keyboard traversal across line breaks, separate VoiceOver actions, and scrolling the complete final line into view.
 
 ### A27 · Measured contrast and live accessibility observation
 
@@ -599,6 +612,8 @@ foreground and background colors across the actual panel presets.
 Earlier palette notes: mixed about 2.1:1 and supported about 2.9:1 on light grounds; Linux used #c4630f, #217a4a and #9a6a10 as candidate light-safe hues. Also inspect dark card contrast, a light-mode scrim and an opaque reduced-transparency tint. These are historical estimates/design hypotheses, not fresh measurements.
 
 Earlier effort: M.
+
+For a repeatable contrast fixture, render the same completed turn over neutral light, neutral dark and high-chroma desktops at 360 points and 140% scale. Sample the composited domain label, verdict text and keyboard focus ring, including the Reduce Transparency rendering. Record wallpaper, theme and measurements before tuning the scrim.
 
 ### A29 · Match Markdown fences and complete code-block actions
 
@@ -804,6 +819,8 @@ Accept: Use existing turn data; retain incomplete/failure labels and unambiguous
 
 Earlier effort: S–M.
 
+L04 adds a plain-text Copy Receipt action beside Copy. Use TranscriptFormatter and list the level, successful searches, pages actually seen by the model, evidence kept or dropped, assessment model and elapsed time wherever the turn records them. Omit unavailable fields in older archives. Keep the incomplete state explicit for a turn that stopped before assessment.
+
 ### A36c · Remember the last inspected source
 
 Novel, delightful, or quirky ideas worth trying — nice-to-have
@@ -815,6 +832,8 @@ Suggested fix: Keep a session reading bookmark. Persist scroll offsets only afte
 Accept: Do not let streaming or layout changes override deliberate reading position.
 
 Earlier effort: S–M.
+
+Use the turn ID alongside the citation number for an explicit return to the originating claim. Check repeated source numbers across turns, a revised answer, thread deletion and Reduce Motion. Use only session state and avoid additional provider requests.
 
 ### A36d · Seed a counter-evidence follow-up
 
@@ -1789,18 +1808,6 @@ another scheme.
 Where: Vervellum/Views/SourcesView.swift:140–142; Vervellum/Views/TurnView.swift:93–94;
 Vervellum/Views/MarkdownText.swift:282–293. Effort: S.
 
-### S07 · Match key hints to the submit preference
-
-Usability: speed, convenience, clarity — nice-to-have
-
-Empty-state Return/Shift-Return advice is hard-coded and contradicts the disabled Return-to-send preference. Platform-specific help alone does not resolve preference-sensitive wording.
-
-Suggested fix: Derive empty-state and relevant help hints from the submit preference.
-
-Accept: Check both preference settings and each platform's actual submit chord.
-
-Where: Vervellum/Views/EmptyStateView.swift:39. Effort: 1 hour.
-
 ### S08 · Clear stale preview state
 
 Bugs — nice-to-have
@@ -1842,12 +1849,9 @@ Accept: Cover clean revisions of invalid drafts, assessment-only invalid referen
 
 Where: Sources/VervellumKit/Core/Research/ResearchRunner.swift:1664,1680–1687,2036–2058; ResearchModels.swift:633–637. Effort: half a day.
 
-Verify attribution after successive rewrites. A regather adopts findings for the new
-answer. A subsequent revision can keep that answer as the draft. Both native panels
-currently tell assistive technology that findings grade the draft in all cases.
-Use one rule for the disclosure hint, notices and transcript heading. Exercise
-regather alone, revise alone, both in sequence, interrupted adoption and legacy
-records. Preserve uncertainty when an older archive lacks enough information.
+Draft attribution for regather, revision, both in sequence and legacy records is covered by #208. Verify interrupted adoption as part of the provenance fixtures below.
+
+Bind saved draft citations to the evidence available when that draft was generated. TranscriptFormatter can omit a draft-only citation from its bibliography. The macOS and GTK draft renderers can resolve a formerly invalid number against sources added later. Capture the draft-time source bound and which pages were read, define a conservative display for older regather records without that provenance, and use it in both renderers and export. Test a draft-only source, a number introduced on the second pass, and a page promoted from summary to full text. Keep unrelated hits out of the bibliography.
 
 ### S33 · Confirm image fallback before disabling vision
 
@@ -1928,17 +1932,17 @@ Accept: Complete configured names without provider calls or exposing credentials
 
 Where: Sources/VervellumKit/Core/Text/ComposerCommand.swift:136.
 
-### R06 · Profile large-library search before hiding results
+### R06 · Measure history search latency
 
-Performance problems, stuttering, and jank — nice-to-have
+ThreadLibrary scans questions and full answers on each query edit, up to 2,000 threads. The matcher also checks findings, limitations, follow-ups and sources. A missing phrase across 200 one-turn threads with 8,200-character answers took 0.56–1.07 seconds per scan in a local debug build on arm64. [The single-scan change](https://github.com/L-K-M/Vervellum/pull/213) shares the result for the rows and empty state. Compare release-build input latency at the default and maximum library sizes.
 
-ThreadLibrary scans questions and full answers on each query edit, up to 2,000 threads. The matcher also checks findings, limitations, follow-ups and sources. A missing phrase across 200 one-turn threads with 8,200-character answers took 0.56–1.07 seconds per scan in a local debug build on arm64. [The single-scan change](https://github.com/L-K-M/Vervellum/pull/213) shares the result for the rows and empty state. Measure release-build input latency at the default and maximum library sizes before selecting a search strategy.
+The #198 fixture took median times of 730 ms and 5.97 s for an unsuccessful query over 200 and 2,000 threads respectively (one 4.3 KB answer per thread, nine debug scans on a busy Mac). That PR removes full-text scanning from the UI thread. Measure time to first useful result and memory on release builds before adding an index or a roughly 150 ms debounce. Preserve all search fields and newest-first ordering. A questions-only early return would need an explicit scope choice from the reader.
 
-Suggested fix: Profile a roughly 150 ms debounce or an index with correct invalidation. The concurrent review suggested questions-first with an answer fallback only for a small question set; that changes result completeness and needs an explicit scope decision, not a silent optimization.
+Where: ThreadLibrary, HistoryView and the macOS history matcher in #198.
 
-Accept: Preserve answer matches, ordering and live library changes unless the reader chooses a narrower search scope.
+A no-match fixture of 2,000 one-turn threads with about 4 KB of answer text each took 1.1–1.9 seconds per scan across three optimized runs on a busy arm64 Mac (3.8–5.6 seconds in Debug). The fixture times ThreadLibrary.search, excluding rendering. Record end-to-end release keystroke latency for early, late and missing matches, then run matching off the UI thread against immutable library snapshots. Cancel obsolete work, key results to both query and library revision, and test deletion or a streamed update during a search. A query-only cache can leave a removed thread on screen.
 
-Where: Sources/VervellumKit/Core/Store/ThreadLibrary.swift:118–126; Vervellum/Views/HistoryView.swift:25.
+Prototype a bounded excerpt from the first matching field so a URL or finding match explains why an otherwise unrelated title appears. Reuse that scan and render plain text. Test composed characters, a match near the end of a long answer, VoiceOver and clearing the filter.
 
 ### G01 · Let Linux level controls wrap
 
@@ -2012,6 +2016,8 @@ sentence-level alignment.
 
 Accept: No model call; bound work on long answers, retain both complete versions,
 and say which prose the findings assessed.
+
+Prototype a local “Find in assessed answer” action when a finding has one verbatim match. Use the assessment target to select the draft or displayed answer, reveal the passage, and preserve the return position. Suppress the jump for paraphrases and repeated matches. Exercise a regather followed by correction and keyboard focus after disclosure.
 
 ### N01 · Flag a single-domain evidence set
 
@@ -2096,6 +2102,8 @@ Suggested fix: Plan a String Catalog, locale-aware dates and a portable Core loc
 Accept: Use existing data and explicit user actions; no silent model call or privacy expansion.
 
 Historical score: 2.7 · 3/2/3 · L.
+
+Give the submit chord one localized spoken name shared by the first-use hint and live VoiceOver announcements, with a separate compact visual keycap.
 
 ### N08 · Open cited sources by number key
 
@@ -2314,7 +2322,7 @@ field and open the thread at the matching turn. Have ThreadLibrary's existing
 search return the match location as part of its walk. Generate the excerpt only
 where it is displayed. Preserve result ordering, normal unfiltered reopening and
 the session identity of detached live threads. Exercise a claim-only hit in an
-older turn, mixed-script input and a cleared query. Measure together with R06.
+older turn, a source-title-only match, mixed-script input and a cleared query. Announce the matching field and excerpt with the row, and test keyboard opening, a changing answer, and deletion during search. Measure together with R06.
 
 ### H02 · Distinguish retrieved and cited domains in follow-up context
 
@@ -2415,24 +2423,6 @@ Accept: a 4 × 4 MB attach does not stall the composer; a crash between the writ
 and the save still leaves bytes the sweep collects; a failed write still raises
 `attachmentNotStored`.
 
-### C05 · `sendJSON` has no wall-clock deadline on the response head
-
-General issues — nice-to-have (extends A22)
-
-`HTTPTransport.fetch` races a deadline task against the open+collect pair, but
-`sendJSON` awaits `open` with no timer
-(`Sources/VervellumKit/Core/Research/HTTPTransport.swift`). The request's
-`timeoutInterval` is an idle timeout, so a server that accepts the connection and
-never sends headers holds the call for the full 120 s idle allowance rather than
-the exchange deadline the caller passed. MCP and cheap JSON calls use this path.
-
-Suggested fix: give `sendJSON` the same independent clock as `fetch`, covering the
-head and the body, and cancel the URL task when it fires.
-
-Accept: a head that never arrives fails at the caller's deadline; a slow body
-still fails at the same deadline; cancellation still stops the task; no change to
-`fetch`'s behaviour.
-
 ### C06 · Header buttons have a fixed hit area that ignores the text-size preference
 
 Visual / accessibility — nice-to-have
@@ -2452,21 +2442,11 @@ with centre alignment, and keep the glyph centred.
 Accept: 140 % text shows no clipped glyph; every header control meets the target
 guideline at both ends of the text-size range.
 
-### C07 · Performance smalls
+### C07 · Profile transcript equality alongside rendering
 
-Performance — nice-to-have
+`TurnView.==` compares a growing answer, sources and findings on the coalescer's 10 Hz delivery path. Profile equality separately from MarkdownBody reparsing the whole answer on each publish and ComposerView.height(for:) constructing a fresh TextKit stack (A20/S14). Before narrowing the comparison, test an unchanged-length answer correction, newly arrived evidence, notices and findings. Each can change the visible row without a stage transition.
 
-- `TurnView.==` compares the whole turn, including the growing answer and the
-  source/findings arrays, at the coalescer's 10 Hz. A stage/answer-prefix
-  comparison would be cheaper and equally correct for the render decision.
-- `MarkdownBody` re-parses the whole answer on every publish (A20's remainder);
-  `ComposerView.height(for:)` builds a fresh TextKit stack per call (A20/S14).
-- `ThreadLibrary.search` scans every field of every turn per keystroke with no
-  debounce or index (R06).
-- `ResearchEngine.sessions` is never evicted (A83).
-
-These are collected here so a future performance pass has one list; each is
-profiled before it is redesigned.
+For large-library matching use R06's fixture. For session retention use A83. These measure different costs and need separate before/after measurements.
 
 ### L01 · The composer is marked dirty ten times a second while an answer streams
 
@@ -2518,21 +2498,6 @@ flag.
 
 Accept: the same payloads cap to the same bytes; the `attachmentTrimmed` notice still
 fires exactly when something was cut.
-
-### L04 · A per-turn evidence receipt
-
-Novel, delightful, or quirky — nice-to-have
-
-A short, copyable block per turn: level, searches run, pages read, evidence kept and
-dropped, the assessment model, and wall-clock. Every field is already on the turn, so
-it is a formatter rather than new state, and it makes a turn auditable after the fact —
-the same job `TranscriptFormatter` does for the answer, extended to the run.
-
-Suggested fix: add a `receipt` property beside `transcript` in `TranscriptFormatter`,
-and a Copy-Receipt affordance next to Copy. Keep it plain text; no new prompt surface.
-
-Accept: the receipt names only facts the turn already records; it does not imply a
-check that did not run.
 
 ### L05 · Copy a finding's citations from its chip
 
@@ -2590,6 +2555,11 @@ logs as well.
 
 Accept: a fixture clock produces deterministic stage durations; live behaviour is
 unchanged.
+
+Addressed in open PR #237: `ResearchTrace` now uses `ProcessInfo.processInfo.systemUptime`
+rather than `Date()`, so a mid-turn wall-clock adjustment cannot produce a negative or
+inflated duration, and the unused `now:` injection is gone. Restore this entry if that
+PR closes unmerged.
 
 Where: `Sources/VervellumKit/Core/Research/ResearchTrace.swift:33–45`. Effort: under
 one hour.
@@ -2697,21 +2667,11 @@ empty but present.
 Where: `Sources/VervellumKit/Core/Providers/ProviderSettings.swift:650,675`.
 Effort: under one hour.
 
-### A91 · Accept a missing `finish_reason` as a normal completion
+### A91 · Verify a gateway's completion signal before accepting a missing finish reason
 
-Bugs — nice-to-have
+Some local gateways reportedly omit `finish_reason` on successful answers. The earlier proposal to accept nil unconditionally conflicts with the explicit-completion contract in PR-REVIEW.md and the partial-stream fixtures. Capture a content-free fixture for the specific gateway and identify a documented positive completion signal. Evaluate compatibility only for that response shape. Pair the successful fixture with a truncated response ending on the same last content token, an idle disconnect and a length-limited answer. Preserve partial prose and its interruption notice whenever the two outcomes are indistinguishable.
 
-`ChatCompletionsClient.checkFinishReason` (`:409`) treats a missing
-`finish_reason` as interrupted; local gateways that omit it on a valid completion
-cause a good answer to be discarded.
-
-Suggested fix: accept `nil` as normal completion; only an explicit
-`length`/`content_filter` (or equivalent) is a stop.
-
-Accept: a fixture response without `finish_reason` completes normally.
-
-Where: `Sources/VervellumKit/Core/Transport/ChatCompletionsClient.swift:409`.
-Effort: under one hour.
+Where: Sources/VervellumKit/Core/Research/ChatCompletionsClient.swift, checkFinishReason. Earlier estimate for the narrow compatibility change was under one hour.
 
 ### A92 · Reject malformed tool-call arguments
 
@@ -3066,19 +3026,408 @@ back.
 
 Where: findings disclosure in `TurnView`; runner follow-up path. Effort: one day.
 
-### D09 · First tap on a source row expands its snippet inline
-
-Delight — nice-to-have
-
-The source-row snippet is hover-only today; a first tap could expand it inline
-before a second tap opens the page.
-
-Accept: one tap reveals the snippet, another opens the page; keyboard equivalent
-via D01.
-
-Where: source list view. Effort: half a day.
+## Verification gaps
 
 Verification gaps noted by this pass: static review cannot confirm Liquid Glass on
 macOS 26, real VoiceOver order, IME composition, frame times on long threads or
 full-screen placement; CI (macOS + Linux + automated GLM review) is the gate and GUI
 QA remains manual.
+
+
+## Mistral Vibe pass 2026-11-21 (second, worktree 0jlhruyq)
+
+Reviewed against `origin/main` at `fc5da67` — a full read of the macOS app, panel,
+store, settings window and shared Core, plus four delegated read-only review passes
+(macOS views; settings/keychain/pasteboard; panel/engine/store; networking and the
+research pipeline). The full write-up with method, per-entry locations and
+confidence is in `tmp.md`; findings below were cross-checked against the entries
+above and existing IDs are cited instead of duplicating them. Concurrent branches
+and other agents' PRs were not inspected during this review.
+
+### Implemented in this pass (open PRs; restore the finding if a PR closes unmerged)
+
+- #258 `vibe-0jlhruyq/preview-ownership` — `show(takingFocus: true)` clears
+  `isPreviewing`, so a user-summoned panel is no longer hidden when Settings closes.
+- #259 `vibe-0jlhruyq/sweep-gating` — attachment sweeps gate on the archive being
+  writable (`!isReadOnly`, `eraseFailure == nil`); regression test in
+  `AttachmentFlowTests` (fails without the fix).
+- #260 `vibe-0jlhruyq/dragged-position` — an open panel is re-placed only when
+  side/width/height actually changed, not on any preference write.
+- #261 `vibe-0jlhruyq/first-launch-no-focus` — the first-launch panel is shown
+  without taking focus.
+- #262 `vibe-0jlhruyq/composer-theme-font` — the composer, placeholder and height
+  measurement use `PanelTheme.NativeFont.at`, so theme font designs reach the typed
+  text.
+- #263 `vibe-0jlhruyq/caret-reduce-motion` — `StreamingCaret` holds a steady opacity
+  under Reduce Motion and resumes blinking if the setting is switched off
+  mid-stream; pure opacity function pinned in `PanelMotionTests`.
+- #264 `vibe-0jlhruyq/followups-offset-ids` — follow-up rows are identified by
+  offset, not by the model-written string.
+- #265 `vibe-0jlhruyq/markdown-body-equatable` — `MarkdownBody` is Equatable (slice of
+  A20; annotated in place above).
+- #266 `vibe-0jlhruyq/jpeg-pasteboard` — JPEG clipboard images and drags are accepted
+  as-is and named off the sniffed bytes (`.jpg`), via a new
+  `AttachmentIntake.name(forPastedImage:sniffing:)`.
+- #267 `vibe-0jlhruyq/delete-all-wording` — the Delete All confirmation names the
+  stored attachment bytes too.
+- #268 `vibe-0jlhruyq/providers-close-reset` — the providers pane reloads on
+  `.vervellumSettingsDidClose`, so typed keys, an armed Clear and a stale status do
+  not survive close/reopen.
+- #269 `vibe-0jlhruyq/deep-followup-json-only` — `ResearchPrompts.deepFollowUp` ends in
+  `\(jsonOnly)` like the other four JSON prompts; pinned by `ResearchPromptsTests`.
+- #270 `vibe-0jlhruyq/searxng-cheap-budget` — SearXNG searches carry a 30 s budget on
+  both clocks (the SearXNG half of A22; annotated in place above).
+
+### A100 · The MCP page reader has no per-page deadline
+
+Bugs — important
+
+`ReaderMCPClient.read` loops over sources calling `session.callTool`, whose deadline
+defaults to the transport's 600 s; `DirectPageReader` bounds each page at 12 s, the
+reader path has no equivalent. Up to 8 pages per deep turn can hold a turn for ~80
+minutes on a stalled reader service, with no visible "hung" vs "slow" distinction.
+
+Suggested fix: thread a `deadline` through `MCPSession.call`/`callTool` (or a
+`read(_:within:)` requirement on `PageReading`), budget per batch by subtracting
+elapsed time across the loop, sized near `DirectPageReader`'s per-page bound. Pure
+Foundation/Dispatch. Where: ReaderMCPClient.swift:68-84, MCPSession.swift:100-102,
+HTTPTransporting.swift:63-69. Effort: S-M.
+
+### A101 · Reader plain text is mangled by the HTML extractor
+
+Bugs — important
+
+`ReaderMCPClient.pageText` always runs `HTMLTextExtractor.text(from:)`, so a reader
+returning plain text containing code (`a < b`, `<div>`, `&amp;`, `&#169;`) gets tags
+stripped and entities decoded before becoming evidence — lossy on the path whose
+purpose is fidelity. Suggested fix: detect markup vs plain text and add a lossless
+plain-text mode (only `HostileText.stripped` + whitespace normalization + the length
+cap); pure and unit-testable. Where: ReaderMCPClient.swift:138-146,
+HTMLTextExtractor.swift:238-303. Effort: S-M.
+
+### A102 · Page reading fails open on a missing Content-Type
+
+Bugs — important
+
+`PageReader` accepts an empty Content-Type and its decode falls back to Latin-1,
+which cannot fail, so a host serving binary without a type has its bytes decoded into
+"page text". Suggested fix: fail closed on an absent type, or reject decoded text
+containing NUL / a high control-character ratio (mirror `Attachment.text(from:)`).
+Where: PageReader.swift:201-207, 459-475. Effort: S.
+
+### A103 · Unbounded model-written metadata can fail a healthy turn
+
+Bugs — important
+
+`purpose`, `displayQuery`, `reading`, `subquestions`, `claim`, `reasoning` and
+`followups` enter later payloads uncapped; `encodeUserContent` hard-fails past
+`maxCharacters` with the non-retryable `invalidContext`, so one verbose model reply
+kills an otherwise healthy turn at the answer or revision stage, blamed on the
+question. Suggested fix: cap each value where it enters a payload
+(`PlanParser`/`AssessmentParser`, `searches_run` total) and raise the existing
+`contextTrimmed` notice when a cap fires. Related A06. Where: ResearchRunner.swift:729-735,
+ResearchModels.swift:78-90, ResponseParsers.swift:52-95, 220-260. Effort: M.
+
+### A104 · `noPagesRead` can be suppressed by reads for trimmed-away sources
+
+Bugs — important
+
+`alreadyRead` is derived from `plannedReads` before the evidence trim, so a page read
+for a source the trim drops still counts and the "no page could be read" notice stays
+silent on a snippets-only turn. Suggested fix: derive from the final kept sources
+(`sources.filter { $0.wasRead }.count`) or prune `plannedReads` to kept numbers.
+Where: ResearchRunner.swift:646, 678, 690. Effort: S.
+
+### A105 · Historic `unsettled` findings describe the draft, not the revised answer
+
+Bugs — important
+
+When a revision landed, history carries the revised answer but findings that graded
+the draft, so a follow-up can be answered against claims about prose the model never
+saw. Suggested fix: include the shortened, citation-stripped draft beside the revised
+answer in `historyEntry`, or mark `unsettled` as grading the draft. Where:
+ResearchContext.swift:136-140, ResearchModels.swift (`draftAnswer`). Effort: S-M.
+
+### A106 · A failed turn records a model that never produced an answer
+
+Bugs — important
+
+`ResearchSession.start` sets `turn.model` up front; `recordAnsweringModel` overwrites
+only on success, so a turn that failed during planning keeps the configured name next
+to an error, contradicting the field's documentation. Suggested fix: leave `model`
+empty until `recordAnsweringModel` runs. Where: ResearchSession.swift:259. Effort: S.
+
+### A107 · The revision payload can exceed the context ceiling for long answers
+
+Bugs — important
+
+`answerContextReserve` (20 000) covers the assessment payload only; `revise` sends
+answer + evidence + reading + findings, so the longest answers — the ones most worth
+correcting — fail with `revisionUnavailable`. Suggested fix: reserve for the answer
+in the revision payload too (drop lowest-ranked evidence for that call only), or state
+the limit in the notice. Related A06. Where: ResearchContext.swift:39,
+ResearchRunner.swift:2039-2075. Effort: M.
+
+### A108 · The reader endpoint is never validated in Settings readiness
+
+Bugs — important
+
+`ProviderSettings.problems` checks the model endpoint and the search provider but
+never `readerEndpoint` when `pageReading == .reader`; a typo surfaces mid-turn as a
+vague notice, repeatedly. Suggested fix: validate `readerEndpoint` (and require the
+reader key) in `problems`, plumb a `hasReaderKey` parameter. Where:
+ProviderSettings.swift:650-709, 417-420. Effort: S-M.
+
+### A109 · Every streamed delta copies the whole answer
+
+Performance problems, stuttering, and jank — important
+
+`update` copies the turn and `turn.answer += chunk` copy-on-writes the entire answer
+per delta — quadratic over a long stream — plus a full-turn `Equatable` per chunk in
+the coalescer. Suggested fix: a delta fast path mutating stored state directly, with
+the coalescer owning the publish cadence. Where: ResearchRunner.swift:319-325, 1851.
+Effort: M.
+
+### A110 · History assembly runs the full forbidden-link scanner for nothing
+
+Performance problems, stuttering, and jank — important
+
+`withoutCitationMarkers` calls `CitationValidator.validate` (eleven regexes plus a
+markdown-link walk) and uses only `.spans`, once per historic turn per `assemble`.
+Suggested fix: a spans-only scope/helper in `CitationValidator`. Where:
+ResearchContext.swift:211-219, CitationValidator.swift:46-49. Effort: S.
+
+### A111 · History is re-summarized from scratch on every model call
+
+Performance problems, stuttering, and jank — important
+
+Each `assemble` re-parses markdown, re-parses URLs and re-encodes JSON for every
+completed turn, at every stage of every round. Suggested fix: cache per-turn summaries
+keyed by turn id, invalidated on mutation, keeping the drop-oldest budget arithmetic
+in `assemble`. Where: ResearchContext.swift:74-160. Effort: M.
+
+### A112 · The MCP reader handshakes once per read batch
+
+Performance problems, stuttering, and jank — important
+
+`readLinkedPages`, `performReads` and `readPlannedPages` each build a fresh reader
+and `connect()` (three round trips) — at least three handshakes per deep turn, plus
+`tools/list` per turn in `SearchMCPClient`. Suggested fix: one connected reader per
+turn (keyed by the endpoint), or a short turn-scoped cache; never persist a session
+id. Where: ResearchRunner.swift:2312, 2518-2527; SearchMCPClient.swift:65-75. Effort: M.
+
+### A113 · Streaming republishes `ThreadStore.library` at snapshot rate
+
+Performance problems, stuttering, and jank — important
+
+Every save calls `archive.onChange`, which assigns the `@Published library` that
+`PanelRootView` observes, so the whole panel body re-evaluates at the coalesced
+stream rate (~10 Hz) even with history closed. Suggested fix: move the library mirror
+into a nested `ObservableObject` observed only by `HistoryView`. Where:
+ThreadStore.swift:14, 70-77; ResearchEngine.swift:203-215; PanelRootView.swift:23.
+Adjacent A20/N03. Effort: M.
+
+### A114 · `HTMLTextExtractor` runs nine whole-document regex passes plus a greedy match
+
+Performance problems, stuttering, and jank — important
+
+One `NSRegularExpression` per never-prose name over up to 800 KB, then a greedy
+`(.*)` article match with `dotMatchesLineSeparators`. Suggested fix: measure first;
+combine the never-prose names into one alternation and/or replace the greedy article
+match with the existing linear helpers. Where: HTMLTextExtractor.swift:61-223.
+Effort: M.
+
+### A115 · Read targeting is recomputed and re-logged per source per pass
+
+Performance problems, stuttering, and jank — important
+
+`readableTargets` re-parses and re-logs every source on every round, and
+`readPlannedPages` matches requests with `numbers.contains` (O(n·m)). Suggested fix:
+compute the readable set once per source-list rebuild and use a `Set<Int>`. Where:
+ResearchRunner.swift:2460-2518. Effort: S.
+
+### A116 · Attachment intake is synchronous multi-megabyte I/O with no async form
+
+Performance problems, stuttering, and jank — important
+
+Core's `AttachmentIntake.read` does all file reads synchronously and both front ends
+call it from UI-adjacent paths; the macOS pasteboard additionally re-encodes TIFF and
+reads up to 16 MiB files mid-gesture. The write/read of stored bytes at submit/retry
+is C04. Suggested fix: add an async intake entry point that performs the reads off the
+calling actor, keeping the pure policy unchanged. Where: AttachmentIntake.swift:104-220;
+PasteboardIntake.swift:195-205. Effort: M.
+
+### A117 · The progress label says "Searching the web · N of N" while pages are read
+
+Bugs — important
+
+With all searches complete and pages outstanding, `runningProgressLabel` falls
+through to the finished-search label; a link-only plan shows the bare stage label for
+the whole read. Suggested fix: label "Reading pages · N of M" from
+`pagesAttempted`/`pagesRead` when the search stage is done; keep it a computed label
+(no new stage case — old builds must still decode). Where: ResearchModels.swift:609-640.
+Effort: S.
+
+### A118 · The Shortcuts pane never records the selection grant
+
+Bugs — important
+
+`SelectedTextReader.rememberGrant()` is not called from the Shortcuts pane, so the
+row cannot distinguish "never granted" from "reset by an update"
+(`grantWasRevoked()` is only used in the summon alert). Suggested fix: call
+`rememberGrant()` from the pane and use `grantWasRevoked()` in the row. Where:
+ShortcutsView.swift:155. Adjacent A45. Effort: S.
+
+### N25 · Decide the popover policy on the non-activating panel
+
+UX and accessibility — nice-to-have
+
+The citation hover preview uses SwiftUI `.popover` (MarkdownText.swift:142) while
+`PanelRootView` deliberately avoids popovers on the panel. Either popovers are safe
+there (then the level-picker comment overstates the risk) or they are not (then
+citation previews break over full-screen apps). Adjacent A99. Effort: S (decision +
+verification in a full-screen Space).
+
+### N26 · Copy-link on source rows; snippet in the accessibility value
+
+UX and accessibility — nice-to-have
+
+Source rows open the URL on click with only a hover tooltip, and the hover-only
+snippet is invisible to keyboard and VoiceOver. Suggested fix: a hover copy-link
+affordance and `accessibilityValue` carrying the snippet/caveat. Where:
+SourcesView.swift:178-197. Row stability itself is A25. Effort: S.
+
+### N27 · Autocorrection off on the endpoint fields
+
+UX and accessibility — nice-to-have
+
+The model and reader endpoint TextFields lack `.autocorrectionDisabled(true)` (the
+search endpoint has it). Where: ProvidersView.swift:236, 178. Effort: XS.
+
+### N28 · Reveal toggle for the typed key entry only
+
+UX and accessibility — nice-to-have
+
+A typed key cannot be inspected, and a save that fails after the fixed slot was
+deleted leaves the field's text gone. Suggested fix: reveal only the typed entry,
+never the stored secret. Where: ProvidersView.swift:537-545, 620-630. The Test
+action is A55. Effort: S.
+
+### N29 · Settings as a NavigationSplitView sidebar
+
+Visual issues and layout problems — nice-to-have
+
+Five panes in a 560×520 TabView read as an iOS-style window; macOS System Settings
+uses a sidebar. Suggested fix: `NavigationSplitView` with symbol + title rows, no
+behavioural change. Where: SettingsView.swift:18-35. Effort: M.
+
+### N30 · Preview panel on the opposite edge from the Settings window
+
+Visual issues and layout problems — nice-to-have
+
+The Settings live-preview panel can cover the Settings window it is meant to be
+watched from. Suggested fix: place the preview on the opposite screen edge.
+Effort: S.
+
+### N31 · Middle-truncate the header title
+
+Visual issues and layout problems — nice-to-have
+
+Long thread titles lose their beginning under `.tail`; middle truncation reads better
+for questions. Where: PanelHeaderView. Effort: XS.
+
+### N32 · Respect the pinned-to-bottom flag when a turn is added
+
+UX and accessibility — nice-to-have
+
+The answer-change scroll checks `isPinnedToBottom` but the turn-count handler scrolls
+unconditionally, so a retry while scrolled up yanks the view down. Where:
+PanelRootView turn-count `onChange`. Effort: XS.
+
+### N33 · Say "Saved." before the problems list; clear the status on edit
+
+UX and accessibility — nice-to-have
+
+A save-with-problems status shows only the problem text, never "Saved.", and is not
+cleared when a field changes. Where: ProvidersView.swift:702-706. Effort: XS.
+
+### N34 · Save is the window's default action while a Clear can be armed
+
+Bugs — nice-to-have
+
+`Button("Save").keyboardShortcut(.defaultAction)` means Return in a field can commit
+an armed key Clear. Suggested fix: drop the default-action shortcut or guard commit
+while a Clear is armed. Where: ProvidersView.swift:202. Effort: XS.
+
+### N35 · Give the disabled Ask button a reason when the draft is blank
+
+UX and accessibility — nice-to-have
+
+`askDisabledHelp` returns nil for a plain blank draft, so VoiceOver hears only "Ask,
+dimmed". Suggested fix: "Type a question to ask" as help/hint. Where:
+PanelRootView.swift:496-499, 545-551. Effort: XS.
+
+### N36 · Re-ask a turn at a different level
+
+Missing features — nice-to-have
+
+"Ask again" always retries at the stored level. Suggested fix: an "Ask again ▸" menu
+with the four levels on the turn footer. Where: ResearchSession.retry, TurnView
+footer. (D08 is the "not settled" re-ask — different.) Effort: S.
+
+### N37 · Quote the selected answer passage into a follow-up
+
+Missing features — nice-to-have
+
+The answer prose is selectable and the composer-seed notification path exists with
+redaction metadata; there is no gesture that turns a selected sentence into a
+follow-up. Suggested fix: a context-menu item / `PanelCommand` posting the seed
+notification with the selected substring; submission stays explicit. Where:
+TurnView.swift:186-205, PanelRootView.swift:200-215. Effort: M.
+
+### D10 · Live evidence-budget meter in the panel header
+
+Delight — nice-to-have
+
+"12/18 sources · 3/5 pages · 70k chars" derived from existing turn fields makes the
+level choice legible and turns an invisible constant into a visible spend. Where:
+ResearchRunner.swift:690-710 (droppedSources, withheldPageText, pagesRead/Attempted);
+render in ProcessTrailView. Effort: M.
+
+### D11 · Draft-vs-revised diff toggle
+
+Delight — nice-to-have
+
+A pure line/word diff over `draftAnswer` vs `answer`, rendered as an expandable
+secondary view — the most compact proof the check-and-revise stage ran. Where:
+ResearchModels.swift, ResearchRunner.swift:2039-2110. Effort: M.
+
+### D12 · ⌘1..⌘4 to cycle the research level in the panel
+
+Delight — nice-to-have
+
+Currently only the chip or a typed command. Effort: S.
+
+### N38 · Surface the load-time prune in the app, not only on stderr
+
+UX and accessibility — nice-to-have
+
+Lowering `keptThreads` between launches trims the in-memory library and explains the
+recovery path only through `FileHandle.standardError` (ThreadArchive.swift:214) —
+a Dock-launched app has no terminal, so "where did my threads go" is unanswerable in
+the app, on the one destructive path with no user gesture behind it. Suggested fix:
+carry a `trimmedOnLoadCount` on the archive and show it beside the History/Settings
+thread counter with the "raise the limit and relaunch" guidance. Adjacent A12.
+Effort: S.
+
+### D13 · Warn on a duplicate question and offer the earlier answer
+
+Delight — nice-to-have
+
+Before spending a run, a normalized exact/near-exact question match against
+`ThreadLibrary` could offer "You asked this on <date> — reopen, or compare" instead of
+producing two slightly different answers to the same question. Suggested fix:
+match on a case/whitespace/punctuation-folded question across threads; on a hit show
+a non-blocking Reopen / Ask anyway / Compare prompt. Never auto-send or silently
+substitute the old answer. Where: ThreadLibrary.swift:118, ResearchEngine ask path.
+Effort: M.

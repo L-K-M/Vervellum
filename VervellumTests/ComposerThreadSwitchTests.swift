@@ -19,7 +19,7 @@ final class ComposerThreadSwitchTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(suite, isDirectory: true)
         defer {
-            defaults.removePersistentDomain(forName: suite)
+            SuitePlistCleanup.removeSuite(suite, from: defaults)
             try? FileManager.default.removeItem(at: directory)
         }
 

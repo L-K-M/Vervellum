@@ -158,6 +158,7 @@ enum ResearchPrompts {
         - "purpose": a short phrase naming what that search is meant to settle.
         - "read": optional — numbers from "found" whose pages you want fetched in \
         full. Omit it when no snippet looks both decisive and too thin.
+        \(jsonOnly)
         """
     }
 
