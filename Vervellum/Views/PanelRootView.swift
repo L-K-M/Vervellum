@@ -39,6 +39,13 @@ struct PanelRootView: View {
         self.secrets = secrets
         self.onOpenSettings = onOpenSettings
         self.onClose = onClose
+        // The same Keychain read `refreshConfiguredState` does, made once up
+        // front: without it the very first frame claims "not configured" to a
+        // configured user and corrects itself one beat later.
+        _configurationProblems = State(initialValue: ProviderReadiness.problems(
+            settings: preferences.providerSettings,
+            level: preferences.researchLevel,
+            secrets: secrets))
     }
 
     @State private var draft = ""
@@ -141,7 +148,7 @@ struct PanelRootView: View {
     /// on **every** SwiftUI render — which during a streamed answer is many times a
     /// second. It is refreshed when the panel is summoned, after Settings closes, and
     /// when the selected research level changes — the only moments it can change.
-    @State private var configurationProblems = ["Provider settings have not been checked yet."]
+    @State private var configurationProblems: [String]
 
     var body: some View {
         VStack(spacing: 0) {
