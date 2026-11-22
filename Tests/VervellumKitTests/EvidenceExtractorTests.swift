@@ -9,6 +9,30 @@ import XCTest
 
 final class EvidenceExtractorTests: XCTestCase {
 
+    func testPublicationMetadataCannotCrowdLaterSourcesOutOfEvidence() {
+        let results = [
+            ["url": "https://first.example", "date": String(repeating: "x", count: 100_000)],
+            ["url": "https://second.example", "publishedAt": "3\u{202E} Mai\n2026"],
+        ]
+        let sources = EvidenceExtractor.sources(from: results)
+        XCTAssertEqual(sources.map(\.publishedAt), [nil, "3 Mai 2026"])
+        let evidence = ResearchContext.evidence(from: sources)
+        XCTAssertEqual(evidence.entries.compactMap { $0["number"] as? Int }, [1, 2])
+        XCTAssertNil(evidence.entries.first?["published"])
+    }
+
+    func testPublicationDateUsesTheFirstUsableAliasWithinTheByteLimit() {
+        let atLimit = String(repeating: "é", count: 64)
+        let results = [
+            ["url": "https://first.example", "date": atLimit],
+            ["url": "https://second.example", "published_at": atLimit + "x", "datePublished": "2026-11-21",
+             "date": "2026-11-22"],
+            ["url": "https://third.example", "date": "e" + String(repeating: "\u{301}", count: 100)],
+        ]
+        XCTAssertEqual(EvidenceExtractor.sources(from: results).map(\.publishedAt),
+                       [atLimit, "2026-11-21", nil])
+    }
+
     func testExtractsAndNumbersHits() {
         let payload: [String: Any] = ["results": [
             ["title": "First", "url": "https://a.example.com/1", "snippet": "One."],
