@@ -134,9 +134,8 @@ struct SourcesView: View {
 /// Separate buttons keep opening a page and inspecting its evidence independently
 /// reachable by keyboard. A popover leaves later rows in place under the pointer.
 struct SourceRow: View {
-    @Environment(\.panelTextScale) private var textScale
-
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.panelTextScale) private var textScale
 
     let source: Source
     var isCited: Bool
