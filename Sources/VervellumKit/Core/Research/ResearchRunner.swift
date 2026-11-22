@@ -750,7 +750,19 @@ final class ResearchRunner: ResearchRunning {
                                             history: history, today: today,
                                             attachments: attachments)
         recordAnsweringModel(from: chain)
-        update { $0.applyCitationValidation(sourceCount: sources.count) }
+        // The same validation answers two questions: whether the citations are
+        // honest, and whether the evidence is a monoculture. Two citations to one
+        // website are not two independent witnesses, and nothing else on the turn
+        // says so. It is a property of the evidence, not a verdict on the answer.
+        //
+        // Here rather than inside `applyCitationValidation`, which also runs at
+        // load (`finishInterruptedTurns`) and on a cancelled partial answer: those
+        // paths would stamp the cue onto a stored turn on every launch, or onto a
+        // answer the reader stopped mid-sentence.
+        update { turn in
+            let validation = turn.applyCitationValidation(sourceCount: sources.count)
+            turn.refreshSingleDomainNotice(using: validation)
+        }
         try Task.checkCancellation()
 
         // 5 — assess.
@@ -1758,7 +1770,10 @@ final class ResearchRunner: ResearchRunning {
             return nil
         }
         recordAnsweringModel(from: chain)
-        update { $0.applyCitationValidation(sourceCount: sources.count) }
+        update { turn in
+            let validation = turn.applyCitationValidation(sourceCount: sources.count)
+            turn.refreshSingleDomainNotice(using: validation)
+        }
         try Task.checkCancellation()
 
         update { $0.stage = .assessing }
@@ -2182,6 +2197,7 @@ final class ResearchRunner: ResearchRunning {
         update { turn in
             turn.draftAnswer = answer
             turn.answer = corrected
+            turn.refreshSingleDomainNotice(using: validation)
             turn.addNotice(.answerRevised)
         }
         trace.log("Revised the answer in " + String(format: "%.1fs", trace.elapsed - began))

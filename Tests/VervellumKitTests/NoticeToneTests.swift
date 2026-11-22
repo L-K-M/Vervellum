@@ -11,7 +11,7 @@ final class NoticeToneTests: XCTestCase {
 
     func testStatusChangesAreInformational() {
         for notice in [TurnNotice.answerRevised, .linkReadingOff, .modelFellBack,
-                       .answerRegathered, .unknown] {
+                       .answerRegathered, .singleDomain, .unknown] {
             XCTAssertEqual(notice.tone, .informational, notice.rawValue)
         }
     }

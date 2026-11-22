@@ -624,6 +624,43 @@ final class ResearchModelTests: XCTestCase {
         XCTAssertTrue(text.contains("Limitations: Only summaries."))
     }
 
+    // MARK: Single-domain evidence
+
+    /// The monoculture cue is about the evidence, not the prose: two cited sources
+    /// on one domain fire it, one cited source does not, and two domains do not.
+    func testSingleDomainCueDependsOnCitedSourcesNotTheProse() {
+        func turn(answer: String, urls: [String]) -> ResearchTurn {
+            var turn = ResearchTurn(question: "Why?")
+            turn.answer = answer
+            turn.sources = urls.enumerated().map { index, url in
+                Source(number: index + 1, url: url, title: "Source \(index + 1)", snippet: "")
+            }
+            return turn
+        }
+        func citesSingle(_ turn: ResearchTurn) -> Bool {
+            let validation = CitationValidator.validate(answer: turn.answer,
+                                                        sourceCount: turn.sources.count)
+            return turn.citesSingleDomain(using: validation)
+        }
+
+        XCTAssertTrue(citesSingle(turn(answer: "Both agree [1, 2].",
+                                      urls: ["https://one.example/a", "https://one.example/b"])))
+        XCTAssertFalse(citesSingle(turn(answer: "Only one is cited [1].",
+                                       urls: ["https://one.example/a", "https://one.example/b"])),
+                       "one citation is not a monoculture")
+        XCTAssertFalse(citesSingle(turn(answer: "Both agree [1, 2].",
+                                       urls: ["https://one.example/a", "https://two.example/b"])))
+        XCTAssertFalse(citesSingle(turn(answer: "No citations here.",
+                                       urls: ["https://one.example/a", "https://one.example/b"])))
+        XCTAssertFalse(citesSingle(turn(answer: "Citing one witness twice [1, 1].",
+                                       urls: ["https://one.example/a", "https://two.example/b"])),
+                       "one source cited twice is still one witness")
+        XCTAssertTrue(citesSingle(turn(answer: "The third source is beside the point [1, 2].",
+                                      urls: ["https://one.example/a", "https://one.example/b",
+                                             "https://two.example/c"])),
+                     "a mono-domain subset of a diverse set is still a monoculture")
+    }
+
     func testDurationFormatting() {
         XCTAssertEqual(Formatting.duration(4.2), "4.2s")
         XCTAssertEqual(Formatting.duration(95), "1:35")
@@ -643,7 +680,8 @@ final class TurnNoticeDecodingTests: XCTestCase {
 
     func testKnownNoticesRoundTrip() throws {
         let original: [TurnNotice] = [.noEvidence, .assessmentUnavailable,
-                                      .unreadableVerdictDropped, .assessmentLinkDropped]
+                                      .unreadableVerdictDropped, .assessmentLinkDropped,
+                                      .singleDomain]
         let data = try JSONEncoder().encode(original)
         XCTAssertEqual(try JSONDecoder().decode([TurnNotice].self, from: data), original)
     }

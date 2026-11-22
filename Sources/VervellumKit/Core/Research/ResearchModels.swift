@@ -271,6 +271,11 @@ enum TurnNotice: String, Codable, Equatable {
     /// *context budget* that could not hold all of it. Said out loud because an answer
     /// written from half a log is the kind of thing a reader needs to know.
     case attachmentTrimmed
+    /// Every source the answer cites is from one website. A fact about the evidence,
+    /// not a verdict: one site can be excellent, and it still cannot corroborate
+    /// itself. Said so a reader does not take two citations to one domain as two
+    /// independent witnesses.
+    case singleDomain
     /// A notice written by a newer build that this one does not know. Kept rather than
     /// failing the whole document: a `notices` array that refused to decode used to make
     /// an older build start from an empty library and overwrite the newer file.
@@ -347,6 +352,9 @@ enum TurnNotice: String, Codable, Equatable {
         case .attachmentTrimmed:
             return "Attached text was shortened to fit the model's context, so the answer "
                 + "saw the marked excerpt rather than the whole file."
+        case .singleDomain:
+            return "Every source this answer cites is from one website. A single site "
+                + "can still be wrong, and it cannot corroborate itself."
         case .attachmentMissing:
             return "Something attached to this question could not be sent, so the answer "
                 + "was written without it. The file is listed above as a record of what "
@@ -663,12 +671,14 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// Runs after the answer has finished streaming rather than per chunk: a citation
     /// marker can be split across two deltas, and flagging a half-arrived `[1` as an
     /// invented reference would put a warning on every answer.
-    mutating func applyCitationValidation(sourceCount: Int) {
+    @discardableResult
+    mutating func applyCitationValidation(sourceCount: Int) -> CitationValidator.Result {
         let validation = CitationValidator.validate(answer: answer, sourceCount: sourceCount)
         if !validation.outOfRangeCitations.isEmpty || !validation.invalidCitationGroups.isEmpty {
             addNotice(.invalidCitation)
         }
         if !validation.forbiddenLinks.isEmpty { addNotice(.literalURL) }
+        return validation
     }
 
     /// Sources the answer actually cites, in citation order. The rest stay available
@@ -676,6 +686,32 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     func citedSources(using validation: CitationValidator.Result) -> [Source] {
         validation.citedSourceIndices.compactMap { index in
             sources.indices.contains(index) ? sources[index] : nil
+        }
+    }
+
+    /// Whether the answer's citations all resolve to one website.
+    ///
+    /// A property of the evidence, not of the prose: two citations to one domain are
+    /// not two independent witnesses, and the answer has no way to say so. Computed
+    /// from the same `Source.domain` the harvester's diversity cap uses, so the cue
+    /// and the cap cannot drift into two definitions of "same site". One cited source
+    /// is not a monoculture, and no citation is not either.
+    func citesSingleDomain(using validation: CitationValidator.Result) -> Bool {
+        let cited = citedSources(using: validation)
+        // Distinct numbers, not markers: `[1, 1]` is one witness cited twice, and
+        // the validator's indices are already deduplicated — this states the
+        // requirement rather than relying on that.
+        guard Set(cited.map(\.number)).count >= 2 else { return false }
+        return Set(cited.map(\.domain)).count == 1
+    }
+
+    /// Makes the single-site cue describe the answer now on screen. A revision or a
+    /// regathered answer can cite differently, so it is withdrawn as well as added.
+    mutating func refreshSingleDomainNotice(using validation: CitationValidator.Result) {
+        if citesSingleDomain(using: validation) {
+            addNotice(.singleDomain)
+        } else {
+            notices.removeAll { $0 == .singleDomain }
         }
     }
 
