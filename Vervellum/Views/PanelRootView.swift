@@ -41,6 +41,13 @@ struct PanelRootView: View {
         self.secrets = secrets
         self.onOpenSettings = onOpenSettings
         self.onClose = onClose
+        // The same Keychain read `refreshConfiguredState` does, made once up
+        // front: without it the very first frame claims "not configured" to a
+        // configured user and corrects itself one beat later.
+        _configurationProblems = State(initialValue: ProviderReadiness.problems(
+            settings: preferences.providerSettings,
+            level: preferences.researchLevel,
+            secrets: secrets))
     }
 
     @State private var draft = ""
@@ -52,6 +59,7 @@ struct PanelRootView: View {
     /// with it, and one that was refused keeps both.
     @State private var attachments: [PendingAttachment] = []
     @State private var showsHistory = false
+    @State private var panelVisible = false
     /// Markdown shown above the thread in place of a turn — `/help`, and the `/model`
     /// listing. One slot rather than a flag per command: they are mutually exclusive by
     /// nature (each replaces the last), and Escape has one thing to back out of.
@@ -63,6 +71,16 @@ struct PanelRootView: View {
     @State private var queueFullNote = false
     /// Earlier questions, newest first, for ↑/↓ recall in the composer.
     @State private var recallIndex: Int?
+    /// The text the recall walk last put in the composer.
+    ///
+    /// The walk has to survive a draft change, or ↑ could not move through the list.
+    /// It must not survive an *edit*: a reader who corrects a recalled question and
+    /// presses ↑ again expects the correction to stay, not to be replaced by the next
+    /// question. Comparing the draft against this is the whole rule — a draft that no
+    /// longer equals it is an edit, and an edit ends the walk. `recall` writes both in
+    /// the same transaction, so the change that puts a question on screen is not itself
+    /// read as an edit.
+    @State private var recalledDraft: String?
 
     /// Which command in the completion list the keyboard has highlighted, if any.
     ///
@@ -143,7 +161,7 @@ struct PanelRootView: View {
     /// on **every** SwiftUI render — which during a streamed answer is many times a
     /// second. It is refreshed when the panel is summoned, after Settings closes, and
     /// when the selected research level changes — the only moments it can change.
-    @State private var configurationProblems = ["Provider settings have not been checked yet."]
+    @State private var configurationProblems: [String]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -197,7 +215,19 @@ struct PanelRootView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .vervellumPanelDidShow)) { _ in
+            panelVisible = true
             refreshConfiguredState()
+        }
+        .onChange(of: showsHistory) { _, shown in
+            // History's search field took first responder while it was open; on
+            // close the composer claims it back, unless the whole panel is hiding.
+            if !shown && panelVisible {
+                DispatchQueue.main.async {
+                    guard panelVisible else { return }
+                    NotificationCenter.default.post(name: .vervellumComposerShouldClaimFocus,
+                                                    object: nil)
+                }
+            }
         }
         // Also on first build: the panel is constructed and shown in the same turn, so
         // without this the very first frame renders the not-configured state even for a
@@ -207,6 +237,7 @@ struct PanelRootView: View {
         // opens on the thread rather than wherever the user happened to be. The draft
         // is deliberately kept — a half-typed question should survive a dismissal.
         .onReceive(NotificationCenter.default.publisher(for: .vervellumPanelWillHide)) { _ in
+            panelVisible = false
             showsHistory = false
             notice = nil
             recallIndex = nil
@@ -258,6 +289,7 @@ struct PanelRootView: View {
                     if engine.thread.isEmpty && notice == nil {
                         EmptyStateView(configurationProblems: configurationProblems,
                                        searches: preferences.researchLevel.searches,
+                                       submitOnReturn: preferences.submitOnReturn,
                                        summonShortcut: preferences.summonHotkey.displayString,
                                        onOpenSettings: onOpenSettings,
                                        onSeedComposer: { draft = $0 })
@@ -295,7 +327,9 @@ struct PanelRootView: View {
                 .background(BottomSentinel { pinned in isPinnedToBottom = pinned })
             }
             .overlay(alignment: .bottom) {
-                if !isPinnedToBottom, engine.isRunning {
+                // Not only mid-stream: scrolled up in a long finished thread, the
+                // pill is still the one-tap way back to the newest answer.
+                if !isPinnedToBottom {
                     jumpToLatest(proxy)
                 }
             }
@@ -305,6 +339,13 @@ struct PanelRootView: View {
                 scrollToBottom(proxy)
             }
             .onChange(of: draft) { old, new in
+                // An edit to a recalled question ends the walk before anything else,
+                // so the next ↑ cannot replace what the reader just typed. A recall
+                // writes `recalledDraft` in the same transaction as the draft, so the
+                // change that puts a question on screen does not trip this.
+                if recallIndex != nil, new != recalledDraft {
+                    recallIndex = nil
+                }
                 // Any edit invalidates the highlight: the list is filtered by what has
                 // been typed, so an index kept across a keystroke could point past the
                 // end of the shorter list, or at a command the user has just filtered out.
@@ -1164,7 +1205,7 @@ struct PanelRootView: View {
             // field the reader cannot see is a button that did nothing to anyone
             // listening rather than looking.
             if !attachments.isEmpty {
-                announce("Put in the composer — Return sends it with the attachment"
+                announce("Put in the composer — \(preferences.submitKeyName) sends it with the attachment"
                          + (attachments.count == 1 ? "" : "s"))
             }
             return
@@ -1416,7 +1457,7 @@ struct PanelRootView: View {
               ComposerCommand.isHalfTypedCommand(new),
               reopened || ComposerCommand.completions(for: old) == nil
         else { return }
-        let key = preferences.submitOnReturn ? "Return" : "Command-Return"
+        let key = preferences.submitKeyName
         announce("Command list, \(opened.count) \(opened.count == 1 ? "match" : "matches"). "
                  + "\(key) completes the highlighted one.")
     }
@@ -1455,6 +1496,7 @@ struct PanelRootView: View {
             guard next < questions.count else { return true }
             recallIndex = next
             draft = questions[next]
+            recalledDraft = questions[next]
         } else {
             // The index points into a *particular* thread's list, and opening a thread
             // from history swaps that list underneath it. Re-validate before indexing:
@@ -1467,9 +1509,11 @@ struct PanelRootView: View {
             if current == 0 {
                 recallIndex = nil
                 draft = ""
+                recalledDraft = ""
             } else {
                 recallIndex = current - 1
                 draft = questions[current - 1]
+                recalledDraft = questions[current - 1]
             }
         }
         return true
