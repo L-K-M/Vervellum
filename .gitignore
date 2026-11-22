@@ -73,3 +73,6 @@ Carthage/Build/
 # Eval transcripts and traces; a trace of a live provider session can carry
 # request URLs, and 60+ files per run do not belong in history.
 eval/runs/
+
+# Local Claude Code approvals can contain secrets.
+**/.claude/settings.local.json

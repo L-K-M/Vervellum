@@ -49,6 +49,8 @@ Empty-state redraws reuse their key-presence result until the panel is shown aga
 On macOS, saving a changed model or search destination normally stages its replacement
 key in a fresh Keychain account before preferences can point at it. With no replacement,
 the new destination points at a fresh empty account; the old key is never carried across.
+Model discovery in Settings uses the same destination check before reading a saved
+key. An edited destination can list models anonymously or with a newly entered key.
 The migrated first model/search accounts and the reader use fixed legacy names for
 downgrade compatibility, so their old values are deleted before a changed endpoint is
 committed; replacements are written only after the settings backend confirms the new

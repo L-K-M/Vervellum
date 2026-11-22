@@ -30,7 +30,7 @@ struct Source: Codable, Identifiable, Equatable {
     /// from the archive, independently of validation when harvesting new hits.
     /// NSWorkspace can launch handlers for non-web schemes, so rows and citation
     /// chips share the same absolute HTTP(S) rule as the GTK browser action.
-    var browserURL: URL? { DirectPageReader.fetchableURL(url) }
+    var browserURL: URL? { SourceHarvester.openableURL(url) }
 
     /// The registrable-looking host, for a compact source chip ("apple.com").
     /// Delegated to `EvidenceExtractor.domainKey` so the diversity cap and the chip

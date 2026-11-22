@@ -9,6 +9,30 @@ import XCTest
 
 final class EvidenceExtractorTests: XCTestCase {
 
+    func testPublicationMetadataCannotCrowdLaterSourcesOutOfEvidence() {
+        let results = [
+            ["url": "https://first.example", "date": String(repeating: "x", count: 100_000)],
+            ["url": "https://second.example", "publishedAt": "3\u{202E} Mai\n2026"],
+        ]
+        let sources = EvidenceExtractor.sources(from: results)
+        XCTAssertEqual(sources.map(\.publishedAt), [nil, "3 Mai 2026"])
+        let evidence = ResearchContext.evidence(from: sources)
+        XCTAssertEqual(evidence.entries.compactMap { $0["number"] as? Int }, [1, 2])
+        XCTAssertNil(evidence.entries.first?["published"])
+    }
+
+    func testPublicationDateUsesTheFirstUsableAliasWithinTheByteLimit() {
+        let atLimit = String(repeating: "é", count: 64)
+        let results = [
+            ["url": "https://first.example", "date": atLimit],
+            ["url": "https://second.example", "published_at": atLimit + "x", "datePublished": "2026-11-21",
+             "date": "2026-11-22"],
+            ["url": "https://third.example", "date": "e" + String(repeating: "\u{301}", count: 100)],
+        ]
+        XCTAssertEqual(EvidenceExtractor.sources(from: results).map(\.publishedAt),
+                       [atLimit, "2026-11-21", nil])
+    }
+
     func testExtractsAndNumbersHits() {
         let payload: [String: Any] = ["results": [
             ["title": "First", "url": "https://a.example.com/1", "snippet": "One."],
@@ -27,6 +51,30 @@ final class EvidenceExtractorTests: XCTestCase {
         let planet = "https://en.wikipedia.org/wiki/Mercury_(planet)"
         let payload: [String: Any] = ["results": [["title": "Mercury (planet)", "url": planet]]]
         XCTAssertEqual(EvidenceExtractor.sources(from: [payload]).first?.url, planet)
+    }
+
+    /// The published date is displayed beside the title in the source list and the
+    /// citation preview, so a hostile value in it (a bidi override or isolate, C0 controls incl. NUL) must be
+    /// stripped exactly like the url, title and snippet are.
+    func testStripsHostileCharactersFromThePublishedDate() {
+        let payload: [String: Any] = ["results": [[
+            "title": "X", "url": "https://a.example.com/1",
+            "publishedDate": "2026\u{202E}\u{2067}-01\u{0002}\u{0000}-02",
+        ]]]
+        XCTAssertEqual(EvidenceExtractor.sources(from: [payload]).first?.publishedAt,
+                       "2026-01-02")
+        // The whole bidi override/isolate class, not just the two samples above: a
+        // stripper scoped to individual characters would pass them while the rest of
+        // the family stays open.
+        let bidi = ([0x202A...0x202E, 0x2066...0x2069].joined())
+            .map { String(Unicode.Scalar(UInt32($0))!) }
+            .joined()
+        let classPayload: [String: Any] = ["results": [[
+            "title": "X", "url": "https://a.example.com/1",
+            "publishedDate": "2026\(bidi)-01",
+        ]]]
+        XCTAssertEqual(EvidenceExtractor.sources(from: [classPayload]).first?.publishedAt,
+                       "2026-01")
     }
 
     /// Two searches routinely surface the same page; giving it two citation numbers

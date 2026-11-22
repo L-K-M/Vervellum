@@ -240,8 +240,9 @@ enum SourceHarvester {
         "mc_cid", "mc_eid", "ref_src",
     ]
 
-    /// Rejects anything that isn't an absolute http(s) URL with a host and, for a URL
-    /// lifted out of prose, trims the punctuation it picked up at the end of a sentence.
+    /// Rejects anything that isn't an absolute http(s) URL with a host and no
+    /// userinfo. For a URL lifted out of prose, trims the punctuation it picked up
+    /// at the end of a sentence.
     ///
     /// A structured field — a search hit's `url` — is an address, not prose. A closing
     /// parenthesis there is part of the path (`/wiki/Mercury_(planet)`), and trimming
@@ -256,8 +257,32 @@ enum SourceHarvester {
         guard let components = URLComponents(string: trimmed),
               let scheme = components.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
-              let host = components.host, !host.isEmpty
+              let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil
         else { return nil }
         return trimmed
+    }
+
+    /// The URL a click may open, or nil when the address is not one a reader should be
+    /// sent to.
+    ///
+    /// Every place the app opens an address a thread carries goes through here, so the
+    /// rule cannot differ between the answer's citation chips, a source row, a finding
+    /// chip and the GTK link handler. The answer chip used to carry its own copy of
+    /// this check while the source row and the finding chip called `NSWorkspace` on
+    /// whatever `URL(string:)` accepted — which is every scheme, `file:` included.
+    /// Harvesting validates a source when it is collected, but a `threads.json`
+    /// restored from a backup, synced from another machine or edited by hand is decoded
+    /// without re-validation, and a click is the one action that leaves the app.
+    ///
+    /// `normalized` supplies the scheme and host; this adds the userinfo rejection,
+    /// which a click must not carry. `trimmingPunctuation` stays off because a stored
+    /// address is an address, not the tail of a sentence: a path may end in `)` or `.`.
+    static func openableURL(_ raw: String) -> URL? {
+        guard let normalized = normalized(raw, trimmingPunctuation: false),
+              let components = URLComponents(string: normalized),
+              components.user == nil, components.password == nil,
+              let url = URL(string: normalized) else { return nil }
+        return url
     }
 }
