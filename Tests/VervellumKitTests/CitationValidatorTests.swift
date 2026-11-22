@@ -257,6 +257,22 @@ final class CitationValidatorTests: XCTestCase {
         }
     }
 
+    /// An ISO date is a year written out further, and never matched before long digit
+    /// runs and ranges were read. Only its zero-padded spelling is exempt.
+    func testBracketedISODatesAreProse() {
+        for marker in ["[2023-01-15]", "[1999-12-31]", "[2023-01]", "[2019-12, 2023-01-15]"] {
+            let answer = "As restated on \(marker)."
+            let result = CitationValidator.validate(answer: answer, sourceCount: 24)
+            XCTAssertEqual(result.spans, [.text(answer)], marker)
+            XCTAssertTrue(result.isClean, marker)
+        }
+        for marker in ["[2023-1-5]", "[2023-13-01]", "[2023-01-32]", "[2023-00]",
+                       "[1499-01-15]", "[1, 2023-01-15]"] {
+            let result = CitationValidator.validate(answer: "Claim \(marker).", sourceCount: 24)
+            XCTAssertFalse(result.isClean, marker)
+        }
+    }
+
     /// History stripping validates against `Int.max`, so clamping to the source count
     /// alone would let one marker allocate for every number it spans.
     func testARangeTooWideForAnySourceListIsBoundedAndReported() {

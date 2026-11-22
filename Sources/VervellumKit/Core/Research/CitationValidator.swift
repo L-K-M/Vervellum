@@ -71,6 +71,9 @@ enum CitationValidator {
     /// value is far past the longest source list, so none can be a real citation.
     private static let plausibleYears = 1500...2100
     private static let yearDigits = 4
+    private static let monthOrDayDigits = 2
+    private static let months = 1...12
+    private static let daysOfMonth = 1...31
 
     /// The most sources one range expands to: several times what the evidence pool can
     /// hold, and a bound for callers that validate against no list at all.
@@ -117,9 +120,9 @@ enum CitationValidator {
             let groups = raw.trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
                 .split(whereSeparator: { $0 == "," || $0 == ";" })
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            // A year in brackets is prose, so it stays inside the surrounding text
-            // rather than becoming a marker that failed validation.
-            if groups.allSatisfy(Self.namesYears) { continue }
+            // A year or date in brackets is prose, so it stays inside the surrounding
+            // text rather than becoming a marker that failed validation.
+            if groups.allSatisfy({ Self.namesYears($0) || Self.namesISODate($0) }) { continue }
             if cursor < range.lowerBound {
                 spans.append(.text(String(answer[cursor..<range.lowerBound])))
             }
@@ -206,6 +209,20 @@ enum CitationValidator {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
         guard parts.count == 2, let first = year(parts[0]), let last = year(parts[1]) else { return false }
         return first <= last && plausibleYears.contains(first) && plausibleYears.contains(last)
+    }
+
+    /// Whether a group is a plausible ISO 8601 date, `2023-01-15` or `2023-01`.
+    private static func namesISODate(_ group: String) -> Bool {
+        let parts = group.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
+        guard let first = parts.first, let year = year(first), plausibleYears.contains(year) else { return false }
+        let allowed = [months, daysOfMonth]
+        let rest = parts.dropFirst()
+        guard !rest.isEmpty, rest.count <= allowed.count else { return false }
+        return zip(rest, allowed).allSatisfy { part, range in
+            guard part.count == monthOrDayDigits, part.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  let number = Int(part) else { return false }
+            return range.contains(number)
+        }
     }
 
     /// `text` as a number, if it is written the way a year is: four ASCII digits.
