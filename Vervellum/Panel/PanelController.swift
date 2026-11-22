@@ -164,8 +164,8 @@ final class PanelController {
     /// the only way to see what a width slider did was to close the panel and summon it
     /// again — which is exactly the moment the comparison is no longer in front of you.
     ///
-    /// Unanimated, and a no-op when neither the placement preferences nor the frame
-    /// changed. A slider drag emits a change per pixel; animating each one leaves
+    /// Unanimated, and a no-op unless a placement preference changed, so a dragged
+    /// panel stays put. A slider drag emits a change per pixel; animating each one leaves
     /// several animations fighting over the same window, and re-setting an identical
     /// frame makes AppKit redraw the hosted SwiftUI tree for nothing.
     func preferencesDidChange() {
@@ -208,7 +208,11 @@ final class PanelController {
     /// The application the panel would hand focus back to on dismissal, for a caller
     /// that dismisses it without restoring: Settings takes the panel's place, and
     /// restores this app itself when it closes.
-    var applicationToRestore: NSRunningApplication? { appToRestoreOnClose }
+    var applicationToRestore: NSRunningApplication? {
+        // The status menu opens Settings over a panel that never had focus, and what
+        // was captured as that panel appeared can be long stale.
+        (awaitsFocus ? otherFrontmostApplication() : nil) ?? appToRestoreOnClose
+    }
 
     /// Dismisses the panel. With `restoringActivation` false the app that was active
     /// before the panel is *not* brought back — the caller is about to show a window
@@ -371,11 +375,16 @@ final class PanelController {
     /// Remembers the app in front as an unfocused panel is promoted. The one captured
     /// when it appeared can be long stale. Vervellum itself is never the answer.
     private func refreshRestoreTarget() {
-        guard awaitsFocus, let frontmost = frontmostApplication(),
-              frontmost.processIdentifier != NSRunningApplication.current.processIdentifier
-        else { return }
+        guard awaitsFocus, let frontmost = otherFrontmostApplication() else { return }
         appToRestoreOnClose = frontmost
         hadRestoreTarget = true
+    }
+
+    private func otherFrontmostApplication() -> NSRunningApplication? {
+        guard let frontmost = frontmostApplication(),
+              frontmost.processIdentifier != NSRunningApplication.current.processIdentifier
+        else { return nil }
+        return frontmost
     }
 
     /// Escape, and the shortcuts that only make sense while the panel is up.
