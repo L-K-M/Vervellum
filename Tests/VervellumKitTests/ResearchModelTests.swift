@@ -9,6 +9,16 @@ import XCTest
 
 final class ResearchModelTests: XCTestCase {
 
+    func testSourceBrowserActionRequiresAnAbsoluteWebAddress() {
+        var source = Source(number: 1, url: "https://example.org/topic_(film)#cast",
+                            title: "Cast", snippet: "")
+        XCTAssertEqual(source.browserURL?.absoluteString, source.url)
+        for address in ["mailto:editor@example.org", "https:", "relative/page"] {
+            source.url = address
+            XCTAssertNil(source.browserURL)
+        }
+    }
+
     // MARK: Mode
 
     /// Which modes gather evidence is what the Linux CLI's configuration check keys

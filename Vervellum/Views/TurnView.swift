@@ -49,8 +49,7 @@ struct TurnView: View, Equatable {
     @State private var trailExpanded = false
     @State private var sourcesExpanded = false
     @State private var showsAllSources = false
-    /// The first draft, collapsed. The findings grade it, and the answer above is
-    /// the rewrite; opening this is the comparison the notice promises.
+    /// Keep the comparison collapsed so the displayed answer stays in reading order.
     @State private var showsDraft = false
 
     private var validation: CitationValidator.Result {
@@ -122,12 +121,12 @@ struct TurnView: View, Equatable {
             Button {
                 showsDraft.toggle()
             } label: {
-                Text(showsDraft ? DraftComparison.hideLabel : DraftComparison.showLabel)
+                Text(DraftComparison.toggleLabel(expanded: showsDraft))
                     .font(PanelTheme.Font.caption(textScale))
                     .foregroundStyle(PanelTheme.Palette.accent)
             }
             .buttonStyle(.plain)
-            .accessibilityHint("The findings grade this draft, not the answer above")
+            .accessibilityHint(DraftComparison.description(for: turn).hint)
             if showsDraft {
                 MarkdownBody(markdown: draft, sources: turn.sources, scale: textScale)
                     .padding(.vertical, PanelTheme.Space.hair)
@@ -250,19 +249,32 @@ struct TurnView: View, Equatable {
 
 /// A blinking caret for the moment between the last search and the first token.
 struct StreamingCaret: View {
-    @State private var isBright = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The caret's opacity for a brightness tick. Under Reduce Motion it is held
+    /// steady and dimmed, so a still caret does not read as a solid block of text.
+    static func opacity(isBright: Bool, reduceMotion: Bool) -> Double {
+        reduceMotion ? 0.6 : (isBright ? 1 : 0.25)
+    }
 
     var body: some View {
+        Group {
+            if reduceMotion {
+                caret.opacity(Self.opacity(isBright: false, reduceMotion: true))
+            } else {
+                // Removing this subtree also stops an in-flight repeating animation.
+                caret.phaseAnimator([false, true]) { view, bright in
+                    view.opacity(Self.opacity(isBright: bright, reduceMotion: false))
+                } animation: { _ in .easeInOut(duration: 0.55) }
+            }
+        }
+        .accessibilityLabel("Writing the answer")
+    }
+
+    private var caret: some View {
         RoundedRectangle(cornerRadius: 1, style: .continuous)
             .fill(PanelTheme.Palette.accent)
             .frame(width: 7, height: 14)
-            .opacity(isBright ? 1 : 0.25)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
-                    isBright = true
-                }
-            }
-            .accessibilityLabel("Writing the answer")
     }
 }
 
@@ -337,7 +349,12 @@ struct FollowupsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
             SectionLabel(text: "Next")
-            ForEach(followups, id: \.self) { followup in
+            // Identified by offset, not by the string: the model can suggest the same
+            // follow-up twice, and two identical ids make SwiftUI's identity ambiguous —
+            // a warning in the console and a tap that can activate the other row.
+            // `onSelect` still receives the string, so a duplicate tap asks the right
+            // question either way.
+            ForEach(Array(followups.enumerated()), id: \.offset) { _, followup in
                 Button {
                     onSelect(followup)
                 } label: {
