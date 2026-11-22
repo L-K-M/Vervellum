@@ -739,6 +739,8 @@ final class ThreadArchiveTests: XCTestCase {
         store.retryErase()
         XCTAssertNil(store.eraseFailure)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertTrue(store.library.threads.isEmpty,
+                      "a retried erase must also clear the in-memory library")
     }
 
     /// When no staging copy survived, the retry falls back to rotating the current

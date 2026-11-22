@@ -369,9 +369,23 @@ final class ThreadArchive {
                 writePending()
             } else if backupFailure != nil {
                 let directory = fileURL.deletingLastPathComponent()
-                let succeeded = finishPendingBackupRotation() || rotateBackup()
-                let backup = succeeded ? nil
-                    : Self.backupFailureMessage(in: directory, file: fileURL.lastPathComponent)
+                var backup: String?
+                if finishPendingBackupRotation() || rotateBackup() {
+                    // A rotation completed through the staging copy never
+                    // re-attempts the primary's chmod. Retry it here so a
+                    // failed owner-only permission is not cleared while the
+                    // saved file may still be readable by others.
+                    do {
+                        try fileManager.setAttributes([.posixPermissions: 0o600],
+                                                      ofItemAtPath: fileURL.path)
+                    } catch {
+                        backup = Self.permissionFailureMessage(
+                            in: directory, file: fileURL.lastPathComponent)
+                    }
+                } else {
+                    backup = Self.backupFailureMessage(in: directory,
+                                                       file: fileURL.lastPathComponent)
+                }
                 recordFailures(save: nil, backup: backup)
             }
         }
@@ -407,6 +421,11 @@ final class ThreadArchive {
     private static func backupFailureMessage(in directory: URL, file: String) -> String {
         "Could not keep a backup copy of \(file) in \(directory.path). The threads "
         + "file itself was saved, but the previous copy was not replaced."
+    }
+
+    private static func permissionFailureMessage(in directory: URL, file: String) -> String {
+        "Could not make \(file) owner-readable only in \(directory.path). The file was "
+        + "saved, but it may be readable by others."
     }
 
     // MARK: Persistence
@@ -478,11 +497,11 @@ final class ThreadArchive {
             // `.bak`, the primary is the corrupt one; copying it over the backup before
             // the new write is known to have succeeded would, if that write then failed
             // for the same reason (a full disk, say), leave nothing readable at all.
-            var backupFailure: String?
+            var attemptBackupFailure: String?
             if primaryIsTrustworthy, fileManager.fileExists(atPath: fileURL.path) {
                 if !rotateBackup() {
-                    backupFailure = Self.backupFailureMessage(in: directory,
-                                                             file: fileURL.lastPathComponent)
+                    attemptBackupFailure = Self.backupFailureMessage(
+                        in: directory, file: fileURL.lastPathComponent)
                 }
             }
             do {
@@ -494,7 +513,8 @@ final class ThreadArchive {
             } catch {
                 recordFailures(save: Self.saveFailureMessage(in: directory,
                                                              file: fileURL.lastPathComponent),
-                               backup: backupFailure)
+                               // This attempt's rotation result.
+                               backup: attemptBackupFailure)
                 FileHandle.standardError.write(Data("vervellum warning: could not save threads\n".utf8))
                 return
             }
@@ -510,14 +530,16 @@ final class ThreadArchive {
                 try fileManager.setAttributes([.posixPermissions: 0o600],
                                               ofItemAtPath: fileURL.path)
             } catch {
-                let permission = "Could not make \(fileURL.lastPathComponent) "
-                    + "owner-readable only in \(directory.path). The file was saved, "
-                    + "but it may be readable by others."
-                backupFailure = [backupFailure, permission]
+                attemptBackupFailure = [attemptBackupFailure,
+                                        Self.permissionFailureMessage(
+                                            in: directory, file: fileURL.lastPathComponent)]
                     .compactMap { $0 }.joined(separator: " ")
             }
-            recordFailures(save: nil, backup: backupFailure)
+            recordFailures(save: nil, backup: attemptBackupFailure)
         } catch {
+            // Reachable only before a rotation is attempted (encoding, directory
+            // creation), so this deliberately reads the *property*: a previously
+            // recorded backup failure still stands when this write never got that far.
             recordFailures(save: Self.saveFailureMessage(in: directory,
                                                          file: fileURL.lastPathComponent),
                            backup: backupFailure)
