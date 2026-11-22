@@ -631,10 +631,20 @@ final class ThreadArchiveTests: XCTestCase {
     /// user has locked while the primary is still writable.
     private final class SelectiveRemoveFileManager: FileManager {
         var deniedPaths: Set<String> = []
+        var deniesAttributeChanges = false
 
         override func removeItem(at URL: URL) throws {
             guard deniedPaths.contains(URL.path) else { return try super.removeItem(at: URL) }
             throw CocoaError(.fileWriteNoPermission)
+        }
+
+        override func setAttributes(_ attributes: [FileAttributeKey: Any],
+                                    ofItemAtPath path: String) throws {
+            // Only the owner-only mode, not the directory's 0o700 fence.
+            if deniesAttributeChanges, (attributes[.posixPermissions] as? Int) == 0o600 {
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            try super.setAttributes(attributes, ofItemAtPath: path)
         }
     }
 
@@ -908,6 +918,27 @@ final class ThreadArchiveTests: XCTestCase {
         let mode = try XCTUnwrap(attributes[.posixPermissions] as? Int)
         XCTAssertEqual(mode & 0o777, 0o600,
                        "the backup must be owner-only from the first rotation")
+    }
+
+    /// A retry whose rotation fails must not replace a standing permission
+    /// warning with a backup-only one: both problems send the reader to
+    /// different places, so both stay in the message.
+    func testARetriedRotationFailureKeepsBothWarnings() throws {
+        let manager = SelectiveRemoveFileManager()
+        manager.deniesAttributeChanges = true
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+
+        // The rotation is already failing on the owner-only chmod; a denied
+        // .bak removal gives the retry a rotation failure of its own.
+        manager.deniedPaths.insert(fileURL.appendingPathExtension("bak").path)
+        store.retrySave()
+        let warning = try XCTUnwrap(store.storageFailures().backup)
+        XCTAssertTrue(warning.contains("backup copy"), warning)
+        XCTAssertTrue(warning.contains("owner-readable"), warning)
     }
 
     /// A failure publishes once, and a successful retry publishes again — the
