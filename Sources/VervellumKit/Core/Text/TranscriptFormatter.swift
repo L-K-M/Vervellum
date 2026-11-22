@@ -9,7 +9,7 @@ import Foundation
 /// with it; so do the verdicts, because an answer without them is exactly the
 /// confident-sounding paragraph this app exists to replace.
 ///
-/// Only sources cited by the answer or its findings are listed. A dump of everything
+/// Only sources cited by the exported prose or findings are listed. A dump of everything
 /// the search happened to return misrepresents what the research actually rests on.
 ///
 /// Pure and dependency-free, so it is fully unit-testable.
@@ -30,6 +30,8 @@ enum TranscriptFormatter {
         }
 
         lines.append(turn.answer)
+        var citedNumbers = Set(turn.findings.flatMap(\.sourceNumbers))
+        citedNumbers.formUnion(sourceNumbers(in: turn.answer, turn: turn))
 
         // The draft the findings were written about. It is kept so a reader can see what
         // the correction changed, and an export that omitted it would leave the claims
@@ -40,6 +42,7 @@ enum TranscriptFormatter {
             lines.append("")
             lines.append("First draft (before the correction)")
             lines.append(draft)
+            citedNumbers.formUnion(sourceNumbers(in: draft, turn: turn))
         }
 
         if !turn.findings.isEmpty {
@@ -56,10 +59,6 @@ enum TranscriptFormatter {
 
         // A verdict can cite evidence the prose did not. Every exported reference
         // needs its source, without listing unrelated search hits or duplicates.
-        let answerSources = turn.citedSources(
-            using: CitationValidator.validate(answer: turn.answer, sourceCount: turn.sources.count))
-        let citedNumbers = Set(answerSources.map(\.number))
-            .union(turn.findings.flatMap(\.sourceNumbers))
         let cited = turn.sources.filter { citedNumbers.contains($0.number) }
             .sorted { $0.number < $1.number }
         if !cited.isEmpty {
@@ -85,5 +84,10 @@ enum TranscriptFormatter {
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    private static func sourceNumbers(in prose: String, turn: ResearchTurn) -> [Int] {
+        let validation = CitationValidator.validate(answer: prose, sourceCount: turn.sources.count)
+        return turn.citedSources(using: validation).map(\.number)
     }
 }
