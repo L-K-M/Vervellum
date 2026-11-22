@@ -322,7 +322,12 @@ struct FollowupsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
             SectionLabel(text: "Next")
-            ForEach(followups, id: \.self) { followup in
+            // Identified by offset, not by the string: the model can suggest the same
+            // follow-up twice, and two identical ids make SwiftUI's identity ambiguous —
+            // a warning in the console and a tap that can activate the other row.
+            // `onSelect` still receives the string, so a duplicate tap asks the right
+            // question either way.
+            ForEach(Array(followups.enumerated()), id: \.offset) { _, followup in
                 Button {
                     onSelect(followup)
                 } label: {
