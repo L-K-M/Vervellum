@@ -138,7 +138,7 @@ struct SourceRow: View {
 
     var body: some View {
         Button {
-            guard let url = URL(string: source.url) else { return }
+            guard let url = SourceHarvester.openableURL(source.url) else { return }
             NSWorkspace.shared.open(url)
         } label: {
             HStack(alignment: .top, spacing: PanelTheme.Space.small) {
