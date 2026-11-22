@@ -341,6 +341,22 @@ enum ProviderCredentialCommit {
         case invalid(String, String)
     }
 
+    /// Discovery can run with unsaved fields. Only the currently saved profile can
+    /// authorize a stored credential for that request, under the same destination
+    /// comparison that Save uses when deciding whether to rotate an account.
+    static func catalogKey(for draft: ModelProfile, saved: ProviderSettings,
+                           edit: CredentialEdit, secrets: SecretStore) -> String? {
+        switch edit {
+        case .clear: return nil
+        case .replace: return edit.replacement
+        case .unchanged:
+            guard let owner = saved.modelProfiles.first(where: { $0.id == draft.id }),
+                  case let .model(destination) = modelDestination(draft.endpoint),
+                  modelDestination(owner.endpoint) == .model(destination) else { return nil }
+            return secrets.value(for: owner.secretAccount)
+        }
+    }
+
     private static func modelDestination(_ raw: String) -> Destination {
         guard let url = ProviderSettings.chatCompletionsURL(from: raw) else {
             return .invalid("model", trimmed(raw))
