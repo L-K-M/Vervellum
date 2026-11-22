@@ -320,8 +320,30 @@ enum PangoMarkup {
     static func notices(_ notices: [TurnNotice]) -> String? {
         guard !notices.isEmpty else { return nil }
         return notices
-            .map { "<span foreground=\"\(Colour.mixed)\">⚠ " + GTK.escape($0.message) + "</span>" }
+            .map { "<span foreground=\"\(colour(for: $0.tone))\">"
+                + glyph(for: $0.tone) + " " + GTK.escape($0.message) + "</span>" }
             .joined(separator: "\n")
+    }
+
+    /// A colour per notice tone, mirroring the macOS palette's meaning. Informational
+    /// notices are secondary rather than a verdict colour, so a status change does not
+    /// borrow the findings table's vocabulary.
+    private static func colour(for tone: NoticeTone) -> String {
+        switch tone {
+        case .informational: return Colour.secondary
+        case .caution: return Colour.mixed
+        case .critical: return Colour.contradicted
+        }
+    }
+
+    /// A glyph per notice tone, so the distinction survives a monochrome screenshot —
+    /// the same rule the verdict glyphs follow.
+    private static func glyph(for tone: NoticeTone) -> String {
+        switch tone {
+        case .informational: return "ℹ"
+        case .caution: return "⚠"
+        case .critical: return "✗"
+        }
     }
 
     static func findings(_ findings: [Finding]) -> String? {

@@ -308,7 +308,7 @@ enum TurnNotice: String, Codable, Equatable {
                 + "Nothing below the answer has been verified."
         case .answerRevised:
             return "The check found claims the evidence does not carry, and the answer was "
-                + "rewritten against them. The findings below grade the first draft, which "
+                + "rewritten against them. The findings below grade the saved draft, which "
                 + "is what they were written about."
         case .revisionUnavailable:
             return "The check found claims worth correcting, but the rewrite could not be "
@@ -337,8 +337,7 @@ enum TurnNotice: String, Codable, Equatable {
                 + "the one that answered."
         case .answerRegathered:
             return "The first check found claims the evidence could not settle, so this "
-                + "turn went back for more evidence and answered again. The findings "
-                + "below grade this answer; the first draft is kept for comparison."
+                + "turn went back for more evidence, answered again, and checked that answer."
         case .attachmentNotStored:
             return "An attachment could not be saved, so it will not be here when this "
                 + "thread is reopened. The answer was written with it — only the stored "
