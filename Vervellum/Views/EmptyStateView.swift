@@ -12,6 +12,7 @@ struct EmptyStateView: View {
 
     let configurationProblems: [String]
     let searches: Bool
+    let submitOnReturn: Bool
     let summonShortcut: String
     var onOpenSettings: () -> Void
     /// Loads the composer with the example — seeding, not submitting. The user
@@ -40,9 +41,15 @@ struct EmptyStateView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
-                hint("Return", "ask · Shift-Return for a new line")
+                let newlineKey = submitOnReturn ? "Shift-Return" : "Return"
+                hint(submitOnReturn ? "Return" : "⌘Return", "ask · \(newlineKey) for a new line",
+                     spokenKey: submitOnReturn ? "Return" : "Command-Return")
                 hint("/", "commands — and the four research levels by name")
                 hint("Esc", "clear the draft, then close")
+                // The feature nobody finds: dropped files and pasted images go
+                // with the question, and the empty state is the one place that
+                // can say so before it is needed.
+                hint("Drop / ⌘V", "a file or image in the composer to attach it")
                 hint(summonShortcut, "summon or dismiss from anywhere")
             }
             .padding(.top, PanelTheme.Space.small)
@@ -98,9 +105,10 @@ struct EmptyStateView: View {
         "Compare OLED and mini-LED displays for a laptop",
     ]
 
-    private func hint(_ key: String, _ meaning: String) -> some View {
+    private func hint(_ key: String, _ meaning: String, spokenKey: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: PanelTheme.Space.small) {
             Text(key)
+                .accessibilityLabel(spokenKey ?? key)
                 .font(PanelTheme.Font.citation(textScale))
                 .foregroundStyle(PanelTheme.Palette.primaryText)
                 .padding(.horizontal, 5)

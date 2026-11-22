@@ -750,7 +750,19 @@ final class ResearchRunner: ResearchRunning {
                                             history: history, today: today,
                                             attachments: attachments)
         recordAnsweringModel(from: chain)
-        update { $0.applyCitationValidation(sourceCount: sources.count) }
+        // The same validation answers two questions: whether the citations are
+        // honest, and whether the evidence is a monoculture. Two citations to one
+        // website are not two independent witnesses, and nothing else on the turn
+        // says so. It is a property of the evidence, not a verdict on the answer.
+        //
+        // Here rather than inside `applyCitationValidation`, which also runs at
+        // load (`finishInterruptedTurns`) and on a cancelled partial answer: those
+        // paths would stamp the cue onto a stored turn on every launch, or onto a
+        // answer the reader stopped mid-sentence.
+        update { turn in
+            let validation = turn.applyCitationValidation(sourceCount: sources.count)
+            turn.refreshSingleDomainNotice(using: validation)
+        }
         try Task.checkCancellation()
 
         // 5 — assess.
@@ -1610,6 +1622,11 @@ final class ResearchRunner: ResearchRunning {
                           reading: String,
                           searchState: inout SearchRoundState) async throws -> Regathered? {
         // A round over a full evidence budget cannot show the answer anything new.
+        // Rank-order page reads live on the first answer's sources. Carry them
+        // into cumulative harvests as well as pages explicitly named by the planner.
+        for source in currentSources where source.wasRead {
+            plannedReads[source.number] = source.fullText
+        }
         let withReads = Self.applyingReads(plannedReads, to: currentSources)
         guard ResearchContext.evidence(from: withReads, limit: evidenceLimit).dropped == 0
         else {
@@ -1704,28 +1721,16 @@ final class ResearchRunner: ResearchRunning {
         // (itself post-trim): the harvested list can grow past what the budget will
         // show the model, and counting that shadow growth would send the turn back
         // for a second answer over evidence identical to the first.
-        let trimmedCount = ResearchContext.evidence(from: harvested,
-                                                    limit: evidenceLimit).entries.count
-        let newSources = trimmedCount - currentSources.count
-        let newTexts = harvested.filter { source in
-            source.wasRead && currentSources.first(where: { $0.number == source.number })?.wasRead != true
-        }.count
-        guard newSources > 0 || newTexts > 0 else {
+        let selection = Self.regatherEvidence(from: harvested, limit: evidenceLimit,
+                                              comparedTo: currentSources)
+        guard selection.hasAdditions else {
             trace.log("Regather round found nothing new; the first answer stands")
             return nil
         }
-
-        // Committed from here: the turn gets the enlarged list, then the second answer.
-        // Snapshot first — a failure below restores rather than half-adopts. The
-        // snapshot is taken after the round's searches were appended on purpose: they
-        // did run, and a restore must not pretend they did not.
+        // Keep the search ledger on rollback: those requests already ran.
         let snapshot = current ?? ResearchTurn(question: question)
-        let (evidence, _, withheld) = ResearchContext.evidence(from: harvested,
-                                                               limit: evidenceLimit)
-        var sources = Array(harvested.prefix(evidence.count))
-        for index in sources.indices where withheld.contains(sources[index].number) {
-            sources[index].fullText = nil
-        }
+        let sources = selection.sources
+        let evidence = selection.entries
         update { turn in
             turn.sources = sources
             turn.pagesRead = sources.filter { $0.wasRead }.count
@@ -1765,7 +1770,10 @@ final class ResearchRunner: ResearchRunning {
             return nil
         }
         recordAnsweringModel(from: chain)
-        update { $0.applyCitationValidation(sourceCount: sources.count) }
+        update { turn in
+            let validation = turn.applyCitationValidation(sourceCount: sources.count)
+            turn.refreshSingleDomainNotice(using: validation)
+        }
         try Task.checkCancellation()
 
         update { $0.stage = .assessing }
@@ -1787,11 +1795,28 @@ final class ResearchRunner: ResearchRunning {
             turn.limitations = secondAssessment.limitations
             turn.followups = secondAssessment.followups
             for notice in secondAssessment.notices { turn.addNotice(notice) }
+            if selection.dropped > 0 { turn.addNotice(.evidenceTrimmed) }
+            if !selection.withheld.isEmpty { turn.addNotice(.pageTextTrimmed) }
             turn.addNotice(.answerRegathered)
         }
-        trace.log("Regather round added \(newSources) source(s), \(newTexts) page text(s)")
+        trace.log("Regather round adopted additional evidence")
         return Regathered(answer: second, sources: sources,
                           evidence: evidence, assessment: secondAssessment)
+    }
+
+    /// Count a page as a reason to answer again only if its text will be in
+    /// the answer payload. The source list and the decision share one budget pass.
+    static func regatherEvidence(from harvested: [Source], limit: Int, comparedTo previous: [Source])
+        -> (entries: [[String: Any]], sources: [Source], hasAdditions: Bool, dropped: Int, withheld: Set<Int>) {
+        let (entries, dropped, withheld) = ResearchContext.evidence(from: harvested, limit: limit)
+        var sources = Array(harvested.prefix(entries.count))
+        for index in sources.indices where withheld.contains(sources[index].number) {
+            sources[index].fullText = nil
+        }
+        let previousReads = Set(previous.filter { $0.wasRead }.map(\.number))
+        let hasAdditions = sources.count > previous.count
+            || sources.contains { $0.wasRead && !previousReads.contains($0.number) }
+        return (entries, sources, hasAdditions, dropped, withheld)
     }
 
     /// Streams every answer, including direct turns and a regather round's second pass.
@@ -1889,6 +1914,11 @@ final class ResearchRunner: ResearchRunning {
             question: question, history: history, today: today,
             extra: ["answer": answer, "evidence": evidence, "reading": reading])
         if assessContext.trimmed { update { $0.addNotice(.contextTrimmed) } }
+        // Sampled before the call, not read from `trace.elapsed` at the end: that one
+        // starts at the beginning of the turn, so the figure below would include
+        // planning, searching, page reading and the answer stream. A maintainer asking
+        // whether the assessor is slow is the reader this line exists for.
+        let began = trace.elapsed
         let assessment: AssessmentParser.Assessment
         do {
             let assessObject = try await chain.perform("Assess") { chat in
@@ -1908,11 +1938,14 @@ final class ResearchRunner: ResearchRunning {
                 || error is CancellationError
                 || (error as? ResearchError) == ResearchError.cancelled
             guard !stopped else { throw error }
-            trace.warn("Assessment unavailable: \(ResearchError.safeLabel(for: error))")
+            // The failure path is where the slowest assessments live — a timeout is
+            // exactly the case a maintainer asking "is the assessor slow?" is chasing.
+            trace.warn(String(format: "Assessment unavailable after %.1fs: %@",
+                              trace.elapsed - began, ResearchError.safeLabel(for: error)))
             return nil
         }
         trace.log("Assessment: \(assessment.findings.count) findings in "
-                  + String(format: "%.1fs", trace.elapsed))
+                  + String(format: "%.1fs", trace.elapsed - began))
         return assessment
     }
 
@@ -2146,17 +2179,15 @@ final class ResearchRunner: ResearchRunning {
         // draft did not. Otherwise an uncited draft and uncited rewrite evade a relative
         // "did it lose citations?" check together.
         let revisionCitedSomething = !validation.citedSourceIndices.isEmpty
-        guard validation.outOfRangeCitations.isEmpty,
-              validation.forbiddenLinks.isEmpty,
-              revisionCitedSomething
-        else {
-            // Which clause fired, because the three are different stories. Two are a
-            // reviser breaking a rule it was given; the third is the un-citing guard,
+        guard validation.isClean, revisionCitedSomething else {
+            // Which clause fired, because they are different stories. All but the last
+            // are a reviser breaking a rule it was given; the last is the un-citing guard,
             // which is the only one that can also refuse a *correct* rewrite — one that
             // weakened every flagged claim and legitimately dropped its numbers. It fails
             // soft either way, so the only way to know how often that happens is to say
             // which branch it was.
             let broken = !validation.outOfRangeCitations.isEmpty ? "a source number that does not exist"
+                : !validation.invalidCitationGroups.isEmpty ? "a citation that could not be read"
                 : !validation.forbiddenLinks.isEmpty ? "a forbidden link in the prose"
                 : "no citation at all"
             trace.warn("Revision discarded: \(broken)")
@@ -2166,6 +2197,7 @@ final class ResearchRunner: ResearchRunning {
         update { turn in
             turn.draftAnswer = answer
             turn.answer = corrected
+            turn.refreshSingleDomainNotice(using: validation)
             turn.addNotice(.answerRevised)
         }
         trace.log("Revised the answer in " + String(format: "%.1fs", trace.elapsed - began))
@@ -2253,11 +2285,15 @@ final class ResearchRunner: ResearchRunning {
     /// introduce fetched text into a field the URL already answers.
     static func linkTitle(for url: String) -> String {
         guard let components = URLComponents(string: url), let host = components.host else {
-            return ResearchContext.shorten(url, to: 120)
+            return HostileText.stripped(ResearchContext.shorten(url, to: 120))
         }
         let name = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
         let path = components.path
-        return ResearchContext.shorten(path.isEmpty || path == "/" ? name : name + path, to: 120)
+        // `components.path` percent-decodes, so a pasted link can smuggle a bidi override
+        // (…%E2%80%AE) or a NUL into the title through the path; strip like every other
+        // displayed field. The title is what the source list shows, never a fetch target.
+        return HostileText.stripped(
+            ResearchContext.shorten(path.isEmpty || path == "/" ? name : name + path, to: 120))
     }
 
     /// Reads the pages the question linked to, and turns the ones that answered into

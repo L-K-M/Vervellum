@@ -385,6 +385,103 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(Self.stage(of: calls[5]), .assess)
     }
 
+    /// Two citations to one website are not two independent witnesses. The cue is a
+    /// property of the evidence, so it is derived from the sources the answer cited
+    /// and says nothing about whether the answer itself is true.
+    ///
+    /// Fixture note: `/search` is stubbed with two same-domain results. When the
+    /// harvester's diversity cap makes that unlikely in a live run, the badge's
+    /// common trigger is a mono-domain cited subset of a diverse harvest — covered
+    /// at the model level in `ResearchModelTests`.
+    func testAnAnswerCitingOneDomainIsBadged() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
+                switch Self.stage(of: call) {
+                case .plan: return .completion(json: Self.plan("a documented fact"))
+                case .assess: return .completion(json: Self.assessment)
+                default: return .unrouted
+                }
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "https://one.example/a", title: "A"),
+                                           (url: "https://one.example/b", title: "B")]))
+            case .fetch:
+                return .html("<p>Page text.</p>")
+            case .stream:
+                return .stream(["Both sources agree [1, 2]."])
+            default:
+                return .unrouted
+            }
+        }
+
+        let turn = await run("What is the fact?", transport: transport)
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertTrue(turn.notices.contains(.singleDomain), "notices: \(turn.notices)")
+    }
+
+    /// The same answer over two domains is not a monoculture, and the cue must not
+    /// fire on a normal, varied evidence set.
+    func testAnAnswerCitingTwoDomainsIsNotBadged() async throws {
+        let transport = StubTransport { call in
+            switch call.kind {
+            case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
+                switch Self.stage(of: call) {
+                case .plan: return .completion(json: Self.plan("a documented fact"))
+                case .assess: return .completion(json: Self.assessment)
+                default: return .unrouted
+                }
+            case .json where call.url.path == "/search":
+                return .json(Self.searxng([(url: "https://a.example/one", title: "One"),
+                                           (url: "https://b.example/two", title: "Two")]))
+            case .fetch:
+                return .html("<p>Page text.</p>")
+            case .stream:
+                return .stream(["Both sources agree [1, 2]."])
+            default:
+                return .unrouted
+            }
+        }
+
+        let turn = await run("What is the fact?", transport: transport)
+        XCTAssertEqual(turn.stage, .complete, turn.failure ?? "no failure recorded")
+        XCTAssertFalse(turn.notices.contains(.singleDomain), "notices: \(turn.notices)")
+    }
+
+    /// The cue describes the answer on screen, so an accepted revision moves it.
+    func testTheSingleSiteCueFollowsAnAcceptedRevision() async throws {
+        for (draft, revision, badged) in [("Degrees [1, 2].", "Arcseconds [1, 3].", false),
+                                          ("Degrees [1, 3].", "Arcseconds [1, 2].", true)] {
+            let transport = StubTransport { call in
+                switch call.kind {
+                case .json where call.url.absoluteString.hasPrefix(Self.modelURL):
+                    switch Self.stage(of: call) {
+                    case .plan: return .completion(json: Self.plan("parallax"))
+                    case .assess: return .completion(json: Self.assessment(verdict: "mixed"))
+                    default: return .unrouted
+                    }
+                case .json where call.url.path == "/search":
+                    return .json(Self.searxng([(url: "https://one.example/a", title: "A"),
+                                               (url: "https://one.example/b", title: "B"),
+                                               (url: "https://two.example/c", title: "C")]))
+                case .fetch:
+                    return .html("<p>Page.</p>")
+                case .stream:
+                    switch Self.stage(of: call) {
+                    case .answer: return .stream([draft])
+                    case .revise: return .stream([revision])
+                    default: return .unrouted
+                    }
+                default:
+                    return .unrouted
+                }
+            }
+
+            let turn = await run("Parallax unit?", transport: transport)
+            XCTAssertEqual(turn.answer, revision, "the revision must be adopted")
+            XCTAssertEqual(turn.notices.contains(.singleDomain), badged, revision)
+        }
+    }
+
     func testLinkedAssessmentTextIsDiscardedBeforeTheTurnPublishesIt() async throws {
         let linked: [String: Any] = [
             "claim": "A linked claim at example.com",
@@ -2078,18 +2175,51 @@ final class ResearchRunnerTests: XCTestCase {
 
     // MARK: Regather
 
+    func testRegatherOnlySpendsAnotherAnswerOnVisibleEvidence() throws {
+        let first = Source(number: 1, url: "https://one.example", title: "One", snippet: "")
+        var read = first
+        read.fullText = String(repeating: "page text", count: 200)
+        var second = read
+        second.number = 2
+        second.url = "https://two.example"
+        let bare = ResearchContext.measure(ResearchContext.evidence(from: [first]).entries)
+        let hidden = ResearchRunner.regatherEvidence(from: [read, second], limit: bare, comparedTo: [first])
+        XCTAssertFalse(hidden.hasAdditions)
+        XCTAssertEqual(hidden.sources, [first])
+        XCTAssertEqual(hidden.dropped, 1)
+        XCTAssertEqual(hidden.withheld, [1])
+
+        let visible = ResearchRunner.regatherEvidence(from: [read], limit: 5000, comparedTo: [first])
+        XCTAssertTrue(visible.hasAdditions)
+        XCTAssertEqual(visible.sources, [read])
+        XCTAssertFalse(ResearchRunner.regatherEvidence(from: [read], limit: 5000,
+                                                      comparedTo: [read]).hasAdditions)
+        XCTAssertTrue(ResearchRunner.regatherEvidence(from: [first, second], limit: 5000,
+                                                     comparedTo: [first]).hasAdditions)
+    }
+
     /// The first assessment's two replies, told apart by which answer they grade.
-    private static func regatherTransport(secondAssessment: StubTransport.Reply)
-        -> StubTransport {
-        StubTransport { call in
+    private static func regatherTransport(secondAssessment: StubTransport.Reply,
+                                          crowded: Bool = false,
+                                          onOneSite: Bool = false) -> StubTransport {
+        // Only the path's tail on one site: the payload escapes the slash before it.
+        let secondHit = onOneSite ? "/settle-it" : "settle-it.example"
+        return StubTransport { call in
             switch call.kind {
             case .fetch:
+                if crowded { return .html("<p>" + String(repeating: "Page text. ", count: 260) + "</p>") }
                 return .html("<p>Text for \(call.url.path).</p>")
             case .json where call.url.path == "/search":
                 let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
                     .queryItems?.first { $0.name == "q" }?.value ?? ""
-                return .json(Self.searxng([(url: "https://\(query).example/hit",
-                                            title: "Hit for \(query)")]))
+                if crowded && query == "settle-it" {
+                    return .json(Self.searxng((1...24).map {
+                        (url: "https://site-\($0).example/settle-it.example/hit",
+                         title: String(repeating: "More evidence ", count: 12))
+                    }))
+                }
+                let url = onOneSite ? "https://one.example/\(query)" : "https://\(query).example/hit"
+                return .json(Self.searxng([(url: url, title: "Hit for \(query)")]))
             case .json:
                 switch Self.stage(of: call) {
                 case .plan:
@@ -2120,7 +2250,7 @@ final class ResearchRunnerTests: XCTestCase {
                 // Two answer calls: the first answers the plan's payload, the second the
                 // regather round's enlarged one. Told apart by size — the second carries
                 // both sources.
-                let carriesTwo = call.userContent?.contains("settle-it.example") == true
+                let carriesTwo = call.userContent?.contains(secondHit) == true
                 return .stream(carriesTwo ? ["Second answer [1, 2]."] : ["First answer [1]."])
             }
         }
@@ -2140,6 +2270,7 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(turn.draftAnswer, "First answer [1].",
                        "the first answer is kept as the draft for comparison")
         XCTAssertEqual(turn.sources.count, 2, "the regather round's hit joined the list")
+        XCTAssertTrue(turn.sources[0].wasRead, "keep the first pass's rank-order page read")
         XCTAssertTrue(turn.notices.contains(.answerRegathered))
         XCTAssertEqual(turn.findings.first?.verdict, .supported,
                        "the findings are the second check's — they grade what is on screen")
@@ -2149,6 +2280,38 @@ final class ResearchRunnerTests: XCTestCase {
         let assesses = transport.calls.filter { Self.stage(of: $0) == .assess }
         XCTAssertEqual(assesses.count, 2)
         XCTAssertTrue(assesses.last?.userContent?.contains("settle-it.example") == true)
+    }
+
+    /// A second answer is judged on its own citations, not the first one's.
+    func testTheSingleSiteCueFollowsARegatheredAnswer() async throws {
+        let transport = Self.regatherTransport(secondAssessment: .completion(json: Self.assessment(
+            verdict: "supported", claim: "Now the evidence carries it.", sources: [1, 2])),
+            onOneSite: true)
+
+        let turn = await run("Does it hold?", mode: .deep, transport: transport)
+
+        XCTAssertEqual(turn.answer, "Second answer [1, 2].")
+        XCTAssertTrue(turn.notices.contains(.singleDomain), "notices: \(turn.notices)")
+    }
+
+    func testAdoptedRegatherReportsNewlyDroppedSourcesAndWithheldPages() async {
+        let transport = Self.regatherTransport(secondAssessment: .completion(json: Self.assessment),
+                                               crowded: true)
+        // Leave room for a single full page on the first pass. On regather the
+        // new summaries fill that room, displacing the page and the tail hits.
+        let fixedBytes = ResearchContext.maxCharacters - ResearchContext.answerContextReserve - 4_000
+        let question = String(repeating: "q", count: fixedBytes)
+        let turn = await run(question, mode: .deep, transport: transport)
+        XCTAssertTrue(turn.notices.contains(.answerRegathered))
+        XCTAssertEqual(turn.notices.filter { $0 == .evidenceTrimmed }.count, 1)
+        XCTAssertEqual(turn.notices.filter { $0 == .pageTextTrimmed }.count, 1)
+        XCTAssertGreaterThan(turn.sources.count, 1)
+        XCTAssertLessThan(turn.sources.count, 24)
+        XCTAssertEqual(turn.sources.first?.wasRead, false)
+        let checks = transport.calls.filter { Self.stage(of: $0) == .assess }
+        XCTAssertEqual(checks.count, 2)
+        XCTAssertEqual(checks.first?.userContent?.contains("Page text."), true)
+        XCTAssertEqual(checks.last?.userContent?.contains("Page text."), false)
     }
 
     /// A regather that cannot finish adopts nothing: the first answer, the first
@@ -2169,6 +2332,47 @@ final class ResearchRunnerTests: XCTestCase {
                        "the first check's findings grade the answer they were written about")
         // The round's searches are not rolled back: they did run.
         XCTAssertEqual(turn.searches.count, 2)
+    }
+
+    func testReadsOnlyRegatherSpendsAnotherAnswerOnlyWhenPageTextFits() async {
+        for tightBudget in [false, true] {
+            // The rank-order read fails. The planner asks to retry that same page
+            // after assessment, and this time the page is available.
+            let firstRead = DispatchSemaphore(value: 1)
+            defer { firstRead.signal() }
+            let transport = StubTransport { call in
+                switch call.kind {
+                case .fetch:
+                    if firstRead.wait(timeout: .now()) == .success {
+                        return .page(status: 404, headers: [:], text: "")
+                    }
+                    return .html("<p>" + String(repeating: "Page evidence. ", count: 400) + "</p>")
+                case .json where call.url.path == "/search":
+                    return .json(Self.searxng([(url: "https://journal.example/report", title: "Study")]))
+                case .json:
+                    switch Self.stage(of: call) {
+                    case .plan: return .completion(json: Self.plan("study"))
+                    case .deepPlan: return .completion(json: ["reading": "Ready", "searches": []])
+                    case .regatherPlan:
+                        return .completion(json: ["reading": "Retry the study", "read": [1], "searches": []])
+                    case .assess:
+                        return .completion(json: Self.assessment(verdict: "insufficient", sources: []))
+                    default: return .unrouted
+                    }
+                case .stream: return .stream(["Answer [1]."])
+                }
+            }
+            // Leave room for the summary and stage metadata but not the retrieved page.
+            let question = tightBudget ? String(repeating: "q", count: ResearchContext.maxCharacters
+                                                   - ResearchContext.answerContextReserve - 3_000) : "What changed?"
+            let turn = await run(question, mode: .deep, transport: transport)
+            XCTAssertEqual(turn.stage, .complete, turn.failure ?? "")
+            XCTAssertEqual(transport.calls.filter { $0.kind == .fetch }.count, 2)
+            XCTAssertEqual(transport.calls.filter { Self.stage(of: $0) == .answer }.count, tightBudget ? 1 : 2)
+            XCTAssertEqual(transport.calls.filter { Self.stage(of: $0) == .assess }.count, tightBudget ? 1 : 2)
+            XCTAssertEqual(turn.sources.first?.wasRead, !tightBudget)
+            XCTAssertEqual(turn.notices.contains(.answerRegathered), !tightBudget)
+        }
     }
 
     /// The round is a deep-mode discipline: a quick turn's insufficient verdict is
@@ -2738,6 +2942,29 @@ final class ResearchRunnerTests: XCTestCase {
     /// The reviser reading the findings and judging that none of them warrants a change
     /// is a real answer, not a failure — and not a revision either. Nothing is said,
     /// because nothing happened.
+    func testARevisionWithAnUnreadableCitationIsDroppedWhole() async {
+        let draft = "Parallax is measured in degrees [1]."
+        for marker in ["[9-2]", "[1-3-5]", "[1-300]", "[4321]"] {
+            let revision = "Parallax is measured in arcseconds [1] \(marker)."
+            let transport = revisionTransport(verdict: "mixed", answer: [draft],
+                                              revision: .stream([revision]))
+            let turn = await run("How is stellar parallax measured?", transport: transport)
+            XCTAssertEqual(turn.answer, draft, "a valid citation must not excuse \(marker)")
+            XCTAssertNil(turn.draftAnswer, marker)
+            XCTAssertTrue(turn.notices.contains(.revisionUnavailable), marker)
+        }
+    }
+
+    func testARevisionMentioningAYearIsAdopted() async {
+        let revision = "Parallax is measured in arcseconds [1], as restated in [2023]."
+        let transport = revisionTransport(verdict: "mixed",
+                                          answer: ["Parallax is measured in degrees [1]."],
+                                          revision: .stream([revision]))
+        let turn = await run("How is stellar parallax measured?", transport: transport)
+        XCTAssertEqual(turn.answer, revision)
+        XCTAssertFalse(turn.notices.contains(.invalidCitation))
+    }
+
     func testARevisionThatChangesNothingIsNotAnnouncedAsOne() async throws {
         let transport = revisionTransport(
             verdict: "mixed",

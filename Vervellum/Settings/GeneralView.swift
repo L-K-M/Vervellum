@@ -1,4 +1,5 @@
 import SwiftUI
+import UpdraftKit
 
 /// Panel behaviour, history, and updates.
 struct GeneralView: View {
@@ -159,13 +160,30 @@ struct GeneralView: View {
                     Button("Delete all…") { showsEraseConfirmation = true }
                         .disabled(store.library.threads.isEmpty)
                 }
-                // The file is still there. Saying so beats a toggle that reads "off"
-                // over questions that are still on disk.
-                if let failure = store.eraseFailure {
+                // A document that cannot be read is a different problem from a
+                // write that failed: nothing here can retry it, so it gets the
+                // explanation alone rather than a button that would do nothing.
+                if let failure = store.readFailure {
                     Text(failure)
                         .font(.system(size: 11))
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                // The file is still there, or the write/backup did not complete.
+                // Saying so beats a toggle that reads "off" over questions that are
+                // still on disk, and the retry is the difference between a warning
+                // the reader can act on and one they can only report.
+                if let failure = store.storageFailure {
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(failure)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Button("Try Again") { store.retryStorage() }
+                            .controlSize(.small)
+                            .accessibilityLabel("Retry the storage operation")
+                    }
                 }
             }
 
@@ -205,7 +223,11 @@ struct GeneralView: View {
             Button("Delete All", role: .destructive) { store.deleteAll() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the threads file from disk. It cannot be undone.")
+            // `deleteAll` also erases the stored copies of attached pictures and
+            // files, and a destructive confirmation that understates what is deleted
+            // is the one sentence the user reads before pressing the button.
+            Text("This removes the threads file and the stored copies of attached "
+                 + "pictures and files from disk. It cannot be undone.")
         }
     }
 }

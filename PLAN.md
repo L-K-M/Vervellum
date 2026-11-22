@@ -525,8 +525,8 @@ point where the interesting decisions stop.
 **Shared** (`Sources/VervellumKit/Core/`, Foundation only): the four-stage pipeline, all
 four prompts, both response parsers, citation validation, source harvesting, evidence
 extraction, context budgeting, the thread document and its archive, markdown parsing,
-slash commands, transcript formatting, secret redaction, the preference schema and the
-version comparison. That is roughly two thirds of the code and effectively all of the
+slash commands, transcript formatting, secret redaction and the preference
+schema. That is roughly two thirds of the code and effectively all of the
 rules — so a fix to a validation rule, a prompt or a parser reaches both platforms
 without being ported.
 
@@ -597,16 +597,16 @@ The shared core (`Sources/VervellumKit/Core/`) and the Linux front end are laid 
   (atomic checkpointed JSON with one `.bak`).
 - `Security/` — `KeychainStore`, the macOS `SecretStore`. `SecretRedactor` is shared.
 - `Selection/` — `SelectedTextReader` (the Accessibility path).
-- `Hotkeys/` — `CarbonHotkey`, `KeyCodes`.
 - `Views/` — the SwiftUI panel: theme tokens, markdown parser and renderer, composer,
   process trail, findings, sources, history, empty state.
 - `Settings/` — the four panes and their window controller.
-- `Updates/` — the GitHub self-updater, shared with the sibling apps.
+- The GitHub self-updater and the global hotkeys come from the shared Updraft and
+  Keycap packages, which the sibling apps use too.
 
 The logic backbone is deliberately free of AppKit and SwiftUI so it can be
 unit-tested: placement geometry, citation validation, source harvesting, evidence
 extraction, context budgeting, both response parsers, the markdown block parser,
-slash-command parsing, preference clamping, and the version comparison.
+slash-command parsing and preference clamping.
 
 ---
 
@@ -675,7 +675,8 @@ Current consolidation decisions and remaining verification limits:
 
 1. **A signed, notarized release and an authenticated update chain.** Everything in
    §4.4 follows from not having one, including the Accessibility grant being reset by
-   every update, and the updater verifying only an asset's size.
+   every update, and the updater checking an asset's size, origin and published digest
+   but never a signature.
 2. Fetch and quote the full text of a small number of decisive sources, with the
    injection surface treated explicitly.
 3. A Settings interface for Linux, so the JSON file is not the only way to configure it.

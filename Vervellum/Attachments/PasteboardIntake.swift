@@ -89,24 +89,27 @@ enum PasteboardIntake {
                 break
             }
             guard let data = imageData(on: item) else { continue }
-            // Numbered from the second — `AttachmentIntake.name(forPastedImage:)` is
-            // where that rule and its reasons live, in Core, so a GTK paste of four
-            // images names them the same way.
+            // Numbered from the second, and named off the bytes —
+            // `AttachmentIntake.name(forPastedImage:sniffing:)` is where that rule and
+            // its reasons live, in Core, so a GTK paste of four images names them the
+            // same way. A JPEG taken as-is is a `.jpg`, not a `.png` claim.
             candidates.append(AttachmentIntake.Candidate(
-                data, name: AttachmentIntake.name(forPastedImage: candidates.count + 1)))
+                data, name: AttachmentIntake.name(forPastedImage: candidates.count + 1,
+                                                  sniffing: data)))
         }
         // A pasteboard that advertises a type without vending an item for it still has
         // to work — that is what a promise from a lazy provider looks like — so the
         // whole-pasteboard read stays as the fallback it always was.
         if candidates.isEmpty, room > 0, let single = imageData(on: pasteboard) {
-            candidates = [AttachmentIntake.Candidate(single, name: AttachmentIntake.pastedImageName)]
+            candidates = [AttachmentIntake.Candidate(
+                single, name: AttachmentIntake.name(forPastedImage: 1, sniffing: single))]
         }
         guard !candidates.isEmpty else {
             // Nothing was converted, and there are two reasons for that. With no room,
             // the board's picture was never looked at — the question is full, and the
             // sentence for that says so. Otherwise the board is carrying a picture this
-            // cannot read: JPEG, which no branch above takes, or a promise that resolved
-            // to nothing. That one has no other flavour to fall back to — no text, no
+            // cannot read: GIF or WebP, which no branch above takes, or a promise that
+            // resolved to nothing. That one has no other flavour to fall back to — no text, no
             // file — so AppKit's own paste does nothing either, which is the dead Cmd-V
             // every other decision in this file is arranged to avoid.
             guard carriesImage(pasteboard) else { return AttachmentIntake.Outcome() }
@@ -131,7 +134,7 @@ enum PasteboardIntake {
     /// about AppKit; GTK hands over a decoded texture and never reaches it.
     static var unreadableImageMessage: String {
         "That picture is in a form Vervellum cannot take from a clipboard, which reads "
-            + "PNG and TIFF. Saving it to a file and dropping the file in will attach it."
+            + "PNG, JPEG and TIFF. Saving it to a file and dropping the file in will attach it."
     }
 
     /// Whether the pasteboard is carrying an image of *some* kind, readable or not.
@@ -143,22 +146,19 @@ enum PasteboardIntake {
         pasteboard.canReadItem(withDataConformingToTypes: [UTType.image.identifier])
     }
 
-    /// PNG bytes for an image sitting on the pasteboard, in either form it arrives in.
+    /// The bytes for an image sitting on the pasteboard, in any form it arrives in.
     ///
     /// A macOS screenshot taken to the clipboard is TIFF, and TIFF is not something a
-    /// provider will look at — so it is re-encoded here, in the front end, where an
-    /// imaging framework is allowed. `Core` cannot do this, which is why it refuses an
-    /// image it does not recognise rather than converting one.
-    ///
-    /// PNG and TIFF only, deliberately for now. `Attachment` does recognise JPEG, so a
-    /// pasteboard carrying `public.jpeg` and nothing else — some apps offer only that —
-    /// comes back empty and pastes as whatever else was on it. Adding the type is not
-    /// the whole change: `pastedImageName` says `.png`, and re-encoding a photograph to
-    /// PNG to keep that true can multiply its size and get it refused by a cap it was
-    /// under. It wants a name that follows the bytes, on both front ends, which is more
-    /// than this belongs to.
+    /// provider will look at — so it is re-encoded to PNG here, in the front end, where
+    /// an imaging framework is allowed. `Core` cannot do this, which is why it refuses
+    /// an image it does not recognise rather than converting one. JPEG is taken as the
+    /// bytes it is: `Attachment` sniffs it and sends it as image/jpeg, and re-encoding a
+    /// photograph to PNG just to keep a `.png` name could multiply its size past the
+    /// attachment cap. PNG and JPEG only need no conversion at all.
     static func imageData(on item: NSPasteboardItem) -> Data? {
-        pngEncoded(png: item.data(forType: .png), tiff: item.data(forType: .tiff))
+        pastedImage(png: item.data(forType: .png),
+                    jpeg: item.data(forType: jpegType),
+                    tiff: item.data(forType: .tiff))
     }
 
     /// The flavours the two `imageData` overloads look at, for a caller that needs to
@@ -167,11 +167,13 @@ enum PasteboardIntake {
     /// Beside them deliberately. The type matrix is the delicate part of this file and a
     /// second copy of it is a second place to forget to change; this is that second copy,
     /// kept where anyone changing the first will see it.
-    static let imageTypes: [NSPasteboard.PasteboardType] = [.png, .tiff]
+    static let imageTypes: [NSPasteboard.PasteboardType] = [.png, .tiff, jpegType]
 
     /// The same, asked of the whole pasteboard.
     static func imageData(on pasteboard: NSPasteboard) -> Data? {
-        pngEncoded(png: pasteboard.data(forType: .png), tiff: pasteboard.data(forType: .tiff))
+        pastedImage(png: pasteboard.data(forType: .png),
+                    jpeg: pasteboard.data(forType: jpegType),
+                    tiff: pasteboard.data(forType: .tiff))
     }
 
     /// Which of the two forms won, given whatever each was asked for.
@@ -192,21 +194,29 @@ enum PasteboardIntake {
     /// nothing says the others were there. Accepted rather than closed: reading the rest
     /// means one attachment per page against a cap of four, which is a decision about
     /// what a paste means rather than a fix.
-    private static func pngEncoded(png: @autoclosure () -> Data?,
-                                   tiff: @autoclosure () -> Data?) -> Data? {
+    private static func pastedImage(png: @autoclosure () -> Data?,
+                                    jpeg: @autoclosure () -> Data?,
+                                    tiff: @autoclosure () -> Data?) -> Data? {
         // Non-empty, not merely non-nil. A pasteboard read can answer with zero bytes —
         // a promise resolved after the board changed, a race as a drag lands — and
         // returning those would attach nothing under a name, refused downstream as
         // "unsupported" in words that describe the wrong problem. Worse, it would skip
-        // the TIFF beside it, which is the flavour that would have worked.
+        // the flavour beside it, which is the one that would have worked.
         if let png = png(), !png.isEmpty { return png }
+        // JPEG before TIFF: the bytes are already what Core will send, and a re-encode
+        // is the one flavour here that can change the size enough to matter.
+        if let jpeg = jpeg(), !jpeg.isEmpty { return jpeg }
         guard let tiff = tiff(), let representation = NSBitmapImageRep(data: tiff)
         else { return nil }
         return representation.representation(using: .png, properties: [:])
     }
 
     /// The pasteboard types the composer accepts in a drag.
-    static let draggedTypes: [NSPasteboard.PasteboardType] = [.fileURL, .png, .tiff]
+    static let draggedTypes: [NSPasteboard.PasteboardType] = [.fileURL, .png, .tiff, jpegType]
+
+    /// `public.jpeg`, spelled through `UTType` because `PasteboardType` has no `.jpeg`
+    /// member on this SDK.
+    private static let jpegType = NSPasteboard.PasteboardType(UTType.jpeg.identifier)
 
     /// Whether `pasteboard` is actually carrying a file.
     ///

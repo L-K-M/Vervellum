@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
+import KeycapCore
 @testable import Vervellum
 
 /// Stands in for the SwiftUI state the composer's draft is bound to.

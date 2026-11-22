@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import KeycapKit
 
 /// The two global shortcuts.
 ///
@@ -40,7 +41,7 @@ struct ShortcutsView: View {
                 registrationWarning(preferences.researchSelectionHotkeyRegistration,
                                     text: "Vervellum could not claim this shortcut — another app may "
                                         + "already be using it. It will try again when you change it.")
-                Toggle("Remove credential-shaped text from the selection", isOn: Binding(
+                Toggle("Remove credential-shaped text from selections and pastes", isOn: Binding(
                     get: { preferences.redactSecrets },
                     set: { preferences.redactSecrets = $0 }))
                 Text("Catches API keys, tokens, private-key blocks and KEY=value lines before "
@@ -63,39 +64,63 @@ struct ShortcutsView: View {
     private func shortcutRow(binding: Binding<HotkeyBinding>,
                              label: String,
                              apply: @escaping (HotkeyBinding) -> Void) -> some View {
-        LabeledContent(label) {
-            HStack(spacing: 10) {
-                Toggle("Enabled", isOn: Binding(
-                    get: { binding.wrappedValue.enabled },
-                    set: { enabled in
-                        var updated = binding.wrappedValue
-                        updated.enabled = enabled
-                        binding.wrappedValue = updated
-                        apply(updated)
-                        onChanged()
-                    }))
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent(label) {
+                HStack(spacing: 10) {
+                    Toggle("Enabled", isOn: Binding(
+                        get: { binding.wrappedValue.enabled },
+                        set: { enabled in
+                            var updated = binding.wrappedValue
+                            updated.enabled = enabled
+                            binding.wrappedValue = updated
+                            apply(updated)
+                            onChanged()
+                        }))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
 
-                HotkeyRecorder(binding: Binding(
-                    get: { binding.wrappedValue },
-                    set: { updated in
-                        binding.wrappedValue = updated
-                        apply(updated)
-                        onChanged()
-                    }))
-                    .frame(width: 150, height: 22)
-                    .disabled(!binding.wrappedValue.enabled)
+                    HotkeyRecorder(binding: Binding(
+                        get: { binding.wrappedValue },
+                        set: { updated in
+                            binding.wrappedValue = updated
+                            apply(updated)
+                            onChanged()
+                        }))
+                        .frame(width: 150, height: 22)
+                        .disabled(!binding.wrappedValue.enabled)
+                }
             }
+            usabilityWarning(binding.wrappedValue)
+        }
+    }
+
+    /// Why a stored shortcut is not registered even though the system would take it.
+    ///
+    /// `HotkeyBinding.registrationProblem` names every rule this app applies,
+    /// including the editing chords Keycap's rule allows. A
+    /// binding those rules refuse is never attempted, and the registration state
+    /// says nothing about it — without this line the shortcut looks configured and
+    /// silently never fires.
+    ///
+    /// `enabled` is stated as well as left to `registrationProblem`: a shortcut the
+    /// reader turned off is not attempting registration, so it earns no warning.
+    @ViewBuilder
+    private func usabilityWarning(_ binding: HotkeyBinding) -> some View {
+        if binding.enabled, let problem = binding.registrationProblem {
+            Label(problem,
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     /// Why a configured shortcut may still not fire, when the system refused it.
     ///
-    /// The recorder accepts any combination; only `RegisterEventHotKey` can say whether
-    /// another application owns it. A failure here is otherwise invisible: the shortcut
-    /// appears configured and silently never fires.
+    /// A combo the usability rule accepts can still be owned by another app, and only
+    /// `RegisterEventHotKey` can say so. A failure here is otherwise invisible: the
+    /// shortcut appears configured and silently never fires.
     @ViewBuilder
     private func registrationWarning(_ registration: Preferences.HotkeyRegistration,
                                      text: String) -> some View {

@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 import Combine
+import UpdraftKit
+import KeycapKit
 
 extension Notification.Name {
     /// Carries text that should be dropped into the composer, in `userInfo["text"]`.
@@ -14,7 +16,7 @@ extension Notification.Name {
 /// that outlives a user interaction: it holds the preferences, the thread store, the
 /// research engine, the panel, the status item and the two global shortcuts, and it
 /// is what re-registers a shortcut when the user changes one.
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private let preferences = Preferences.shared
     private let secrets: SecretStore = KeychainStore()
@@ -27,7 +29,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var engine = ResearchEngine(preferences: preferences.core, secrets: secrets,
                                              attachmentStore: store.attachmentStore)
     private lazy var updateChecker = UpdateChecker(
-        configuration: .init(owner: "L-K-M", repo: "Vervellum"))
+        configuration: .init(
+            owner: "L-K-M", repo: "Vervellum",
+            // Keep sending `Vervellum/<version>` rather than the package's
+            // bundle-identifier default; GitHub sees the same header as before.
+            userAgent: AppIdentity.userAgent,
+            // A modal alert sits at `.modalPanel` (8) and the research panel at
+            // `.floating` (3), so the alert is already on top. Updraft defaults to
+            // `.floating`, which would put it level with the panel.
+            alertWindowLevel: .modalPanel))
 
     /// Built in `applicationDidFinishLaunching` rather than lazily: its root-view
     /// closure needs to reference the controller itself (to close the panel), which a
@@ -35,14 +45,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panelController: PanelController?
     private var settingsWindow: SettingsWindowController?
 
-    private let summonHotkey = CarbonHotkey(identifier: 1)
-    private let selectionHotkey = CarbonHotkey(identifier: 2)
+    // Vervellum's own four-character Carbon signature, `'VRVL'`. Keycap's default
+    // is `'KCAP'`; this constant is what recognises this app's hot-key events, so
+    // it must not change.
+    private let summonHotkey = CarbonHotkey(identifier: 1, signature: 0x5652_564C)
+    private let selectionHotkey = CarbonHotkey(identifier: 2, signature: 0x5652_564C)
     private var statusItem: NSStatusItem?
     /// The menu's Stop item. Kept because `autoenablesItems` is off and the item is
     /// enabled by hand when the run state changes.
     private var stopMenuItem: NSMenuItem?
+    /// The "what is it doing" line at the top of the menu, retitled every time the
+    /// menu opens (`menuNeedsUpdate`) and hidden while nothing is running.
+    private var busyMenuItem: NSMenuItem?
+    private var busySeparator: NSMenuItem?
     private var runningObserver: AnyCancellable?
     private var previewObserver: NSObjectProtocol?
+    /// The once-a-second clock behind the status item's elapsed title while a
+    /// run is in flight. A Timer rather than anything smarter: one write a
+    /// second to one button is as cheap as this information gets.
+    private var busyTimer: Timer?
 
     // MARK: Lifecycle
 
@@ -128,6 +149,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store: store,
             updateChecker: updateChecker,
             onShortcutsChanged: { [weak self] in self?.registerHotkeys() })
+        self.settingsWindow?.shouldRestoreActivation = { [weak panelController] in
+            // Closing Settings must not take focus from a preview the user summoned.
+            panelController?.isOpen != true
+        }
 
         observePanelPreview()
 
@@ -219,10 +244,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// (Re)registers both global shortcuts from the current preferences.
     ///
-    /// A combination another app already owns cannot be registered, and Carbon
+    /// A binding the usability rule refuses (a disabled shortcut, an OS-reserved
+    /// chord, a bare non-function key) is never attempted; the Shortcuts pane says
+    /// why. A combination another app already owns cannot be registered, and Carbon
     /// reports that as a status code rather than an error — `CarbonHotkey.register`
-    /// logs it and returns false so the failure is at least diagnosable instead of
-    /// silently doing nothing.
+    /// classifies it as a `HotkeyRegistrationResult` so the failure is at least
+    /// diagnosable instead of silently doing nothing.
     func registerHotkeys() {
         summonHotkey.onPressed = { [weak self] in self?.panelController?.toggle() }
         selectionHotkey.onPressed = { [weak self] in self?.summonWithSelection() }
@@ -231,10 +258,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         summonHotkey.unregister()
         if summon.isValid {
             // The result is the reader's only signal that the shortcut they were
-            // promised actually fires; `CarbonHotkey` logs a status code and nothing
-            // else surfaces it.
+            // promised actually fires; `CarbonHotkey` answers a status code and
+            // nothing else surfaces it.
             preferences.summonHotkeyRegistration =
-                summonHotkey.register(keyCode: summon.keyCode, modifiers: summon.modifiers)
+                summonHotkey.register(keyCode: summon.keyCode, modifiers: summon.modifiers).isRegistered
                     ? .registered : .failed
         } else {
             preferences.summonHotkeyRegistration = .notAttempted
@@ -245,7 +272,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if selection.isValid {
             preferences.researchSelectionHotkeyRegistration =
                 selectionHotkey.register(keyCode: selection.keyCode,
-                                        modifiers: selection.modifiers)
+                                        modifiers: selection.modifiers).isRegistered
                     ? .registered : .failed
         } else {
             preferences.researchSelectionHotkeyRegistration = .notAttempted
@@ -398,7 +425,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     accessibilityDescription: isRunning ? "Vervellum — researching" : "Vervellum")
                 self.statusItem?.button?.image?.isTemplate = true
                 self.stopMenuItem?.isEnabled = isRunning
+                if isRunning {
+                    self.startBusyTimer()
+                } else {
+                    self.stopBusyTimer()
+                }
             }
+    }
+
+    /// "0:42" beside the hourglass: how long the oldest in-flight question has
+    /// been running, so a slow run reads as "still working" rather than "stuck".
+    private func startBusyTimer() {
+        busyTimer?.invalidate()
+        let timer = Timer(timeInterval: 1, repeats: true) {
+            [weak self] _ in self?.updateBusyTitle()
+        }
+        // Menu tracking changes the run-loop mode; keep the visible clock ticking.
+        RunLoop.main.add(timer, forMode: .common)
+        busyTimer = timer
+        updateBusyTitle()
+    }
+
+    private func stopBusyTimer() {
+        busyTimer?.invalidate()
+        busyTimer = nil
+        statusItem?.button?.title = ""
+    }
+
+    private func updateBusyTitle() {
+        let started = engine.runningThreadIDs
+            .compactMap { id in store.library.threads.first(where: { $0.id == id }) }
+            .compactMap { $0.turns.last?.askedAt }
+            .min()
+        // The library may not know the thread yet on the first tick — the icon
+        // alone still says something is working.
+        guard let started else { statusItem?.button?.title = ""; return }
+        let elapsed = max(0, Int(Date().timeIntervalSince(started)))
+        statusItem?.button?.title = elapsed >= 3600
+            ? String(format: "%d:%02d:%02d", elapsed / 3600, elapsed / 60 % 60, elapsed % 60)
+            : String(format: "%d:%02d", elapsed / 60, elapsed % 60)
     }
 
     private func makeMenu() -> NSMenu {
@@ -407,6 +472,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // other item having to answer a validation message. All of them are always
         // available anyway.
         menu.autoenablesItems = false
+        // What the hourglass icon cannot say: which question it is working on.
+        // Hidden while idle; `menuNeedsUpdate` fills the title on every open, so a
+        // detached session the panel cannot show is still named here.
+        let busy = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        busy.isEnabled = false
+        busy.isHidden = true
+        menu.addItem(busy)
+        busyMenuItem = busy
+        let separator = NSMenuItem.separator()
+        separator.isHidden = true
+        menu.addItem(separator)
+        busySeparator = separator
+        menu.delegate = self
         for (title, selector, key) in [
             ("Ask Vervellum…", #selector(summon), ""),
             ("Research the Selection", #selector(summonSelection), ""),
@@ -465,6 +543,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func checkForUpdates() { updateChecker.checkNow() }
 
     // MARK: Helpers
+
+    func menuNeedsUpdate(_ menu: NSMenu) { updateBusyMenuItem() }
+
+    /// Retitles the "Researching: …" line from the live state each time the menu
+    /// opens — cheaper and more honest than tracking every publish that could
+    /// change it.
+    private func updateBusyMenuItem() {
+        guard let busyMenuItem, let busySeparator else { return }
+        let running = engine.runningThreadIDs
+        let questions = running
+            .compactMap { id in store.library.threads.first(where: { $0.id == id }) }
+            .compactMap { $0.turns.last?.question }
+        if running.count > 1 {
+            busyMenuItem.title = "Researching \(running.count) threads"
+        } else if let question = questions.first,
+                  question.contains(where: { !$0.isWhitespace }) {
+            // A question can be multi-line and arbitrarily long; the menu gets one
+            // line of it.
+            let oneLine = question.split(whereSeparator: \.isNewline).joined(separator: " ")
+            busyMenuItem.title = "Researching: " + String(oneLine.prefix(57))
+                + (oneLine.count > 57 ? "…" : "")
+        } else {
+            busyMenuItem.title = "Researching…"
+        }
+        busyMenuItem.isHidden = running.isEmpty
+        busySeparator.isHidden = running.isEmpty
+    }
 
     private static var isRunningTests: Bool {
         NSClassFromString("XCTestCase") != nil

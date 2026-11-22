@@ -158,6 +158,8 @@ final class Preferences: ObservableObject {
         set { core.showProcessTrail = newValue }
     }
 
+    var submitKeyName: String { submitOnReturn ? "Return" : "Command-Return" }
+
     var submitOnReturn: Bool {
         get { core.submitOnReturn }
         set { core.submitOnReturn = newValue }
@@ -186,13 +188,15 @@ final class Preferences: ObservableObject {
 
     /// Whether the system could actually be made to deliver each global shortcut.
     ///
+    /// A binding the usability rule refuses (disabled, OS-reserved, or a bare
+    /// non-function key) is never attempted and the Shortcuts pane says why.
     /// `CarbonHotkey.register` answers a status code rather than an error, and a
     /// combination another application already owns cannot be claimed. The summon
     /// shortcut is this app's primary interaction, so a silent failure is the one
-    /// configuration outcome the reader has no way to discover. The recorder itself
-    /// accepts any key combination; only the system can say whether it will fire.
+    /// configuration outcome the reader has no way to discover.
     enum HotkeyRegistration: String {
-        /// The binding is disabled, so no registration was attempted.
+        /// No registration was attempted: the binding is disabled or the
+        /// usability rule refused it.
         case notAttempted
         case registered
         case failed

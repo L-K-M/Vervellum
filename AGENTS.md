@@ -200,7 +200,6 @@ VervellumTests/              macOS-only tests (hotkeys, panel geometry, Accessib
 - `Text/` — `MarkdownParser`, `ComposerCommand`, `Formatting`, `TranscriptFormatter`.
 - `Platform/` — the seams: `SecretStore`, `SettingsStore`, `LogSink`,
   `CorePreferences`, `SecretRedactor`.
-- `Updates/` — the GitHub self-updater's portable half.
 
 `Sources/VervellumKit/Linux/` — `GTK` (every raw C call), `PangoMarkup` (rendering),
 `LinuxPanel`, `LinuxApp`, `LinuxEnvironment`, `LinuxPaths`, `LinuxSecretStore`,
@@ -233,14 +232,17 @@ flattening is done in C rather than by re-typing raw pointers in Swift.
   why `Core` refuses an image it cannot identify rather than converting one.
 - `Security/` — `KeychainStore`, the macOS `SecretStore`.
 - `Selection/` — `SelectedTextReader` (the Accessibility path).
-- `Hotkeys/` — `CarbonHotkey`, `KeyCodes`.
 - `Views/` — the SwiftUI panel: `PanelTheme` (all design tokens), `MarkdownText` (the
   renderer over Core's `MarkdownParser`), `ComposerView`, `ProcessTrailView`,
   `FindingsView`, `SourcesView`, `TurnView`, `HistoryView`, `EmptyStateView`,
   `PanelHeaderView`, `PanelRootView`.
 - `Settings/` — the four panes (Providers, Shortcuts, General, About), the window
-  controller, and `HotkeyRecorder`.
-- `Updates/` — `UpdateChecker`, which needs `NSAlert`; the rest is in Core.
+  controller, and `HotkeyRecorder` (Vervellum's `HotkeyBinding` over Keycap's
+  `ShortcutRecorder`).
+
+The updater and the global hotkeys come from the Updraft and Keycap packages (see
+"Dependencies"): `AppDelegate` configures the `UpdateChecker` and the two
+`CarbonHotkey`s, and `HotkeyBinding` converts to and from Keycap's `KeyCombo`.
 
 ## Conventions
 
@@ -255,7 +257,7 @@ flattening is done in C rather than by re-typing raw pointers in Swift.
   unit-testable: `PanelPlacement`, `CitationValidator`, `SourceHarvester`,
   `EvidenceExtractor`, `ResearchContext`, `PlanParser`, `AssessmentParser`,
   `ProviderSettings`, `MarkdownParser`, `ComposerCommand`, `ThreadLibrary`,
-  `SemanticVersion`, `HotkeyBinding`.
+  `HotkeyBinding`.
 - No type is `@MainActor`. AppKit callbacks (hotkey handlers, notification observers,
   local event monitors) drive this app, and a type-level `@MainActor` makes those
   closures illegal in Swift 5 language mode. `ResearchSession` instead hops each of the
@@ -265,11 +267,27 @@ flattening is done in C rather than by re-typing raw pointers in Swift.
 
 ## Dependencies
 
-**None.** No SwiftPM packages, no CocoaPods, no vendored source. Everything is system
-frameworks, including the markdown renderer (`AttributedString(markdown:)` for inline
-syntax, a hand-written block parser above it). Keep it that way: a research panel that
-handles untrusted web content has a small enough attack surface to reason about, and a
-dependency tree would end that.
+**First-party L-K-M packages only, and only in the macOS app.** The updater and the
+global hotkeys are shared with the sibling apps through two Swift packages by the same
+author. Both are public domain and have no dependencies of their own:
+
+- [Updraft](https://github.com/L-K-M/Updraft) (`UpdraftKit`): the GitHub release
+  check, download and alerts.
+- [Keycap](https://github.com/L-K-M/Keycap) (`KeycapKit`): Carbon hotkey registration,
+  the shortcut recorder and the rule for which shortcuts are usable.
+
+They are referenced from `Vervellum.xcodeproj` by tag with an up-to-next-minor rule,
+and the resolved versions are committed in its `Package.resolved`. A fix to updater or
+hotkey behaviour belongs in the package: release it there, then raise the pin here.
+Do not copy package code back into this repository.
+
+`Package.swift` (the Linux build, the `.deb` and the Flatpak) has no dependencies at
+all. Beyond those two packages there are no SwiftPM packages, no CocoaPods and no
+vendored source. Everything else is system frameworks, including the markdown renderer
+(`AttributedString(markdown:)` for inline syntax, a hand-written block parser above
+it). Keep it that way: a research panel that handles untrusted web content has a small
+enough attack surface to reason about, and a third-party dependency tree would end
+that.
 
 ## Licensing
 
@@ -453,7 +471,8 @@ dependency tree would end that.
   the two back into one rule in either direction.
 - **Do** assume Developer ID + notarization, not the App Store — the sandbox cannot
   grant the Accessibility access the selection feature needs.
-- **Don't** add dependencies; prefer system frameworks.
+- **Don't** add dependencies; prefer system frameworks. The two first-party packages
+  under "Dependencies" are the only exception, and only in the macOS app.
 - **Don't** run the assessment stage in parallel with the answer stage. It does not
   depend on the prose, so it looks like free latency — but assessing the answer that
   was *actually written* is the whole reason the verdict table can be trusted. The

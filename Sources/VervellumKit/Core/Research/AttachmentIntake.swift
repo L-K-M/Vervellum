@@ -45,6 +45,17 @@ enum AttachmentIntake {
         ordinal <= 1 ? pastedImageName : "pasted image \(ordinal).png"
     }
 
+    /// The name for the `ordinal`-th image of one paste whose bytes are in hand, so the
+    /// extension follows the bytes: a pasteboard that offered only `public.jpeg` is
+    /// named `.jpg`, not `.png`. `name(forPastedImage:)` stays for callers that hand
+    /// over PNG whatever the source was — the GTK clipboard decodes to one — and the
+    /// media type itself is still sniffed by `Attachment.make`, so the extension here
+    /// is for the reader only, exactly as in `pastedImageName`.
+    static func name(forPastedImage ordinal: Int, sniffing data: Data) -> String {
+        let ext = Attachment.imageMediaType(sniffing: data) == "image/jpeg" ? "jpg" : "png"
+        return ordinal <= 1 ? "pasted image.\(ext)" : "pasted image \(ordinal).\(ext)"
+    }
+
     /// What a paste or a drop turned out to hold.
     struct Outcome: Equatable {
         var accepted: [PendingAttachment] = []

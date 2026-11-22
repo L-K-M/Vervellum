@@ -49,6 +49,8 @@ Empty-state redraws reuse their key-presence result until the panel is shown aga
 On macOS, saving a changed model or search destination normally stages its replacement
 key in a fresh Keychain account before preferences can point at it. With no replacement,
 the new destination points at a fresh empty account; the old key is never carried across.
+Model discovery in Settings uses the same destination check before reading a saved
+key. An edited destination can list models anonymously or with a newly entered key.
 The migrated first model/search accounts and the reader use fixed legacy names for
 downgrade compatibility, so their old values are deleted before a changed endpoint is
 committed; replacements are written only after the settings backend confirms the new
@@ -249,10 +251,12 @@ vouch for, and it is handled on those terms:
   that no longer decodes, or a picture the provider refused raise a notice on the turn
   rather than leaving an answer that ignores a file for no visible reason.
 
-### Captured text
+### Captured and pasted text
 
-The optional "research the selection" shortcut reads the frontmost app's selection
-through the Accessibility API. Before that text reaches the composer it is scanned for
+On macOS, two kinds of text are scanned before they reach the composer: the selection
+that the optional "research the selection" shortcut reads through the Accessibility
+API, and text pasted into the composer. One setting controls both, and it is on by
+default even when the shortcut is off. They are scanned for
 credential-shaped values — vendor-prefixed keys, `Authorization` headers, `KEY=value`
 lines, private-key blocks, JSON Web Tokens, URLs with embedded credentials — which are
 replaced, with a visible count of how many.
@@ -262,6 +266,9 @@ replaced, with a visible count of how many.
 - **Redaction is a safety net, not a guarantee.** A secret with no recognisable shape —
   a dictionary-word password, a customer name, an internal hostname — passes straight
   through. Read what you are about to send.
+- **Only the selection and pastes are scanned.** Text you type or drop into the
+  composer, the contents of attached files and images, and anything pasted on Linux
+  are not.
 - **The providers see your questions.** Vervellum has no way to make a remote model
   endpoint or a remote search server forget what was sent to it. Their handling is
   governed by their own policies.
@@ -274,8 +281,10 @@ replaced, with a visible count of how many.
   instead; *Snippets only* makes neither request.
 - **Released builds are not signed or notarized.** CI ad-hoc signs the app so it will
   launch on Apple Silicon; there is no Developer ID signature, no notarization, and the
-  Hardened Runtime is not applied to the CI artifact. The in-app updater verifies a
-  downloaded asset's size and nothing else — it does **not** verify a signature — and it
+  Hardened Runtime is not applied to the CI artifact. The in-app updater (the shared
+  Updraft package) accepts a download only over HTTPS from GitHub's hosts, checks its
+  size and, when the release publishes one, its SHA-256 digest, and marks it
+  quarantined so Gatekeeper evaluates it. It does **not** verify a signature, and it
   never installs anything: the file is saved to `~/Downloads` and revealed in the
   Finder, with Gatekeeper applying as usual. Establishing a signed, notarized release
   and an authenticated update chain is the top backlog item.
@@ -287,7 +296,8 @@ replaced, with a visible count of how many.
 - **Stored threads are plain JSON.** The file is written `0600` — in Application Support
   on macOS, under `$XDG_DATA_HOME` on Linux — which protects it from other users but not
   from anything running as you. History can be turned off, and turning it off deletes the
-  primary and backup files. Failed erasure is reported and blocks further writes
+  primary and backup files, and any staged backup copy a failed rotation left.
+  Failed erasure is reported and blocks further writes
   until erasure succeeds. Session-only deletion markers reject late snapshots;
   deletion is not secure disk erasure and cannot remove external backups.
 - **Downgrades are not history-safe.** Schema 2 adds notice values that older releases

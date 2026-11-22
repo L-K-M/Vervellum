@@ -1,102 +1,33 @@
 import SwiftUI
-import AppKit
+import KeycapKit
 
-/// A SwiftUI control that records a global shortcut. Click it, press the desired
-/// modifier+key combination, and it reports a new `HotkeyBinding`. Escape cancels;
-/// a combination with no modifier is rejected (a bare key would be captured
-/// system-wide). Backs MF-6's customizable hotkeys.
-struct HotkeyRecorder: NSViewRepresentable {
+/// A SwiftUI control that records a global shortcut into Vervellum's persisted
+/// `HotkeyBinding`.
+///
+/// Keycap's `ShortcutRecorder` owns the recording rules: Escape cancels, a bare
+/// ⌫ is a no-op (`HotkeyBinding` cannot express "no shortcut"), and a combo that
+/// is not a usable global hotkey beeps and keeps recording. This wrapper is the
+/// boundary: it converts to and from `KeyCombo` and keeps the stored JSON shape
+/// and the `enabled` flag. A new recording stores the label resolved by Keycap.
+struct HotkeyRecorder: View {
     @Binding var binding: HotkeyBinding
 
-    func makeNSView(context: Context) -> RecorderButton {
-        let button = RecorderButton()
-        button.onChange = { binding = $0 }
-        button.binding = binding
-        button.isEnabled = context.environment.isEnabled
-        return button
-    }
-
-    func updateNSView(_ nsView: RecorderButton, context: Context) {
-        nsView.binding = binding
-        nsView.onChange = { binding = $0 }
-        // Forward SwiftUI's `.disabled(...)` to the button — an NSViewRepresentable
-        // doesn't propagate it automatically, so a switched-off recorder still recorded
-        // and rewrote the binding despite looking dimmed (F-M10).
-        nsView.isEnabled = context.environment.isEnabled
-        nsView.refreshTitle()
-    }
-}
-
-/// An `NSButton` that, while first responder, intercepts the next key event and
-/// turns it into a `HotkeyBinding`.
-final class RecorderButton: NSButton {
-    var binding = HotkeyBinding.defaultSummon
-    var onChange: ((HotkeyBinding) -> Void)?
-
-    private var recording = false { didSet { refreshTitle() } }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        bezelStyle = .rounded
-        setButtonType(.momentaryPushIn)
-        target = self
-        action = #selector(beginRecording)
-        refreshTitle()
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override var acceptsFirstResponder: Bool { true }
-
-    @objc private func beginRecording() {
-        window?.makeFirstResponder(self)
-    }
-
-    override func becomeFirstResponder() -> Bool {
-        recording = true
-        return super.becomeFirstResponder()
-    }
-
-    override func resignFirstResponder() -> Bool {
-        recording = false
-        return super.resignFirstResponder()
-    }
-
-    override func keyDown(with event: NSEvent) {
-        guard recording else { super.keyDown(with: event); return }
-
-        // Bare Escape cancels without changing the binding.
-        if event.keyCode == 53 && HotkeyBinding.carbonModifiers(from: event.modifierFlags) == 0 {
-            window?.makeFirstResponder(nil)
-            return
-        }
-
-        let candidate = binding.updated(from: event)
-        guard candidate.hasCommandModifier else {
-            // Shift only changes the character being typed; it does not make that
-            // character safe to capture system-wide. Nudge and keep recording.
-            NSSound.beep()
-            return
-        }
-        binding = candidate
-        onChange?(candidate)
-        window?.makeFirstResponder(nil)
-    }
-
-    /// Swallow key-equivalents while recording so Space/Return don't re-trigger the
-    /// button's own action instead of being captured.
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if recording { keyDown(with: event); return true }
-        return super.performKeyEquivalent(with: event)
-    }
-
-    func refreshTitle() {
-        if recording {
-            title = "Type shortcut…"
-        } else if binding.modifiers != 0 {
-            title = binding.displayString
-        } else {
-            title = "Click to record"
-        }
+    var body: some View {
+        ShortcutRecorder(
+            combo: Binding(
+                get: { binding.combo },
+                set: { newCombo in
+                    // `.ignore` means a delete never arrives here; a real recording
+                    // always carries a combo.
+                    guard let newCombo else { return }
+                    var updated = binding
+                    updated.keyCode = newCombo.keyCode
+                    updated.modifiers = newCombo.carbonModifiers
+                    updated.keyLabel = KeyNames.displayName(for: newCombo.keyCode)
+                    binding = updated
+                }),
+            deleteAction: .ignore,
+            placeholder: "Click to record",
+            recordingPrompt: "Type shortcut…")
     }
 }

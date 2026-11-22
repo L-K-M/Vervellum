@@ -243,6 +243,21 @@ final class ResearchSession {
         return PendingAttachment(attachment: attachment, data: rebuilt.1)
     }
 
+    /// A turn's attachments, for editing its question before asking it again.
+    ///
+    /// Copies with ids of their own, unlike a retry's: the edited question is a new one,
+    /// and it can be asked beside the original. Whatever cannot be restored is absent,
+    /// for the caller to report.
+    func restoredAttachments(for turn: ResearchTurn) -> [PendingAttachment] {
+        turn.attachments.compactMap(restoredAttachment).map { restored in
+            let record = restored.attachment
+            return PendingAttachment(attachment: Attachment(kind: record.kind, name: record.name,
+                                                            mediaType: record.mediaType,
+                                                            byteCount: record.byteCount),
+                                     data: restored.data)
+        }
+    }
+
     /// Appends a turn for an already-trimmed question and starts researching it.
     /// - Parameter lostAttachments: whether this question was asked with something
     ///   attached that could not be brought along. Only `retry` can be, and only when

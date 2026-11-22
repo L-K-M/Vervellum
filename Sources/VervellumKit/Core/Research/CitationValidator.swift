@@ -32,20 +32,52 @@ enum CitationValidator {
         var spans: [Span]
         /// Zero-based source indices actually cited, ascending.
         var citedSourceIndices: [Int]
-        /// Citation numbers outside `1...sourceCount` that the model invented.
+        /// Citation numbers outside `1...sourceCount` that the model invented. A range
+        /// reports the bound that overshot rather than every number past the list, and a
+        /// number too large for `Int` is recorded as `Int.max`. May contain duplicates.
+        /// Consumers gate on `isEmpty`; no surface shows the raw array.
         var outOfRangeCitations: [Int]
+        /// Bracketed groups that could not be read as a number or a range: a reversed
+        /// range such as `[9-2]`, a malformed one such as `[1-3-5]`, or one wider than
+        /// `maximumRangeExpansion`.
+        /// They carry the same `invalidCitation` notice an invented number does.
+        var invalidCitationGroups: [String]
         /// Direct destinations the model wrote despite being told to cite by number.
         /// Populated only for document scope; inline scope exists solely for the
         /// renderer's citation masking and deliberately skips destination scanning.
         var forbiddenLinks: [String]
 
-        var isClean: Bool { outOfRangeCitations.isEmpty && forbiddenLinks.isEmpty }
+        var isClean: Bool {
+            outOfRangeCitations.isEmpty && invalidCitationGroups.isEmpty && forbiddenLinks.isEmpty
+        }
     }
 
-    /// Matches `[3]`, `[3, 4]`, `[3,4 , 12]` — digits and separators only, so an
-    /// ordinary markdown link `[text](url)` or a bracketed aside never matches.
+    /// Matches `[3]`, `[3, 4]`, `[3,4 , 12]` and the range spellings `[1-3]`,
+    /// `[1–3]`, `[2—4]` — digits and separators only, so an ordinary markdown link
+    /// `[text](url)` or a bracketed aside never matches. A range is expanded by the
+    /// parser below; a group that cannot be read as a number or a range is reported.
+    /// The whitespace runs are possessive (`\s*+`) so a long run of spaces and digits
+    /// with no closing bracket cannot make the engine partition the whitespace every
+    /// which way. The pattern is matched against model-written text on every rendered
+    /// block while an answer streams, so a degenerate marker must not stall that path.
+    ///
+    /// The digit count is unbounded on purpose. Capped at three, `[1000]` never matched,
+    /// so exactly the numbers most likely to be invented were never reported. Magnitude
+    /// is decided against the source list below, never by this pattern.
     private static let citationRegex = try? NSRegularExpression(
-        pattern: #"\[\s*\d{1,3}(?:\s*[,;]\s*\d{1,3})*\s*\]"#)
+        pattern: #"\[\s*+\d++(?:\s*+(?:[,;]\s*+\d++|[-–—]\s*+\d++))*\s*+\]"#)
+
+    /// Four-digit numbers read as years when nothing else shares their brackets. Every
+    /// value is far past the longest source list, so none can be a real citation.
+    private static let plausibleYears = 1500...2100
+    private static let yearDigits = 4
+    private static let monthOrDayDigits = 2
+    private static let months = 1...12
+    private static let daysOfMonth = 1...31
+
+    /// The most sources one range expands to: several times what the evidence pool can
+    /// hold, and a bound for callers that validate against no list at all.
+    static let maximumRangeExpansion = 256
 
     /// Parses `answer` against a source list of `sourceCount` entries.
     ///
@@ -59,6 +91,7 @@ enum CitationValidator {
         var spans: [Span] = []
         var cited: Set<Int> = []
         var outOfRange: [Int] = []
+        var malformed: [String] = []
         let code = scope == .document ? codeRanges(in: answer) : inlineCodeRanges(in: answer[...])
         // Inline validation runs for every rendered Markdown block while an answer is
         // streaming, and its caller uses only citation spans. Destination policy is a
@@ -70,7 +103,8 @@ enum CitationValidator {
 
         guard let regex = citationRegex else {
             return Result(spans: [.text(answer)], citedSourceIndices: [],
-                          outOfRangeCitations: [], forbiddenLinks: forbiddenLinks)
+                          outOfRangeCitations: [], invalidCitationGroups: [],
+                          forbiddenLinks: forbiddenLinks)
         }
 
         let full = NSRange(answer.startIndex..<answer.endIndex, in: answer)
@@ -79,22 +113,70 @@ enum CitationValidator {
         for match in regex.matches(in: answer, range: full) {
             guard let range = Range(match.range, in: answer) else { continue }
             if code.contains(where: { $0.overlaps(range) }) { continue }
+            let raw = String(answer[range])
+            // Newlines as well as spaces: the regex's `\s*` admits a marker that wraps
+            // across a line, and a wrapped `[1,\n2]` is still one citation. Trimming
+            // only spaces would leave `"\n2"` and flag it as malformed.
+            let groups = raw.trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
+                .split(whereSeparator: { $0 == "," || $0 == ";" })
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            // A year or date in brackets is prose, so it stays inside the surrounding
+            // text rather than becoming a marker that failed validation.
+            if groups.allSatisfy({ Self.namesYears($0) || Self.namesISODate($0) }) { continue }
             if cursor < range.lowerBound {
                 spans.append(.text(String(answer[cursor..<range.lowerBound])))
             }
-            let raw = String(answer[range])
-            let numbers = raw
-                .trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
-                .split(whereSeparator: { $0 == "," || $0 == ";" || $0 == " " })
-                .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
 
             var indices: [Int] = []
-            for number in numbers {
-                if number >= 1 && number <= sourceCount {
-                    indices.append(number - 1)
-                    cited.insert(number - 1)
+            // Deduplicated in first-occurrence order: a range can overlap a neighbour
+            // (`[1, 1-3]`), and the chip's label is built from this order, so `[2, 1]`
+            // must still read "2,1".
+            var seen = Set<Int>()
+            func cite(_ number: Int) {
+                guard seen.insert(number).inserted else { return }
+                indices.append(number - 1)
+                cited.insert(number - 1)
+            }
+
+            for group in groups {
+                if let single = Int(group) {
+                    if single >= 1, single <= sourceCount {
+                        cite(single)
+                    } else {
+                        outOfRange.append(single)
+                    }
+                } else if let bounds = Self.rangeBounds(in: group) {
+                    if bounds.start > bounds.end {
+                        // A reversed range is reported, not guessed at: forming a
+                        // ClosedRange from the swapped endpoints would trap.
+                        malformed.append(group)
+                        continue
+                    }
+                    // A range is expanded in place, so `[1-3]` cites 1, 2 and 3 and
+                    // renders as one chip naming all three. Only a bound past the source
+                    // list is recorded as invented: walking to it would make the cost of
+                    // validation a number the model chose.
+                    if bounds.start < 1 { outOfRange.append(bounds.start) }
+                    if bounds.end > sourceCount { outOfRange.append(bounds.end) }
+                    let first = max(bounds.start, 1)
+                    var last = min(bounds.end, sourceCount)
+                    guard first <= last else { continue }
+                    // Clamping is no bound when the caller passes `Int.max`, as history
+                    // stripping does. The shortened range is reported, never cut silently.
+                    if last - first >= Self.maximumRangeExpansion {
+                        malformed.append(group)
+                        last = first + Self.maximumRangeExpansion - 1
+                    }
+                    for number in first...last { cite(number) }
+                } else if group.allSatisfy(\.isNumber) {
+                    // A digit run `Int` rejects: too long, or digits ICU's `\d` matches
+                    // and `Int` does not read. Either way it names no source.
+                    outOfRange.append(.max)
                 } else {
-                    outOfRange.append(number)
+                    // Neither a number nor a range — more than one separator, or a
+                    // non-numeric endpoint. It is reported rather than guessed at: a
+                    // wrong expansion would cite sources the model never named.
+                    malformed.append(group)
                 }
             }
             // A marker whose every number was invented is kept as plain text rather
@@ -115,7 +197,54 @@ enum CitationValidator {
         return Result(spans: spans,
                       citedSourceIndices: cited.sorted(),
                       outOfRangeCitations: outOfRange,
+                      invalidCitationGroups: malformed,
                       forbiddenLinks: forbiddenLinks)
+    }
+
+    /// Whether a group is a plausible year, or a forward span of them.
+    private static func namesYears(_ group: String) -> Bool {
+        if let year = year(group) { return plausibleYears.contains(year) }
+        let parts = group.split(omittingEmptySubsequences: false,
+                                whereSeparator: { $0 == "-" || $0 == "–" || $0 == "—" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard parts.count == 2, let first = year(parts[0]), let last = year(parts[1]) else { return false }
+        return first <= last && plausibleYears.contains(first) && plausibleYears.contains(last)
+    }
+
+    /// Whether a group is a plausible ISO 8601 date, `2023-01-15` or `2023-01`.
+    private static func namesISODate(_ group: String) -> Bool {
+        let parts = group.split(separator: "-", omittingEmptySubsequences: false).map(String.init)
+        guard let first = parts.first, let year = year(first), plausibleYears.contains(year) else { return false }
+        let allowed = [months, daysOfMonth]
+        let rest = parts.dropFirst()
+        guard !rest.isEmpty, rest.count <= allowed.count else { return false }
+        return zip(rest, allowed).allSatisfy { part, range in
+            guard part.count == monthOrDayDigits, part.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  let number = Int(part) else { return false }
+            return range.contains(number)
+        }
+    }
+
+    /// `text` as a number, if it is written the way a year is: four ASCII digits.
+    private static func year(_ text: String) -> Int? {
+        guard text.count == yearDigits,
+              text.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
+        return Int(text)
+    }
+
+    /// The two endpoints of a `[1-3]`-style group, or nil when the group is not a
+    /// range at all. A group with more than one separator, or a non-numeric endpoint,
+    /// answers nil so the caller reports it rather than guessing an expansion. The
+    /// endpoints are returned unordered: a reversed range is a value the caller reports,
+    /// and forming a `ClosedRange` from it would trap.
+    private static func rangeBounds(in group: String) -> (start: Int, end: Int)? {
+        guard let separator = group.firstIndex(where: { $0 == "-" || $0 == "–" || $0 == "—" })
+        else { return nil }
+        let lower = group[..<separator].trimmingCharacters(in: .whitespacesAndNewlines)
+        let upper = group[group.index(after: separator)...]
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let start = Int(lower), let end = Int(upper) else { return nil }
+        return (start, end)
     }
 
     // MARK: Code

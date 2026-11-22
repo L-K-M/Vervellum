@@ -9,6 +9,26 @@ import XCTest
 /// rewording cannot quietly drop one.
 final class ResearchPromptsTests: XCTestCase {
 
+    /// Every prompt whose reply is parsed as JSON must ask for bare JSON. The parser
+    /// strips one leading fence as a recovery path, but a decorated reply on a model
+    /// that adds a preamble is swallowed by the `try?` at the call site — the deep
+    /// follow-up rounds silently stop, and the reader sees a one-round answer with no
+    /// sign a later round was lost. Pinning all five keeps a sixth prompt from
+    /// inheriting the gap.
+    func testEveryJSONPromptAsksForBareJSON() {
+        let jsonPrompts = [
+            ResearchPrompts.deepFollowUp(maxSearches: 4, today: "2026-09-06", round: 1, of: 2),
+            ResearchPrompts.gapRound(maxSearches: 4, today: "2026-09-06"),
+            ResearchPrompts.plan(maxSearches: 4, today: "2026-09-06"),
+            ResearchPrompts.agentLoop(today: "2026-09-06"),
+            ResearchPrompts.assess,
+        ]
+        for prompt in jsonPrompts {
+            XCTAssertTrue(prompt.contains(ResearchPrompts.jsonOnly.trimmingCharacters(in: .whitespacesAndNewlines)),
+                          "a JSON-parsed prompt must end in the jsonOnly clause")
+        }
+    }
+
     func testEveryPromptCarriesTheTrustPreamble() {
         for prompt in [ResearchPrompts.plan(maxSearches: 4, today: "2026-09-06"),
                        ResearchPrompts.answer, ResearchPrompts.assess, ResearchPrompts.direct] {

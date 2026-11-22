@@ -1,90 +1,100 @@
-import AppKit
 import Carbon.HIToolbox
+import KeycapKit
 
 /// A user-configurable global hotkey: a virtual key code plus Carbon modifier
-/// flags, an on/off switch, and a human label captured at record time (so the
-/// display respects the user's keyboard layout without a keycode→name table).
+/// flags, an on/off switch, and a human label captured at record time.
 /// Persisted as JSON in `UserDefaults`; registered via `CarbonHotkey` (which needs
 /// no permission). See PLAN.md §5.
+///
+/// The combo is converted to and from Keycap's `KeyCombo` at the recorder
+/// boundary; the persisted shape is Vervellum's own and must not change.
 struct HotkeyBinding: Codable, Equatable {
     var keyCode: UInt32
     /// Carbon modifier-flag bits (`cmdKey | optionKey | …`).
     var modifiers: UInt32
-    /// The key's display label, e.g. `"D"`, `"Space"`, `"↩"`.
+    /// The label captured at record time, preserved in JSON for older builds.
     var keyLabel: String
     var enabled: Bool
 
-    /// At least one modifier that changes the gesture rather than merely changing the
-    /// character it types. Shift-A is still ordinary text and must never be captured
-    /// system-wide; Command, Control and Option identify an intentional shortcut.
-    var hasCommandModifier: Bool {
-        let commandMask = UInt32(cmdKey | controlKey | optionKey)
-        return modifiers & commandMask != 0
+    /// The persisted values as Keycap's combo. `HotkeyModifiers(carbonFlags:)`
+    /// keeps only the four Carbon hotkey bits; caps lock and the other Cocoa
+    /// flags were never part of a `RegisterEventHotKey` registration.
+    var combo: KeyCombo {
+        KeyCombo(keyCode: keyCode, modifiers: HotkeyModifiers(carbonFlags: modifiers))
     }
 
-    /// Registerable only when enabled and carrying a command modifier — a bare or
-    /// Shift-only key would steal ordinary typing system-wide.
-    var isValid: Bool { enabled && hasCommandModifier }
+    init(keyCode: UInt32, modifiers: UInt32, keyLabel: String, enabled: Bool) {
+        self.keyCode = keyCode
+        self.modifiers = modifiers
+        self.keyLabel = keyLabel
+        self.enabled = enabled
+    }
+
+    /// Builds a binding from a Keycap combo, preserving the stored label and flag.
+    init(combo: KeyCombo, keyLabel: String, enabled: Bool) {
+        self.init(keyCode: combo.keyCode, modifiers: combo.carbonModifiers,
+                  keyLabel: keyLabel, enabled: enabled)
+    }
+
+    /// Registerable only when enabled and a usable global hotkey. Keycap's family
+    /// rule refuses the OS-owned ⌘Q/W/H/M/Space/Tab (and ⇧⌘3–6) so a registration
+    /// cannot swallow them, and accepts bare F1–F20 because function keys do not
+    /// collide with typing. A Shift-only chord is still ordinary text.
+    /// Vervellum adds one rule of its own on top of Keycap's, because a global
+    /// hotkey is registered with Carbon for the whole system rather than for this
+    /// app: an editing command would be swallowed everywhere, not only while the
+    /// panel is open.
+    ///
+    /// Option-only chords stay allowed, though some of them type a character. They
+    /// are common summon shortcuts (⌥Space), and refusing them would switch off
+    /// shortcuts people already have saved, with a warning only Settings shows.
+    ///
+    /// Derived from `registrationProblem` rather than re-listing the rules, so the
+    /// property that refuses a chord and the sentence the Shortcuts pane shows for
+    /// it cannot drift apart.
+    var isValid: Bool { enabled && registrationProblem == nil }
+
+    /// Command (+ optional Shift) on a key every editor binds for editing.
+    ///
+    /// ⌘C/V/X/A/Z and their ⇧ variants (⇧⌘Z redo, ⇧⌘V paste-and-match-style) are
+    /// the chords a global registration would take away from every text field on
+    /// the Mac. Adding ⌥ or ⌃ makes a different chord that no editor binds, so
+    /// those stay allowed.
+    private static let protectedEditingKeys: Set<UInt32> = [
+        KeyCode.a, KeyCode.c, KeyCode.v, KeyCode.x, KeyCode.z,
+    ]
+
+    /// Whether this binding is a global version of a system editing command.
+    var isProtectedEditingShortcut: Bool {
+        let modifiers = combo.modifiers
+        guard modifiers.contains(.command),
+              modifiers.intersection([.option, .control]).isEmpty
+        else { return false }
+        return Self.protectedEditingKeys.contains(keyCode)
+    }
+
+    /// Why this binding cannot be registered, in words the Shortcuts pane can
+    /// show; nil when it can be registered. The recorder is Keycap's, so it
+    /// accepts a combo this property refuses — the warning beside it is what
+    /// keeps that honest, and `isValid` is what keeps the chord off the system.
+    var registrationProblem: String? {
+        guard enabled else { return nil }
+        if isProtectedEditingShortcut {
+            return "\(displayString) is a system editing shortcut, so Vervellum doesn't "
+                + "register it globally. Record a different one."
+        }
+        if !combo.isUsableGlobalHotkey {
+            return "\(displayString) can't be used as a global shortcut, so Vervellum "
+                + "doesn't register it. Record a new one."
+        }
+        return nil
+    }
 
     /// The modifier glyphs in canonical macOS order (⌃⌥⇧⌘).
-    var modifierSymbols: String {
-        var s = ""
-        if modifiers & UInt32(controlKey) != 0 { s += "⌃" }
-        if modifiers & UInt32(optionKey)  != 0 { s += "⌥" }
-        if modifiers & UInt32(shiftKey)   != 0 { s += "⇧" }
-        if modifiers & UInt32(cmdKey)     != 0 { s += "⌘" }
-        return s
-    }
+    var modifierSymbols: String { combo.modifiers.symbols }
 
-    /// The full shortcut, e.g. `"⌃⌥⌘D"`.
-    var displayString: String { modifierSymbols + keyLabel }
-
-    // MARK: Capture
-
-    /// Builds a binding from a recorded key event (preserving the current `enabled`).
-    func updated(from event: NSEvent) -> HotkeyBinding {
-        HotkeyBinding(keyCode: UInt32(event.keyCode),
-                      modifiers: Self.carbonModifiers(from: event.modifierFlags),
-                      keyLabel: Self.label(for: event),
-                      enabled: enabled)
-    }
-
-    /// Maps Cocoa modifier flags to Carbon's `RegisterEventHotKey` bits.
-    static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
-        var carbon: UInt32 = 0
-        if flags.contains(.command) { carbon |= UInt32(cmdKey) }
-        if flags.contains(.option)  { carbon |= UInt32(optionKey) }
-        if flags.contains(.control) { carbon |= UInt32(controlKey) }
-        if flags.contains(.shift)   { carbon |= UInt32(shiftKey) }
-        return carbon
-    }
-
-    /// A short label for a recorded key, using the layout-aware character when the
-    /// key isn't one of the named special keys.
-    static func label(for event: NSEvent) -> String {
-        switch Int(event.keyCode) {
-        case kVK_Space:       return "Space"
-        case kVK_Return, kVK_ANSI_KeypadEnter: return "↩"
-        case kVK_Tab:         return "⇥"
-        case kVK_Delete:      return "⌫"
-        case kVK_ForwardDelete: return "⌦"
-        case kVK_Escape:      return "⎋"
-        case kVK_LeftArrow:   return "←"
-        case kVK_RightArrow:  return "→"
-        case kVK_UpArrow:     return "↑"
-        case kVK_DownArrow:   return "↓"
-        case kVK_Home:        return "↖"
-        case kVK_End:         return "↘"
-        case kVK_PageUp:      return "⇞"
-        case kVK_PageDown:    return "⇟"
-        default:
-            if let chars = event.charactersIgnoringModifiers, !chars.isEmpty,
-               chars.first.map({ !$0.isWhitespace }) == true {
-                return chars.uppercased()
-            }
-            return "Key \(event.keyCode)"
-        }
-    }
+    /// Uses the recorder's key naming so the panel hint matches it.
+    var displayString: String { combo.displayString }
 
     // MARK: Persistence
 

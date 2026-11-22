@@ -497,6 +497,26 @@ final class ResearchSessionTests: XCTestCase {
         }
     }
 
+    /// Editing a question brings back what it was asked with, as copies of their own.
+    func testEditingRestoresVerifiedCopiesOfAttachments() throws {
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        let record = Attachment(kind: .image, name: "shot.png", mediaType: "image/png",
+                                byteCount: png.count)
+        let hops = HopQueue()
+        let setup = try makeRetrySession(attachment: record, storedData: png, deliver: hops.deliver)
+        var turn = try XCTUnwrap(setup.session.thread.turns.first { $0.id == setup.turnID })
+
+        let copy = try XCTUnwrap(setup.session.restoredAttachments(for: turn).first)
+        XCTAssertEqual(copy.data, png)
+        XCTAssertEqual(copy.attachment.name, record.name)
+        XCTAssertNotEqual(copy.attachment.id, record.id)
+
+        turn.attachments = [Attachment(kind: .text, name: "shot.png", mediaType: "image/png",
+                                       byteCount: png.count)]
+        XCTAssertTrue(setup.session.restoredAttachments(for: turn).isEmpty,
+                      "bytes that do not match their record stay out")
+    }
+
     func testLocalTurnsStayOutOfHistoryAndPersistence() {
         let hops = HopQueue()
         var seenHistory: [[String]] = []

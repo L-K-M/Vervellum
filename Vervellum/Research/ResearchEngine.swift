@@ -163,6 +163,11 @@ final class ResearchEngine: ObservableObject {
         activeSession.retry(id)
     }
 
+    /// See `ResearchSession.restoredAttachments(for:)`.
+    func restoredAttachments(for turn: ResearchTurn) -> [PendingAttachment] {
+        activeSession.restoredAttachments(for: turn)
+    }
+
     /// Stops the visible thread's running turn. A detached thread's run is unaffected —
     /// Stop means stop *this* conversation's work.
     func cancel() {

@@ -46,6 +46,59 @@ struct ComposerView: NSViewRepresentable {
     /// what keeps that true for the second one.
     var onAttach: (AttachmentIntake.Outcome) -> Void
 
+    /// Whether a text paste is scanned for credential-shaped values before it reaches
+    /// the field.
+    ///
+    /// The selection shortcut already redacts what it captures, and a paste is the same
+    /// hazard: a `.env` line copied in a hurry is the commonest way a key reaches the
+    /// composer without ever being read. The preference is the selection one, because
+    /// they are one rule.
+    var redactPastedText = true
+    /// Called with how many spans a paste had removed, so the panel can say so. Zero is
+    /// never passed: a paste that changed nothing does not speak.
+    var onPastedTextRedacted: (Int) -> Void = { _ in }
+
+    /// What a paste should do, decided before any of it happens.
+    ///
+    /// A value rather than a switch at the call site so the whole decision is testable
+    /// with a local pasteboard. `NSPasteboard.general` is process-global, and a test
+    /// that set it would be changing the reader's clipboard.
+    enum PasteRoute: Equatable {
+        /// The board carried an attachment, or a refusal to take one.
+        case attach(AttachmentIntake.Outcome)
+        /// The board carried text and the redaction pass changed it. The text is what
+        /// should be inserted; `redactions` is what the reader is told.
+        case insert(String, redactions: Int)
+        /// The board carried text and it should be pasted exactly as it is.
+        case plain
+    }
+
+    /// Routes one paste: an attachment if the board carries one, otherwise the text
+    /// half — redacted first when the preference is on.
+    ///
+    /// `PasteboardIntake.read` answers an empty outcome both for "this is text" and for
+    /// "nothing here is mine". Only the first has a string to redact; the second falls
+    /// through to `super.paste`, which does whatever AppKit does with it.
+    static func route(_ pasteboard: NSPasteboard, existing: Int, redact: Bool) -> PasteRoute {
+        let outcome = PasteboardIntake.read(pasteboard, existing: existing)
+        guard outcome.isEmpty else { return .attach(outcome) }
+        guard redact,
+              let text = pastedText(on: pasteboard),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return .plain }
+        let result = SecretRedactor.redact(text)
+        guard result.didRedact else { return .plain }
+        return .insert(result.text, redactions: result.redactionCount)
+    }
+
+    /// What `super.paste` would type. A board can hold HTML or RTFD and no plain
+    /// string, and the text view flattens those, so they have to be read as well.
+    private static func pastedText(on pasteboard: NSPasteboard) -> String? {
+        if let plain = pasteboard.string(forType: .string) { return plain }
+        let rich = pasteboard.readObjects(forClasses: [NSAttributedString.self], options: nil)
+        return (rich?.first as? NSAttributedString)?.string
+    }
+
     /// The composer's text size before the preference is applied.
     static let baseFontSize: CGFloat = 13
 
@@ -91,7 +144,11 @@ struct ComposerView: NSViewRepresentable {
         textView.setAccessibilityLabel("Question")
         textView.setAccessibilityHelp(placeholder)
         textView.allowsUndo = true
-        textView.font = .systemFont(ofSize: Self.baseFontSize * Self.sane(scale))
+        // The theme's font design, not just the size: every other text surface goes
+        // through PanelTheme.NativeFont, and the composer is where the user is looking
+        // while typing — a Serif/Rounded theme that did not reach the typed text would
+        // jump face at the moment the question is submitted.
+        textView.font = PanelTheme.NativeFont.at(Self.baseFontSize, Self.sane(scale))
         textView.textContainerInset = NSSize(width: 4, height: 6)
         textView.drawsBackground = false
         textView.isVerticallyResizable = true
@@ -146,7 +203,7 @@ struct ComposerView: NSViewRepresentable {
         // from the same scale in the same frame — so if it ever did not, the box and the
         // glyphs inside it would disagree until the draft was retyped. This makes that
         // impossible to get wrong rather than relying on the setter's reach.
-        let wanted = NSFont.systemFont(ofSize: Self.baseFontSize * Self.sane(scale))
+        let wanted = PanelTheme.NativeFont.at(Self.baseFontSize, Self.sane(scale))
         if textView.font != wanted {
             textView.font = wanted
             let whole = NSRange(location: 0, length: (textView.string as NSString).length)
@@ -166,7 +223,7 @@ struct ComposerView: NSViewRepresentable {
     /// The height the composer wants for its current content, clamped.
     static func height(for text: String, width: CGFloat, scale: Double = 1.0) -> CGFloat {
         let storage = NSTextStorage(string: text.isEmpty ? " " : text,
-                                    attributes: [.font: NSFont.systemFont(ofSize: baseFontSize * sane(scale))])
+                                    attributes: [.font: PanelTheme.NativeFont.at(baseFontSize, sane(scale))])
         let container = NSTextContainer(size: NSSize(width: max(width - 8, 1),
                                                     height: .greatestFiniteMagnitude))
         container.lineFragmentPadding = 5
@@ -212,6 +269,7 @@ struct ComposerView: NSViewRepresentable {
         var parent: ComposerView
         weak var textView: NSTextView?
         private var showObserver: NSObjectProtocol?
+        private var focusObserver: NSObjectProtocol?
 
         init(_ parent: ComposerView) {
             self.parent = parent
@@ -240,6 +298,7 @@ struct ComposerView: NSViewRepresentable {
 
         deinit {
             if let showObserver { NotificationCenter.default.removeObserver(showObserver) }
+            if let focusObserver { NotificationCenter.default.removeObserver(focusObserver) }
         }
 
         /// Re-asserts focus every time the panel is summoned. See the type's docs.
@@ -252,6 +311,9 @@ struct ComposerView: NSViewRepresentable {
                 // occasionally undone by AppKit's own focus restoration.
                 DispatchQueue.main.async { self?.claimFocus() }
             }
+            focusObserver = NotificationCenter.default.addObserver(
+                forName: .vervellumComposerShouldClaimFocus, object: nil, queue: .main
+            ) { [weak self] _ in self?.claimFocus() }
         }
 
         func claimFocus() {
@@ -366,10 +428,24 @@ final class ComposerTextView: NSTextView {
     /// forward to flatten.
     override func paste(_ sender: Any?) {
         guard let coordinator else { return super.paste(sender) }
-        let outcome = PasteboardIntake.read(NSPasteboard.general,
-                                            existing: coordinator.parent.attachmentCount)
-        guard !outcome.isEmpty else { return super.paste(sender) }
-        coordinator.parent.onAttach(outcome)
+        let parent = coordinator.parent
+        switch ComposerView.route(NSPasteboard.general,
+                                  existing: parent.attachmentCount,
+                                  redact: parent.redactPastedText) {
+        case .attach(let outcome):
+            parent.onAttach(outcome)
+        case .insert(let text, let redactions):
+            // `insertText`, not `super.paste`: the words that would have been pasted are
+            // not the words the reader is meant to see. `insertText` is undoable, so a
+            // redacted paste can be backed out — undo removes the insertion entirely; the
+            // original survives on the pasteboard, not here.
+            insertText(text, replacementRange: selectedRange())
+            // A long redacted paste can leave the caret below the visible field.
+            scrollRangeToVisible(selectedRange())
+            parent.onPastedTextRedacted(redactions)
+        case .plain:
+            super.paste(sender)
+        }
     }
 
     override func pasteAsPlainText(_ sender: Any?) { paste(sender) }
@@ -412,7 +488,7 @@ final class ComposerTextView: NSTextView {
         super.draw(dirtyRect)
         guard string.isEmpty, let placeholder = coordinator?.parent.placeholder else { return }
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font ?? NSFont.systemFont(ofSize: ComposerView.baseFontSize),
+            .font: font ?? PanelTheme.NativeFont.at(ComposerView.baseFontSize, 1),
             .foregroundColor: NSColor.tertiaryLabelColor,
         ]
         let origin = NSPoint(x: textContainerInset.width + (textContainer?.lineFragmentPadding ?? 5),

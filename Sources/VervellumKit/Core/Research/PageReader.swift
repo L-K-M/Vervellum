@@ -453,24 +453,203 @@ final class DirectPageReader: PageReading {
 
     /// Decodes a page's bytes, honouring the charset the response declared.
     ///
-    /// UTF-8 first because it is nearly everything, then the declared charset, then
-    /// Latin-1 — which cannot fail, so a page in an encoding nobody declared is read
-    /// with mojibake in the accents rather than dropped entirely.
+    /// The declaration is acted on where it is decisive. BOM-less UTF-16 whose text
+    /// is pure ASCII is valid UTF-8 — one byte in two is NUL — so a UTF-8-first
+    /// decode reads it as a NUL-filled string (accented UTF-16 is rejected by a
+    /// strict UTF-8 decode); an explicit little- or big-endian declaration is
+    /// honoured before the generic fallback. For the single-byte charsets the order is the
+    /// other way: a server that labels UTF-8 as ISO-8859-1 or Windows-1252 is common
+    /// enough that a strict UTF-8 decode wins, and a genuine Windows-1252 page is not
+    /// valid UTF-8, so it falls through to the declared codec. The `iso-8859-1` and
+    /// `latin1` labels are decoded as Windows-1252 as well, because that is what the
+    /// WHATWG Encoding Standard — and every browser — does with those labels; the
+    /// codecs agree outside `0x80...0x9F`, where a real page carries the euro and the
+    /// smart quotes rather than C1 controls. Latin-1 is the last resort — for a page
+    /// that declared nothing, or whose declared codec failed — because it cannot fail.
     static func decode(_ data: Data, contentType: String) -> String? {
-        if let text = String(data: data, encoding: .utf8) { return text }
-        if contentType.contains("charset=") {
-            let declared = contentType.components(separatedBy: "charset=").last?
-                .components(separatedBy: ";").first?
-                .trimmingCharacters(in: CharacterSet(charactersIn: " \"'")) ?? ""
-            switch declared.lowercased() {
-            case "iso-8859-1", "latin1", "windows-1252":
-                return String(data: data, encoding: .isoLatin1)
-            case "utf-16", "utf-16le", "utf-16be":
-                return String(data: data, encoding: .utf16)
-            default:
-                break
+        let text: String?
+        // WHATWG sniffs a byte-order mark ahead of any declared charset: a body
+        // that begins FF FE / FE FF is UTF-16LE/BE whatever the Content-Type says.
+        if data.count >= 2,
+           (data[data.startIndex] == 0xFF && data[data.startIndex + 1] == 0xFE)
+            || (data[data.startIndex] == 0xFE && data[data.startIndex + 1] == 0xFF) {
+            // `utf16` honours the BOM itself, so the default is never used.
+            text = Self.utf16(data, defaultingTo: .little)
+        } else {
+            switch declaredEncoding(contentType) {
+            case .utf16LittleEndian:
+                text = Self.utf16(data, defaultingTo: .little)
+            case .utf16BigEndian:
+                text = Self.utf16(data, defaultingTo: .big)
+            case .utf16:
+                // WHATWG maps the bare `utf-16` label to little-endian (RFC 2781 would
+                // default to big-endian; browsers do not). A byte-order mark still wins.
+                text = Self.utf16(data, defaultingTo: .little)
+            case .utf8:
+                text = String(data: data, encoding: .utf8)
+            case .windowsCP1252:
+                text = String(data: data, encoding: .utf8) ?? Self.windowsCP1252(data)
+            case .isoLatin1:
+                // The label is decoded as Windows-1252, per WHATWG; see the type comment.
+                text = String(data: data, encoding: .utf8) ?? Self.windowsCP1252(data)
+            case nil:
+                text = String(data: data, encoding: .utf8)
             }
         }
-        return String(data: data, encoding: .isoLatin1)
+        guard let text else { return String(data: data, encoding: .isoLatin1) }
+        // An explicit UTF-16 codec keeps a byte-order mark as U+FEFF; the extractor
+        // and the model do not want a zero-width character at the top of the page.
+        return text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
+    }
+
+    /// Which endianness a UTF-16 body decodes as when it carries no byte-order mark.
+    private enum UTF16Endianness {
+        case little
+        case big
+    }
+
+    /// Decodes a UTF-16 body, honouring a byte-order mark and otherwise using
+    /// `defaultingTo`.
+    ///
+    /// Foundation's `.utf16` is deliberately not used for a BOM-less body: Darwin
+    /// answers nil, swift-corelibs-foundation assumes big-endian, and neither is a
+    /// contract. Decoding the code units directly makes the result the same on both
+    /// platforms, and a BOM — which the explicit codecs would keep as U+FEFF — is
+    /// consumed here.
+    ///
+    /// An invalid code unit — an unpaired surrogate or a dangling trailing byte — is
+    /// replaced with U+FFFD rather than failing the whole body, the way WHATWG's
+    /// decoder and every browser behave: one corrupt byte should not cost the reader
+    /// the page.
+    private static func utf16(_ data: Data, defaultingTo endianness: UTF16Endianness) -> String {
+        let effective: UTF16Endianness
+        let body: Data
+        if data.count >= 2 {
+            let first = data[data.startIndex], second = data[data.startIndex + 1]
+            if first == 0xFF, second == 0xFE {
+                effective = .little
+                body = Data(data.dropFirst(2))
+            } else if first == 0xFE, second == 0xFF {
+                effective = .big
+                body = Data(data.dropFirst(2))
+            } else {
+                effective = endianness
+                body = data
+            }
+        } else {
+            effective = endianness
+            body = data
+        }
+
+        func unit(at index: Data.Index) -> UInt16? {
+            guard let next = body.index(index, offsetBy: 1, limitedBy: body.endIndex),
+                  next < body.endIndex else { return nil }
+            let first = UInt16(body[index]), second = UInt16(body[next])
+            return effective == .little ? first | (second << 8) : second | (first << 8)
+        }
+
+        var scalars = String.UnicodeScalarView()
+        scalars.reserveCapacity(body.count / 2)
+        var index = body.startIndex
+        while index < body.endIndex {
+            guard let leading = unit(at: index) else {
+                scalars.append("\u{FFFD}")          // a dangling trailing byte
+                break
+            }
+            index = body.index(index, offsetBy: 2)
+            if let scalar = Unicode.Scalar(leading) {
+                scalars.append(scalar)
+                continue
+            }
+            // A high surrogate must be followed by a low one. Anything else is
+            // replaced, and the surrogate itself is consumed either way.
+            if (0xD800...0xDBFF).contains(leading),
+               index < body.endIndex,
+               let trailing = unit(at: index),
+               (0xDC00...0xDFFF).contains(trailing) {
+                index = body.index(index, offsetBy: 2)
+                let combined = 0x10000 + (UInt32(leading - 0xD800) << 10) + UInt32(trailing - 0xDC00)
+                scalars.append(Unicode.Scalar(combined) ?? "\u{FFFD}")
+            } else {
+                scalars.append("\u{FFFD}")
+            }
+        }
+        return String(scalars)
+    }
+
+    /// Windows-1252, decoded here rather than through `String(data:encoding:)`.
+    ///
+    /// The codec differs from ISO-8859-1 only in `0x80...0x9F`, where a Windows
+    /// page carries the euro, the smart quotes, dashes and friends. Darwin's
+    /// `.windowsCP1252` applies that table; swift-corelibs-foundation's does not —
+    /// it maps the C1 range to the same code points as Latin-1, so the same page
+    /// would decode differently on the two platforms. Decoding it explicitly keeps
+    /// the evidence identical everywhere, which is the point of the shared core.
+    private static func windowsCP1252(_ data: Data) -> String {
+        let overrides: [UInt8: Unicode.Scalar] = [
+            0x80: "€", 0x82: "‚", 0x83: "ƒ", 0x84: "„", 0x85: "…",
+            0x86: "†", 0x87: "‡", 0x88: "ˆ", 0x89: "‰", 0x8A: "Š",
+            0x8B: "‹", 0x8C: "Œ", 0x8E: "Ž", 0x91: "‘", 0x92: "’",
+            0x93: "“", 0x94: "”", 0x95: "•", 0x96: "–", 0x97: "—",
+            0x98: "˜", 0x99: "™", 0x9A: "š", 0x9B: "›", 0x9C: "œ",
+            0x9E: "ž", 0x9F: "Ÿ",
+        ]
+        var scalars = String.UnicodeScalarView()
+        scalars.reserveCapacity(data.count)
+        for byte in data {
+            // The bytes undefined in Windows-1252 (0x81, 0x8D, 0x8F, 0x90, 0x9D)
+            // fall back to the code point itself; WHATWG's decoder emits U+FFFD
+            // there, but keeping the C1 code point preserves the raw byte, which
+            // suits an evidence reader better.
+            scalars.append(overrides[byte] ?? Unicode.Scalar(byte))
+        }
+        return String(scalars)
+    }
+
+    /// The codec a `Content-Type` declares, or nil when it declares none this build
+    /// recognises. Aliases are included because a server's spelling is not a contract.
+    private enum DeclaredEncoding {
+        case utf8
+        case utf16
+        case utf16LittleEndian
+        case utf16BigEndian
+        case windowsCP1252
+        case isoLatin1
+    }
+
+    private static func declaredEncoding(_ contentType: String) -> DeclaredEncoding? {
+        // `charset=` must open a parameter; a match inside another token (e.g.
+        // `xcharset=`) is not a declaration — keep scanning for a real one.
+        var marker = contentType.range(of: "charset=", options: .caseInsensitive)
+        while let found = marker {
+            let preceding = contentType[contentType.startIndex..<found.lowerBound]
+                .reversed()
+                .drop(while: { $0 == " " || $0 == "\t" })
+            if preceding.isEmpty || preceding.first == ";" { break }
+            marker = contentType.range(of: "charset=", options: .caseInsensitive,
+                                       range: found.upperBound..<contentType.endIndex)
+        }
+        guard let marker = marker else {
+            return nil
+        }
+        let declared = contentType[marker.upperBound...]
+            .components(separatedBy: ";").first?
+            .trimmingCharacters(in: CharacterSet(charactersIn: " \"'")) ?? ""
+        switch declared.lowercased() {
+        case "utf-8", "utf8":
+            return .utf8
+        case "utf-16", "utf16", "unicode":
+            return .utf16
+        case "utf-16le", "utf-16-le", "utf16le":
+            return .utf16LittleEndian
+        case "utf-16be", "utf-16-be", "utf16be":
+            return .utf16BigEndian
+        case "windows-1252", "cp1252", "cp-1252", "x-cp1252":
+            return .windowsCP1252
+        case "iso-8859-1", "iso8859-1", "iso_8859-1", "latin1", "latin-1":
+            return .isoLatin1
+        default:
+            return nil
+        }
     }
 }

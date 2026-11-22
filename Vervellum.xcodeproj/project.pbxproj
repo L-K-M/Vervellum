@@ -6,6 +6,11 @@
 	objectVersion = 70;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AB0000000000000000000004 /* UpdraftKit in Frameworks */ = {isa = PBXBuildFile; productRef = AB0000000000000000000002 /* UpdraftKit */; };
+		AC0000000000000000000003 /* KeycapKit in Frameworks */ = {isa = PBXBuildFile; productRef = AC0000000000000000000002 /* KeycapKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		AA000000000000000000001A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -33,6 +38,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AB0000000000000000000004 /* UpdraftKit in Frameworks */,
+				AC0000000000000000000003 /* KeycapKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -87,6 +94,8 @@
 			);
 			name = Vervellum;
 			packageProductDependencies = (
+				AB0000000000000000000002 /* UpdraftKit */,
+				AC0000000000000000000002 /* KeycapKit */,
 			);
 			productName = Vervellum;
 			productReference = AA0000000000000000000006 /* Vervellum.app */;
@@ -143,6 +152,8 @@
 			);
 			mainGroup = AA0000000000000000000002;
 			packageReferences = (
+				AB0000000000000000000001 /* XCRemoteSwiftPackageReference "Updraft" */,
+				AC0000000000000000000004 /* XCRemoteSwiftPackageReference "Keycap" */,
 			);
 			productRefGroup = AA0000000000000000000003 /* Products */;
 			projectDirPath = "";
@@ -425,6 +436,38 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AB0000000000000000000001 /* XCRemoteSwiftPackageReference "Updraft" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/L-K-M/Updraft";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.2.0;
+			};
+		};
+		AC0000000000000000000004 /* XCRemoteSwiftPackageReference "Keycap" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/L-K-M/Keycap";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.1.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AB0000000000000000000002 /* UpdraftKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AB0000000000000000000001 /* XCRemoteSwiftPackageReference "Updraft" */;
+			productName = UpdraftKit;
+		};
+		AC0000000000000000000002 /* KeycapKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AC0000000000000000000004 /* XCRemoteSwiftPackageReference "Keycap" */;
+			productName = KeycapKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = AA0000000000000000000001 /* Project object */;
 }

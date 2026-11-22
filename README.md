@@ -31,7 +31,8 @@ runs the searches and answers based on current sources.
 - **A faulted answer is corrected, not just annotated.** When the check finds a claim
   the evidence contradicts or only half-supports, the answer is sent back once to be
   fixed against the same evidence — a correction of the sentences the findings name,
-  not a rewrite. The first draft is kept, because the findings below grade the draft.
+  not a rewrite. The assessed draft is kept for comparison. When a deep turn gathers more
+  evidence and answers again, the findings assess that second answer.
   A correction that never arrives, or that breaks the citation rule, is dropped and
   the draft stands with a warning.
 - **Finding nothing is a result.** *Not established* is a normal outcome, not an
@@ -63,7 +64,9 @@ runs the searches and answers based on current sources.
   limit and relaunching brings the threads back. Be aware how small "until something is
   saved" is, though: asking one question writes the trimmed list, and that is what makes
   it permanent. The write rotates the previous file to `threads.json.bak` first, so
-  there is one more chance after that and no more. Active turns are checkpointed;
+  there is one more chance after that and no more. (The copy is staged as
+  `threads.json.bak.tmp`, which stays until a failed rotation can be finished.)
+  Active turns are checkpointed;
   interrupted work reopens as incomplete, with its partial answer retained.
 - **Keyboard-first.** `Return` asks, `Esc` clears then closes, `↑`/`↓` walk back
   through earlier questions, `/` opens commands. Everything in the header is also a
@@ -145,7 +148,10 @@ runs the searches and answers based on current sources.
   and the backdrop are yours to change, live, while the panel is open. A preset is a
   starting point, not a mode. Verdicts keep their symbols and their written labels
   whatever you do to their colours, so the worst you can make it is ugly.
-- **Native.** SwiftUI and AppKit, Liquid Glass on macOS 26, no dependencies.
+- **Native.** SwiftUI and AppKit, Liquid Glass on macOS 26, no third-party
+  dependencies. The updater and global shortcuts come from the author's shared
+  [Updraft](https://github.com/L-K-M/Updraft) and [Keycap](https://github.com/L-K-M/Keycap)
+  packages, as in the sibling apps.
 
 ## Getting started
 
@@ -343,10 +349,10 @@ page reading also contacts up to three pages for One pass, or eight shared
 between pasted links and search results for Deep rounds and Agent loop; reader-service
 mode sends those URLs to the configured reader instead. Threads and preferences stay
 on your machine. API keys live in the Keychain on macOS. Linux reads explicit
-environment keys first, then the keyring, then an unencrypted mode-0600 file. Text
-captured by the macOS selection shortcut is scanned for credential-shaped values
-before it reaches the composer, and you're told how many were removed. See
-[PRIVACY.md](PRIVACY.md) for the complete per-stage account.
+environment keys first, then the keyring, then an unencrypted mode-0600 file. On macOS,
+text captured by the selection shortcut or pasted into the composer is scanned for
+credential-shaped values before it reaches the composer, and you're told how many were
+removed. See [PRIVACY.md](PRIVACY.md) for the complete per-stage account.
 
 ## Distribution
 

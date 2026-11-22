@@ -19,6 +19,8 @@ struct PanelRootView: View {
     /// nested views below keep their `@Environment` reads, because they are descendants.
     private var textScale: Double { preferences.textScale }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @ObservedObject var engine: ResearchEngine
     @ObservedObject var store: ThreadStore
     @ObservedObject var preferences: Preferences
@@ -39,6 +41,13 @@ struct PanelRootView: View {
         self.secrets = secrets
         self.onOpenSettings = onOpenSettings
         self.onClose = onClose
+        // The same Keychain read `refreshConfiguredState` does, made once up
+        // front: without it the very first frame claims "not configured" to a
+        // configured user and corrects itself one beat later.
+        _configurationProblems = State(initialValue: ProviderReadiness.problems(
+            settings: preferences.providerSettings,
+            level: preferences.researchLevel,
+            secrets: secrets))
     }
 
     @State private var draft = ""
@@ -50,6 +59,7 @@ struct PanelRootView: View {
     /// with it, and one that was refused keeps both.
     @State private var attachments: [PendingAttachment] = []
     @State private var showsHistory = false
+    @State private var panelVisible = false
     /// Markdown shown above the thread in place of a turn — `/help`, and the `/model`
     /// listing. One slot rather than a flag per command: they are mutually exclusive by
     /// nature (each replaces the last), and Escape has one thing to back out of.
@@ -61,6 +71,16 @@ struct PanelRootView: View {
     @State private var queueFullNote = false
     /// Earlier questions, newest first, for ↑/↓ recall in the composer.
     @State private var recallIndex: Int?
+    /// The text the recall walk last put in the composer.
+    ///
+    /// The walk has to survive a draft change, or ↑ could not move through the list.
+    /// It must not survive an *edit*: a reader who corrects a recalled question and
+    /// presses ↑ again expects the correction to stay, not to be replaced by the next
+    /// question. Comparing the draft against this is the whole rule — a draft that no
+    /// longer equals it is an edit, and an edit ends the walk. `recall` writes both in
+    /// the same transaction, so the change that puts a question on screen is not itself
+    /// read as an edit.
+    @State private var recalledDraft: String?
 
     /// Which command in the completion list the keyboard has highlighted, if any.
     ///
@@ -141,7 +161,7 @@ struct PanelRootView: View {
     /// on **every** SwiftUI render — which during a streamed answer is many times a
     /// second. It is refreshed when the panel is summoned, after Settings closes, and
     /// when the selected research level changes — the only moments it can change.
-    @State private var configurationProblems = ["Provider settings have not been checked yet."]
+    @State private var configurationProblems: [String]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -195,7 +215,19 @@ struct PanelRootView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .vervellumPanelDidShow)) { _ in
+            panelVisible = true
             refreshConfiguredState()
+        }
+        .onChange(of: showsHistory) { _, shown in
+            // History's search field took first responder while it was open; on
+            // close the composer claims it back, unless the whole panel is hiding.
+            if !shown && panelVisible {
+                DispatchQueue.main.async {
+                    guard panelVisible else { return }
+                    NotificationCenter.default.post(name: .vervellumComposerShouldClaimFocus,
+                                                    object: nil)
+                }
+            }
         }
         // Also on first build: the panel is constructed and shown in the same turn, so
         // without this the very first frame renders the not-configured state even for a
@@ -205,6 +237,7 @@ struct PanelRootView: View {
         // opens on the thread rather than wherever the user happened to be. The draft
         // is deliberately kept — a half-typed question should survive a dismissal.
         .onReceive(NotificationCenter.default.publisher(for: .vervellumPanelWillHide)) { _ in
+            panelVisible = false
             showsHistory = false
             notice = nil
             recallIndex = nil
@@ -239,15 +272,29 @@ struct PanelRootView: View {
             case .openSettings:
                 onOpenSettings()
             case .stop: engine.cancel()
+            case .scrollToTop: scrollToEdge(top: true)
+            case .scrollToBottom: scrollToEdge(top: false)
             }
         }
     }
 
     // MARK: Thread
 
+    /// Holds the thread's scroll proxy so panel commands (⌘↑/⌘↓) can scroll it. A
+    /// reference box rather than a stored property on the view: `body` is a computed
+    /// property, so `self` is immutable there and a `var` cannot be assigned from the
+    /// reader's closure; and `@State` would re-invalidate the view on every render, a
+    /// loop. Nothing in `body` reads the box — the command handler does, outside any
+    /// render pass.
+    private final class ScrollProxyBox {
+        var proxy: ScrollViewProxy?
+    }
+    private let scrollProxyBox = ScrollProxyBox()
+
     private var thread: some View {
         ScrollViewReader { proxy in
-            ScrollView {
+            scrollProxyBox.proxy = proxy
+            return ScrollView {
                 // Keep row lifetimes stable while scrolling. LazyVStack repeatedly
                 // changes item phases for these variable-height AppKit-backed rows;
                 // the resulting view-graph churn can occupy the main loop forever.
@@ -256,6 +303,7 @@ struct PanelRootView: View {
                     if engine.thread.isEmpty && notice == nil {
                         EmptyStateView(configurationProblems: configurationProblems,
                                        searches: preferences.researchLevel.searches,
+                                       submitOnReturn: preferences.submitOnReturn,
                                        summonShortcut: preferences.summonHotkey.displayString,
                                        onOpenSettings: onOpenSettings,
                                        onSeedComposer: { draft = $0 })
@@ -274,8 +322,11 @@ struct PanelRootView: View {
                         // `TurnView`'s own docs for the whole story.
                         TurnView(turn: turn,
                                  showsProcessTrail: preferences.showProcessTrail,
+                                 palette: PanelTheme.palette,
                                  onRetry: { engine.retry(turn.id) },
-                                 onAskFollowup: askFollowup)
+                                 onAskFollowup: askFollowup,
+                                 onSeedComposer: seedComposer,
+                                 attachmentData: { store.attachmentData(for: $0) })
                             .equatable()
                             .id(turn.id)
                     }
@@ -286,20 +337,32 @@ struct PanelRootView: View {
                 }
                 .padding(.horizontal, PanelTheme.Space.gutter)
                 .padding(.vertical, PanelTheme.Space.large)
+                // ⌘↑'s anchor is the padded content itself. A spacer row at the top
+                // would push every thread down by the stack's spacing.
+                .id(Self.topAnchor)
                 // Observe the full scroll content, including its bottom anchor.
                 .background(BottomSentinel { pinned in isPinnedToBottom = pinned })
             }
             .overlay(alignment: .bottom) {
-                if !isPinnedToBottom, engine.isRunning {
+                // Not only mid-stream: scrolled up in a long finished thread, the
+                // pill is still the one-tap way back to the newest answer.
+                if !isPinnedToBottom {
                     jumpToLatest(proxy)
                 }
             }
-            .animation(PanelTheme.Motion.disclosure, value: isPinnedToBottom)
+            .animation(PanelTheme.Motion.disclosureAnimation(reduceMotion), value: isPinnedToBottom)
             .onChange(of: engine.thread.turns.last?.answer) { _, _ in
                 guard isPinnedToBottom else { return }
                 scrollToBottom(proxy)
             }
             .onChange(of: draft) { old, new in
+                // An edit to a recalled question ends the walk before anything else,
+                // so the next ↑ cannot replace what the reader just typed. A recall
+                // writes `recalledDraft` in the same transaction as the draft, so the
+                // change that puts a question on screen does not trip this.
+                if recallIndex != nil, new != recalledDraft {
+                    recallIndex = nil
+                }
                 // Any edit invalidates the highlight: the list is filtered by what has
                 // been typed, so an index kept across a keystroke could point past the
                 // end of the shorter list, or at a command the user has just filtered out.
@@ -320,11 +383,26 @@ struct PanelRootView: View {
     }
 
     private static let bottomAnchor = "vervellum.bottom"
+    private static let topAnchor = "vervellum.top"
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         // Unanimated: an animated scroll re-targeted on every streamed token fights
         // itself and the text visibly judders.
         proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+    }
+
+    /// ⌘↑/⌘↓: jump the transcript to an end.
+    ///
+    /// Animated, unlike the follow-scroll while an answer streams — this is a deliberate
+    /// jump, not a token re-target. The sentinel observes the resulting scroll and updates
+    /// the pin, so ⌘↑ mid-answer stops the auto-follow until the reader returns to the
+    /// bottom, exactly as scrolling up by hand does.
+    private func scrollToEdge(top: Bool) {
+        guard !showsHistory, let proxy = scrollProxyBox.proxy else { return }
+        withAnimation(PanelTheme.Motion.disclosureAnimation(reduceMotion)) {
+            proxy.scrollTo(top ? Self.topAnchor : Self.bottomAnchor,
+                           anchor: top ? .top : .bottom)
+        }
     }
 
     /// The way back to the stream after scrolling up mid-answer. Tapping it scrolls,
@@ -344,7 +422,7 @@ struct PanelRootView: View {
         .buttonStyle(.plain)
         .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
         .padding(.bottom, PanelTheme.Space.small)
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
+        .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .bottom)))
     }
 
     // MARK: Composer
@@ -353,7 +431,7 @@ struct PanelRootView: View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
             if let redactionNote {
                 Label("\(redactionNote) credential-shaped value\(redactionNote == 1 ? "" : "s") "
-                      + "removed from the captured text.",
+                      + "removed from the text.",
                       systemImage: "eye.slash")
                     .font(PanelTheme.Font.caption(textScale))
                     .foregroundStyle(PanelTheme.Palette.verdict(.mixed))
@@ -440,7 +518,12 @@ struct PanelRootView: View {
                              // in Swift carries no defaults — a bare `receive` here is
                              // `(Outcome, Bool) -> Void` and does not fit. This is the
                              // intake gesture, so the default is the one it wants.
-                             onAttach: { receive($0) })
+                             onAttach: { receive($0) },
+                             // The same rule the selection shortcut follows, and the
+                             // same preference: a paste is the other way a key reaches
+                             // the composer without being read.
+                             redactPastedText: preferences.redactSecrets,
+                             onPastedTextRedacted: { redactionNote = $0 })
                     // The composer's height for its content, laid out at the width the
                     // row will actually give it: the measured row width minus what the
                     // send button and its spacing take. Measured rather than derived
@@ -1159,12 +1242,39 @@ struct PanelRootView: View {
             // field the reader cannot see is a button that did nothing to anyone
             // listening rather than looking.
             if !attachments.isEmpty {
-                announce("Put in the composer — Return sends it with the attachment"
+                announce("Put in the composer — \(preferences.submitKeyName) sends it with the attachment"
                          + (attachments.count == 1 ? "" : "s"))
             }
             return
         }
         submit(question)
+    }
+
+    /// Loads a finished turn's question and attachments into the composer for
+    /// editing — never submits. Offered as "Edit & re-ask", and like "Ask again" it
+    /// asks with what the question was asked with, or says what is missing.
+    private func seedComposer(_ turn: ResearchTurn) {
+        guard draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              attachments.isEmpty else {
+            notice = "Send or clear your current draft and attachments before editing an earlier question."
+            announce("Current draft and attachments kept. Send or clear them before editing an earlier question.")
+            return
+        }
+        draft = turn.question
+        recallIndex = nil
+        guard !turn.attachments.isEmpty else {
+            // Seeding is silent on screen but invisible to a VoiceOver user, so it
+            // is said out loud — the same reason `askFollowup` announces its load.
+            announce("Question loaded into the composer")
+            return
+        }
+        // `receive` does the announcing here: what came back, and what could not.
+        let restored = engine.restoredAttachments(for: turn)
+        let missing = turn.attachments.count - restored.count
+        let refusals = missing == 0 ? [] : ["\(missing) attachment\(missing == 1 ? "" : "s") "
+            + "from that question could not be brought back, so \(missing == 1 ? "it was" : "they were") "
+            + "left out."]
+        receive(AttachmentIntake.Outcome(accepted: restored, refusals: refusals), restoring: true)
     }
 
     private func newThread() {
@@ -1384,7 +1494,7 @@ struct PanelRootView: View {
               ComposerCommand.isHalfTypedCommand(new),
               reopened || ComposerCommand.completions(for: old) == nil
         else { return }
-        let key = preferences.submitOnReturn ? "Return" : "Command-Return"
+        let key = preferences.submitKeyName
         announce("Command list, \(opened.count) \(opened.count == 1 ? "match" : "matches"). "
                  + "\(key) completes the highlighted one.")
     }
@@ -1423,6 +1533,7 @@ struct PanelRootView: View {
             guard next < questions.count else { return true }
             recallIndex = next
             draft = questions[next]
+            recalledDraft = questions[next]
         } else {
             // The index points into a *particular* thread's list, and opening a thread
             // from history swaps that list underneath it. Re-validate before indexing:
@@ -1435,9 +1546,11 @@ struct PanelRootView: View {
             if current == 0 {
                 recallIndex = nil
                 draft = ""
+                recalledDraft = ""
             } else {
                 recallIndex = current - 1
                 draft = questions[current - 1]
+                recalledDraft = questions[current - 1]
             }
         }
         return true

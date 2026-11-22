@@ -1,4 +1,6 @@
 import XCTest
+import Carbon.HIToolbox
+import KeycapCore
 @testable import Vervellum
 
 final class PreferencesTests: XCTestCase {
@@ -12,7 +14,9 @@ final class PreferencesTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        defaults.removePersistentDomain(forName: suiteName)
+        SuitePlistCleanup.removeSuite(suiteName, from: defaults)
+        defaults = nil
+        suiteName = nil
     }
 
     func testDefaultsAreReturnedForAnEmptyStore() {
@@ -77,6 +81,21 @@ final class PreferencesTests: XCTestCase {
 
         defaults.set("not json", forKey: "summonHotkey")
         XCTAssertEqual(Preferences(defaults: defaults).summonHotkey, HotkeyBinding.defaultSummon)
+    }
+
+    /// A shortcut saved before Keycap stores a label the recorder no longer shows.
+    /// The panel hint reads this binding through `Preferences`, so the stored JSON
+    /// is seeded in a scratch suite and the hint must match the recorder's name.
+    func testAnOldSavedShortcutHintMatchesTheRecorder() {
+        let old = HotkeyBinding(keyCode: KeyCode.f5,
+                                modifiers: UInt32(cmdKey | optionKey),
+                                keyLabel: "Key \(KeyCode.f5)", enabled: true)
+        defaults.set(old.jsonString, forKey: "summonHotkey")
+
+        let stored = Preferences(defaults: defaults).summonHotkey
+        XCTAssertEqual(stored, old)
+        XCTAssertEqual(stored.displayString, stored.combo.displayString)
+        XCTAssertEqual(stored.displayString, "⌥⌘F5")
     }
 
     /// The shared settings are exercised in `CorePreferencesTests`; this only checks

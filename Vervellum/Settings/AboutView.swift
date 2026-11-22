@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UpdraftKit
 
 /// What this is, what it does with your data, and where the source lives.
 struct AboutView: View {

@@ -26,6 +26,12 @@ struct Source: Codable, Identifiable, Equatable {
     /// Whether the answer could have been written from the page rather than a summary.
     var wasRead: Bool { !(fullText ?? "").isEmpty }
 
+    /// Recheck the source at activation time because a reopened thread comes
+    /// from the archive, independently of validation when harvesting new hits.
+    /// NSWorkspace can launch handlers for non-web schemes, so rows and citation
+    /// chips share the same absolute HTTP(S) rule as the GTK browser action.
+    var browserURL: URL? { SourceHarvester.openableURL(url) }
+
     /// The registrable-looking host, for a compact source chip ("apple.com").
     /// Delegated to `EvidenceExtractor.domainKey` so the diversity cap and the chip
     /// the reader sees can never drift into two definitions of "same domain".
@@ -186,7 +192,8 @@ enum TurnNotice: String, Codable, Equatable {
     /// Some retrieved sources did not fit the evidence budget and were never shown to
     /// the model.
     case evidenceTrimmed
-    /// The model cited a source number that does not exist.
+    /// The model cited a source number that does not exist, or wrote a citation that
+    /// cannot be read.
     case invalidCitation
     /// The model wrote a direct destination despite the no-link rule. The
     /// raw name predates bare-domain and Markdown-link detection and remains stable so
@@ -264,6 +271,11 @@ enum TurnNotice: String, Codable, Equatable {
     /// *context budget* that could not hold all of it. Said out loud because an answer
     /// written from half a log is the kind of thing a reader needs to know.
     case attachmentTrimmed
+    /// Every source the answer cites is from one website. A fact about the evidence,
+    /// not a verdict: one site can be excellent, and it still cannot corroborate
+    /// itself. Said so a reader does not take two citations to one domain as two
+    /// independent witnesses.
+    case singleDomain
     /// A notice written by a newer build that this one does not know. Kept rather than
     /// failing the whole document: a `notices` array that refused to decode used to make
     /// an older build start from an empty library and overwrite the newer file.
@@ -285,7 +297,8 @@ enum TurnNotice: String, Codable, Equatable {
             return "Some sources were found but not shown to the model, because the "
                 + "evidence would not fit its context. The answer could not have used them."
         case .invalidCitation:
-            return "The model referred to a source number that does not exist. Those references were left as plain text."
+            return "The model wrote a citation that does not match the source list. "
+                + "Anything that matched no source was not linked."
         case .literalURL:
             return "The model wrote a direct link despite the no-link rule. Treat it as unverified."
         case .assessmentLinkDropped:
@@ -302,7 +315,7 @@ enum TurnNotice: String, Codable, Equatable {
                 + "Nothing below the answer has been verified."
         case .answerRevised:
             return "The check found claims the evidence does not carry, and the answer was "
-                + "rewritten against them. The findings below grade the first draft, which "
+                + "rewritten against them. The findings below grade the saved draft, which "
                 + "is what they were written about."
         case .revisionUnavailable:
             return "The check found claims worth correcting, but the rewrite could not be "
@@ -331,8 +344,7 @@ enum TurnNotice: String, Codable, Equatable {
                 + "the one that answered."
         case .answerRegathered:
             return "The first check found claims the evidence could not settle, so this "
-                + "turn went back for more evidence and answered again. The findings "
-                + "below grade this answer; the first draft is kept for comparison."
+                + "turn went back for more evidence, answered again, and checked that answer."
         case .attachmentNotStored:
             return "An attachment could not be saved, so it will not be here when this "
                 + "thread is reopened. The answer was written with it — only the stored "
@@ -340,6 +352,9 @@ enum TurnNotice: String, Codable, Equatable {
         case .attachmentTrimmed:
             return "Attached text was shortened to fit the model's context, so the answer "
                 + "saw the marked excerpt rather than the whole file."
+        case .singleDomain:
+            return "Every source this answer cites is from one website. A single site "
+                + "can still be wrong, and it cannot corroborate itself."
         case .attachmentMissing:
             return "Something attached to this question could not be sent, so the answer "
                 + "was written without it. The file is listed above as a record of what "
@@ -656,10 +671,14 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// Runs after the answer has finished streaming rather than per chunk: a citation
     /// marker can be split across two deltas, and flagging a half-arrived `[1` as an
     /// invented reference would put a warning on every answer.
-    mutating func applyCitationValidation(sourceCount: Int) {
+    @discardableResult
+    mutating func applyCitationValidation(sourceCount: Int) -> CitationValidator.Result {
         let validation = CitationValidator.validate(answer: answer, sourceCount: sourceCount)
-        if !validation.outOfRangeCitations.isEmpty { addNotice(.invalidCitation) }
+        if !validation.outOfRangeCitations.isEmpty || !validation.invalidCitationGroups.isEmpty {
+            addNotice(.invalidCitation)
+        }
         if !validation.forbiddenLinks.isEmpty { addNotice(.literalURL) }
+        return validation
     }
 
     /// Sources the answer actually cites, in citation order. The rest stay available
@@ -667,6 +686,32 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     func citedSources(using validation: CitationValidator.Result) -> [Source] {
         validation.citedSourceIndices.compactMap { index in
             sources.indices.contains(index) ? sources[index] : nil
+        }
+    }
+
+    /// Whether the answer's citations all resolve to one website.
+    ///
+    /// A property of the evidence, not of the prose: two citations to one domain are
+    /// not two independent witnesses, and the answer has no way to say so. Computed
+    /// from the same `Source.domain` the harvester's diversity cap uses, so the cue
+    /// and the cap cannot drift into two definitions of "same site". One cited source
+    /// is not a monoculture, and no citation is not either.
+    func citesSingleDomain(using validation: CitationValidator.Result) -> Bool {
+        let cited = citedSources(using: validation)
+        // Distinct numbers, not markers: `[1, 1]` is one witness cited twice, and
+        // the validator's indices are already deduplicated — this states the
+        // requirement rather than relying on that.
+        guard Set(cited.map(\.number)).count >= 2 else { return false }
+        return Set(cited.map(\.domain)).count == 1
+    }
+
+    /// Makes the single-site cue describe the answer now on screen. A revision or a
+    /// regathered answer can cite differently, so it is withdrawn as well as added.
+    mutating func refreshSingleDomainNotice(using validation: CitationValidator.Result) {
+        if citesSingleDomain(using: validation) {
+            addNotice(.singleDomain)
+        } else {
+            notices.removeAll { $0 == .singleDomain }
         }
     }
 

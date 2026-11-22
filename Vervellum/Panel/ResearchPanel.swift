@@ -1,4 +1,5 @@
 import AppKit
+import KeycapKit
 
 /// The floating window the research thread lives in.
 ///
@@ -116,6 +117,25 @@ final class ResearchPanel: NSPanel {
             post(.submit)
             return true
         }
+        // Command-Arrow jumps the thread to its top or bottom. The composer usually holds
+        // first responder, so ↑/↓ alone reach it, not the thread's scroll view — without
+        // these a long transcript can only be scrolled with the pointer. In text being
+        // edited the same keys move the caret to either end, so while there is some they
+        // stay with it and the thread gets them only from an empty field. The `flags`
+        // check is repeated here so the ⌘ requirement is local to the branch and a
+        // bare arrow can never be swallowed, even if the guard above changes;
+        // `subtracting(.capsLock)` keeps Caps-Lock users scrolling too (a no-op today,
+        // since `flags` is already cleaned above, but robust if that ever changes).
+        if event.keyCode == UInt16(KeyCode.upArrow), !isEditingText,
+           flags.subtracting(.capsLock) == .command {
+            post(.scrollToTop)
+            return true
+        }
+        if event.keyCode == UInt16(KeyCode.downArrow), !isEditingText,
+           flags.subtracting(.capsLock) == .command {
+            post(.scrollToBottom)
+            return true
+        }
         switch event.charactersIgnoringModifiers?.lowercased() {
         case "w":
             onClose?()
@@ -129,6 +149,13 @@ final class ResearchPanel: NSPanel {
         }
     }
 
+    /// Whether the first responder holds text the user can edit. Covers the composer,
+    /// a field editor, and an input method mid-composition, whose marked text counts.
+    private var isEditingText: Bool {
+        guard let editor = firstResponder as? NSTextView, editor.isEditable else { return false }
+        return !editor.string.isEmpty
+    }
+
     private func post(_ command: PanelCommand) {
         NotificationCenter.default.post(name: .vervellumPanelCommand, object: nil,
                                         userInfo: ["command": command.rawValue])
@@ -140,7 +167,7 @@ final class ResearchPanel: NSPanel {
 /// A notification rather than a closure per command: the panel's root view is built
 /// once and reused across every summon, so there is no initializer to thread a dozen
 /// callbacks through, and the view owns the state each command needs to change.
-enum PanelCommand: String {
+enum PanelCommand: String, CaseIterable {
     /// Escape. The view decides what it backs out of; see `PanelRootView`.
     case escape
     case submit
@@ -148,6 +175,10 @@ enum PanelCommand: String {
     case toggleHistory
     case openSettings
     case stop
+    /// ⌘↑ — scroll the thread to its first turn.
+    case scrollToTop
+    /// ⌘↓ — scroll the thread to its latest content.
+    case scrollToBottom
 }
 
 extension Notification.Name {
