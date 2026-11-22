@@ -1622,6 +1622,11 @@ final class ResearchRunner: ResearchRunning {
                           reading: String,
                           searchState: inout SearchRoundState) async throws -> Regathered? {
         // A round over a full evidence budget cannot show the answer anything new.
+        // Rank-order page reads live on the first answer's sources. Carry them
+        // into cumulative harvests as well as pages explicitly named by the planner.
+        for source in currentSources where source.wasRead {
+            plannedReads[source.number] = source.fullText
+        }
         let withReads = Self.applyingReads(plannedReads, to: currentSources)
         guard ResearchContext.evidence(from: withReads, limit: evidenceLimit).dropped == 0
         else {
@@ -1716,28 +1721,16 @@ final class ResearchRunner: ResearchRunning {
         // (itself post-trim): the harvested list can grow past what the budget will
         // show the model, and counting that shadow growth would send the turn back
         // for a second answer over evidence identical to the first.
-        let trimmedCount = ResearchContext.evidence(from: harvested,
-                                                    limit: evidenceLimit).entries.count
-        let newSources = trimmedCount - currentSources.count
-        let newTexts = harvested.filter { source in
-            source.wasRead && currentSources.first(where: { $0.number == source.number })?.wasRead != true
-        }.count
-        guard newSources > 0 || newTexts > 0 else {
+        let selection = Self.regatherEvidence(from: harvested, limit: evidenceLimit,
+                                              comparedTo: currentSources)
+        guard selection.hasAdditions else {
             trace.log("Regather round found nothing new; the first answer stands")
             return nil
         }
-
-        // Committed from here: the turn gets the enlarged list, then the second answer.
-        // Snapshot first — a failure below restores rather than half-adopts. The
-        // snapshot is taken after the round's searches were appended on purpose: they
-        // did run, and a restore must not pretend they did not.
+        // Keep the search ledger on rollback: those requests already ran.
         let snapshot = current ?? ResearchTurn(question: question)
-        let (evidence, _, withheld) = ResearchContext.evidence(from: harvested,
-                                                               limit: evidenceLimit)
-        var sources = Array(harvested.prefix(evidence.count))
-        for index in sources.indices where withheld.contains(sources[index].number) {
-            sources[index].fullText = nil
-        }
+        let sources = selection.sources
+        let evidence = selection.entries
         update { turn in
             turn.sources = sources
             turn.pagesRead = sources.filter { $0.wasRead }.count
@@ -1802,11 +1795,28 @@ final class ResearchRunner: ResearchRunning {
             turn.limitations = secondAssessment.limitations
             turn.followups = secondAssessment.followups
             for notice in secondAssessment.notices { turn.addNotice(notice) }
+            if selection.dropped > 0 { turn.addNotice(.evidenceTrimmed) }
+            if !selection.withheld.isEmpty { turn.addNotice(.pageTextTrimmed) }
             turn.addNotice(.answerRegathered)
         }
-        trace.log("Regather round added \(newSources) source(s), \(newTexts) page text(s)")
+        trace.log("Regather round adopted additional evidence")
         return Regathered(answer: second, sources: sources,
                           evidence: evidence, assessment: secondAssessment)
+    }
+
+    /// Count a page as a reason to answer again only if its text will be in
+    /// the answer payload. The source list and the decision share one budget pass.
+    static func regatherEvidence(from harvested: [Source], limit: Int, comparedTo previous: [Source])
+        -> (entries: [[String: Any]], sources: [Source], hasAdditions: Bool, dropped: Int, withheld: Set<Int>) {
+        let (entries, dropped, withheld) = ResearchContext.evidence(from: harvested, limit: limit)
+        var sources = Array(harvested.prefix(entries.count))
+        for index in sources.indices where withheld.contains(sources[index].number) {
+            sources[index].fullText = nil
+        }
+        let previousReads = Set(previous.filter { $0.wasRead }.map(\.number))
+        let hasAdditions = sources.count > previous.count
+            || sources.contains { $0.wasRead && !previousReads.contains($0.number) }
+        return (entries, sources, hasAdditions, dropped, withheld)
     }
 
     /// Streams every answer, including direct turns and a regather round's second pass.
