@@ -192,7 +192,8 @@ enum TurnNotice: String, Codable, Equatable {
     /// Some retrieved sources did not fit the evidence budget and were never shown to
     /// the model.
     case evidenceTrimmed
-    /// The model cited a source number that does not exist.
+    /// The model cited a source number that does not exist, or wrote a citation that
+    /// cannot be read.
     case invalidCitation
     /// The model wrote a direct destination despite the no-link rule. The
     /// raw name predates bare-domain and Markdown-link detection and remains stable so
@@ -291,7 +292,8 @@ enum TurnNotice: String, Codable, Equatable {
             return "Some sources were found but not shown to the model, because the "
                 + "evidence would not fit its context. The answer could not have used them."
         case .invalidCitation:
-            return "The model referred to a source number that does not exist. Those references were left as plain text."
+            return "The model wrote a citation that does not match the source list. "
+                + "Anything that matched no source was not linked."
         case .literalURL:
             return "The model wrote a direct link despite the no-link rule. Treat it as unverified."
         case .assessmentLinkDropped:
@@ -663,7 +665,9 @@ struct ResearchTurn: Codable, Identifiable, Equatable {
     /// invented reference would put a warning on every answer.
     mutating func applyCitationValidation(sourceCount: Int) {
         let validation = CitationValidator.validate(answer: answer, sourceCount: sourceCount)
-        if !validation.outOfRangeCitations.isEmpty { addNotice(.invalidCitation) }
+        if !validation.outOfRangeCitations.isEmpty || !validation.invalidCitationGroups.isEmpty {
+            addNotice(.invalidCitation)
+        }
         if !validation.forbiddenLinks.isEmpty { addNotice(.literalURL) }
     }
 
