@@ -21,8 +21,13 @@ struct HistoryView: View {
     var onClose: () -> Void
 
     @State private var query = ""
+    @State private var matcher: HistoryMatcher?
+    @State private var searchTask: Task<Void, Never>?
+    @State private var matchingIDs: Set<UUID>?
+    @State private var activeQuery = ""
+    @State private var refreshPending = false
 
-    private var results: [ResearchThread] { store.library.search(query) }
+    private var needle: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,6 +37,47 @@ struct HistoryView: View {
                 emptyState
             } else {
                 list
+            }
+        }
+        .onReceive(store.$library) { search($0) }
+        .onChange(of: query) { search(store.library) }
+        .onDisappear {
+            searchTask?.cancel()
+            searchTask = nil
+            refreshPending = false
+            matcher = nil
+        }
+    }
+
+    private func search(_ library: ThreadLibrary) {
+        let text = needle
+        if activeQuery != text {
+            searchTask?.cancel()
+            searchTask = nil
+            refreshPending = false
+            activeQuery = text
+            matchingIDs = nil
+            // A different query cannot reuse previous matches.
+            matcher = nil
+        }
+        guard !text.isEmpty else { return }
+        // Keep at most one refresh waiting. A continuously streaming thread can
+        // publish faster than a complete search, so restarting each pass could
+        // postpone the first results until the stream ends.
+        if searchTask != nil {
+            refreshPending = true
+            return
+        }
+        let worker = matcher ?? HistoryMatcher(needle: text)
+        matcher = worker
+        searchTask = Task { @MainActor in
+            guard let matches = try? await worker.matches(in: library),
+                  !Task.isCancelled else { return }
+            if matchingIDs != matches { matchingIDs = matches }
+            searchTask = nil
+            if refreshPending {
+                refreshPending = false
+                search(store.library)
             }
         }
     }
@@ -74,7 +120,14 @@ struct HistoryView: View {
     }
 
     private var list: some View {
-        ScrollView {
+        // Resolve IDs against the live rows. A removed thread cannot be reopened
+        // from a worker snapshot, even during a background refresh.
+        let unfiltered = needle.isEmpty
+        let pending = !unfiltered && (matchingIDs == nil || activeQuery != needle)
+        let results = unfiltered ? store.library.threads : store.library.threads.filter {
+            !pending && matchingIDs?.contains($0.id) == true
+        }
+        return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(results) { thread in
                     HistoryRow(thread: thread,
@@ -83,7 +136,7 @@ struct HistoryView: View {
                                onDelete: { onDelete(thread) })
                 }
                 if results.isEmpty {
-                    Text("Nothing matches “\(query)”.")
+                    Text(pending ? "Searching history…" : "Nothing matches “\(query)”.")
                         .font(PanelTheme.Font.caption(textScale))
                         .foregroundStyle(PanelTheme.Palette.tertiaryText)
                         .padding(PanelTheme.Space.large)
