@@ -56,6 +56,17 @@ final class TranscriptFormatterTests: XCTestCase {
         XCTAssertLessThan(draftAt, claimsAt)
     }
 
+    func testIncludesSourcesCitedOnlyInTheExportedDraft() {
+        var subject = turn()
+        subject.sources.append(Source(number: 4, url: "https://unused.example.com",
+                                      title: "Unused", snippet: ""))
+        subject.draftAnswer = "Earlier evidence [3, 1]. Code `items[4]`. Unknown [99]."
+        let text = subject.transcript
+        XCTAssertTrue(text.contains("[3] Three — https://three.example.com"))
+        XCTAssertEqual(text.components(separatedBy: "[1] One —").count, 2)
+        XCTAssertFalse(text.contains("unused.example.com"))
+    }
+
     /// A dump of everything the search returned misrepresents what the answer rests on.
     func testOmitsUncitedSources() {
         XCTAssertFalse(TranscriptFormatter.plainText(turn()).contains("three.example.com"))
