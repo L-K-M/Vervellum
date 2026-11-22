@@ -115,6 +115,10 @@ struct HeaderButton: View {
             // the container, not the button, so taps in the ring would never reach
             // the action.
             .padding(Self.hitPadding)
+            // Inside the label and after the padding. `.plain` hit-tests the label's
+            // content, so without this only the glyph's own pixels take a click, and
+            // a content shape on the Button itself does not reach into the label.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         // The button's frame is now the expanded 26×26, so hit testing, hover and
@@ -125,7 +129,6 @@ struct HeaderButton: View {
         // without overlapping. Do not remove the inverse padding (spacing would grow)
         // and do not move the hit padding outside the Button (the container would
         // grow, not the button, and taps in the ring would not reach the action).
-        .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .help(help)
         .accessibilityLabel(help)
