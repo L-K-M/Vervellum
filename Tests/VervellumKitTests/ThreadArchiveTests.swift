@@ -656,17 +656,19 @@ final class ThreadArchiveTests: XCTestCase {
         }
     }
 
-    /// Fails directory creation once (a failed write) and refuses removals (a
-    /// failed erase), standing in for a folder that became read-only.
+    /// Refuses directory creation (a failed write) and removals (a failed
+    /// erase), standing in for a folder that became read-only. The write
+    /// failure is sticky: `flush()` retries a retained snapshot, so a one-shot
+    /// failure would be consumed by the first attempt and the retry would
+    /// succeed, making the test timing-dependent across platforms.
     private final class CompoundFileManager: FileManager {
-        var createDirectoryFailures = 1
+        var failsCreateDirectory = false
         var deniesRemoval = true
 
         override func createDirectory(at URL: URL,
                                       withIntermediateDirectories: Bool,
                                       attributes: [FileAttributeKey: Any]?) throws {
-            if createDirectoryFailures > 0 {
-                createDirectoryFailures -= 1
+            if failsCreateDirectory {
                 throw CocoaError(.fileWriteNoPermission)
             }
             try super.createDirectory(at: URL,
@@ -771,7 +773,6 @@ final class ThreadArchiveTests: XCTestCase {
     /// document back on disk: "history off means the bytes are gone".
     func testRetryingAfterAnErasureDoesNotResurrectTheDocument() throws {
         let manager = CompoundFileManager()
-        manager.createDirectoryFailures = 0
         let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
         store.save(thread("one"))
         store.flush()
@@ -779,7 +780,7 @@ final class ThreadArchiveTests: XCTestCase {
 
         // The second write fails after the snapshot is queued, so a retry has
         // something to resurrect — and the old document is still on disk.
-        manager.createDirectoryFailures = 1
+        manager.failsCreateDirectory = true
         store.save(thread("two"))
         store.flush()
         XCTAssertNotNil(store.storageFailures().save, "the second write should fail")
@@ -788,7 +789,7 @@ final class ThreadArchiveTests: XCTestCase {
         XCTAssertNotNil(store.eraseFailure,
                         "the erase should fail while the folder is read-only")
 
-        manager.createDirectoryFailures = 0
+        manager.failsCreateDirectory = false
         manager.deniesRemoval = false
         store.retryErase()
         store.retrySave()
@@ -801,11 +802,10 @@ final class ThreadArchiveTests: XCTestCase {
     /// to a later retry.
     func testAnErasureClearsTheWriteWarning() throws {
         let manager = CompoundFileManager()
-        manager.createDirectoryFailures = 0
         let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
         store.save(thread("one"))
         store.flush()
-        manager.createDirectoryFailures = 1
+        manager.failsCreateDirectory = true
         store.save(thread("two"))
         store.flush()
         XCTAssertNotNil(store.storageFailures().save)
