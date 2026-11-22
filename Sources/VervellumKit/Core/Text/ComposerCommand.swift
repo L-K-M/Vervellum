@@ -497,7 +497,7 @@ enum ComposerCommand: Equatable {
             stopKey: "⌘.",
             settingsKey: "⌘,",
             windowCloseKey: "⌘W",
-            scrollKeys: "`⌘↑` / `⌘↓` — top / bottom of the thread",
+            scrollKeys: "`⌘↑` / `⌘↓` — top / bottom of the thread, when the composer is empty",
             hiddenCommands: [],
             providersGuidance: "Add and remove providers in Settings ▸ Providers.")
 

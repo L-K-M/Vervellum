@@ -269,9 +269,6 @@ struct PanelRootView: View {
                 // the resulting view-graph churn can occupy the main loop forever.
                 // Finished turns still skip body updates through `.equatable()` below.
                 VStack(alignment: .leading, spacing: PanelTheme.Space.section) {
-                    // The top anchor, so ⌘↑ has somewhere to land: the bottom anchor
-                    // exists because the last turn's own id points at its *top*.
-                    Color.clear.frame(height: 1).id(Self.topAnchor)
                     if engine.thread.isEmpty && notice == nil {
                         EmptyStateView(configurationProblems: configurationProblems,
                                        searches: preferences.researchLevel.searches,
@@ -305,6 +302,9 @@ struct PanelRootView: View {
                 }
                 .padding(.horizontal, PanelTheme.Space.gutter)
                 .padding(.vertical, PanelTheme.Space.large)
+                // ⌘↑'s anchor is the padded content itself. A spacer row at the top
+                // would push every thread down by the stack's spacing.
+                .id(Self.topAnchor)
                 // Observe the full scroll content, including its bottom anchor.
                 .background(BottomSentinel { pinned in isPinnedToBottom = pinned })
             }
@@ -355,7 +355,7 @@ struct PanelRootView: View {
     /// bottom, exactly as scrolling up by hand does.
     private func scrollToEdge(top: Bool) {
         guard !showsHistory, let proxy = scrollProxyBox.proxy else { return }
-        withAnimation(PanelTheme.Motion.disclosure) {
+        withAnimation(PanelTheme.Motion.disclosureAnimation(reduceMotion)) {
             proxy.scrollTo(top ? Self.topAnchor : Self.bottomAnchor,
                            anchor: top ? .top : .bottom)
         }
