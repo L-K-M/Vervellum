@@ -19,6 +19,8 @@ struct SourcesView: View {
 
     let sources: [Source]
     let citedNumbers: Set<Int>
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     @Binding var isExpanded: Bool
     @Binding var showsAll: Bool
 
@@ -121,7 +123,8 @@ struct SourcesView: View {
     }
 }
 
-/// One source: number, title, domain, date, and what the model actually saw of it.
+/// One source: number, title, domain, date, and a way to read what the model
+/// actually saw of it.
 ///
 /// The single most misleading thing a research tool can do is present a citation as
 /// though the page had been read. So each row says which it was — the page, or a search
@@ -129,17 +132,43 @@ struct SourcesView: View {
 /// runner clears when a page was fetched but its text did not fit the model's context.
 /// The row therefore describes the evidence the answer had, never the request that was
 /// made on its behalf.
+///
+/// Separate buttons keep opening a page and inspecting its evidence independently
+/// reachable by keyboard. A popover leaves later rows in place under the pointer.
 struct SourceRow: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.panelTextScale) private var textScale
 
     let source: Source
     var isCited: Bool
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
+    /// What the row's click does. Injected for the same reason `FindingsView`'s
+    /// action is: a hosted test cannot let a real click reach `NSWorkspace`.
+    var onOpen: (Source) -> Void = { source in
+        guard let url = source.browserURL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
     @State private var isHovering = false
+    @State private var detailsHovering = false
+    @State private var showsDetails = false
+    @FocusState private var focus: RowFocus?
+
+    private enum RowFocus { case open, details }
 
     var body: some View {
+        HStack(alignment: .top, spacing: PanelTheme.Space.tight) {
+            openButton
+            detailsButton
+        }
+    }
+
+    /// The row itself: still the browser action, still the only way the page is
+    /// reached from here.
+    private var openButton: some View {
         Button {
-            guard let url = SourceHarvester.openableURL(source.url) else { return }
-            NSWorkspace.shared.open(url)
+            onOpen(source)
         } label: {
             HStack(alignment: .top, spacing: PanelTheme.Space.small) {
                 Text("\(source.number)")
@@ -167,32 +196,21 @@ struct SourceRow: View {
                                 .foregroundStyle(PanelTheme.Palette.tertiaryText)
                         }
                         if source.wasRead {
-                            // Shown on the row rather than only on hover: it changes what
-                            // a citation to this source is worth, which is not a detail.
+                            // Shown on the row rather than only on the card: it changes
+                            // what a citation to this source is worth, which is not a
+                            // detail.
                             Text("·").foregroundStyle(PanelTheme.Palette.tertiaryText)
                             Label("page read", systemImage: "doc.text")
                                 .font(PanelTheme.Font.at(10, textScale))
                                 .foregroundStyle(PanelTheme.Palette.verdict(.supported))
                         }
                     }
-                    if isHovering, !source.snippet.isEmpty {
-                        Text(source.snippet)
-                            .font(PanelTheme.Font.at(10.5, textScale))
-                            .foregroundStyle(PanelTheme.Palette.secondaryText)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 2)
-                        Text(source.wasRead
-                             ? "Search summary. The answer also had this page's own text."
-                             : "Search summary — not the full page")
-                            .font(PanelTheme.Font.at(9.5, textScale))
-                            .foregroundStyle(PanelTheme.Palette.tertiaryText)
-                    }
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "arrow.up.forward.square")
                     .font(PanelTheme.Font.at(9, textScale))
                     .foregroundStyle(PanelTheme.Palette.tertiaryText)
-                    .opacity(isHovering ? 1 : 0)
+                    .opacity(isHovering || focus == .open ? 1 : 0)
                     .padding(.top, 2)
             }
             .padding(.vertical, PanelTheme.Space.tight)
@@ -202,11 +220,60 @@ struct SourceRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(PanelTheme.Motion.disclosure) { isHovering = hovering }
-        }
+        .focused($focus, equals: .open)
+        .animation(PanelTheme.Motion.disclosureAnimation(reduceMotion), value: isHovering || focus == .open)
+        .onHover { isHovering = $0 }
         .help(source.url)
         .accessibilityLabel("Source \(source.number), \(source.title), \(source.domain)"
+                            + (source.publishedAt.map { ", \($0)" } ?? "")
                             + (source.wasRead ? ", page read" : ", search summary only"))
+        // The summary is spoken here so the card is a second way to the same facts,
+        // not the only one. An empty summary leaves the row with no value at all,
+        // which is what an unset value already means.
+        .accessibilityValue(source.snippet)
+    }
+
+    /// Always on screen rather than revealed by the pointer: a control that only
+    /// exists under a resting hand is one a keyboard cannot reach.
+    private var detailsButton: some View {
+        Button {
+            showsDetails.toggle()
+        } label: {
+            Label("Details", systemImage: "info.circle")
+                .labelStyle(.iconOnly)
+                .font(PanelTheme.Font.at(10.5, textScale))
+                .foregroundStyle(detailsAfforded
+                                 ? PanelTheme.Palette.primaryText
+                                 : PanelTheme.Palette.tertiaryText)
+                .frame(width: 22, height: 22)
+                .background(detailsAfforded ? PanelTheme.Palette.chipFill : .clear,
+                            in: RoundedRectangle(cornerRadius: PanelTheme.Radius.chip,
+                                                 style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($focus, equals: .details)
+        .animation(PanelTheme.Motion.disclosureAnimation(reduceMotion), value: detailsAfforded)
+        .onHover { detailsHovering = $0 }
+        .padding(.top, PanelTheme.Space.tight)
+        .help("Show the source's summary")
+        .accessibilityLabel("Details for source \(source.number)")
+        .accessibilityHint("Shows the summary and whether the answer had the page itself")
+        .popover(isPresented: $showsDetails) {
+            let preview = SourcePreview(source: source, snippetLineLimit: nil)
+            // Long summaries at large text sizes can exceed a short display.
+            ViewThatFits(in: .vertical) {
+                preview.fixedSize(horizontal: false, vertical: true)
+                ScrollView { preview }
+            }
+            .frame(width: SourcePreview.width)
+            .frame(maxHeight: 360)
+        }
+    }
+
+    /// Whether the details button is showing its affordance — under the pointer,
+    /// under keyboard focus, or while its card is open.
+    private var detailsAfforded: Bool {
+        detailsHovering || focus == .details || showsDetails
     }
 }
