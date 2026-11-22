@@ -8,7 +8,8 @@ final class TurnViewThemeTests: XCTestCase {
 
     private func makeView(palette: PanelPalette) -> TurnView {
         TurnView(turn: turn, showsProcessTrail: true, palette: palette,
-                 onRetry: {}, onAskFollowup: { _ in })
+                 onRetry: {}, onAskFollowup: { _ in },
+                 attachmentData: { _ in nil })
     }
 
     /// A theme change is a global write (`PanelTheme.palette`), not an input any parent

@@ -19,6 +19,8 @@ struct AttachmentPreview: View {
 
     let attachment: Attachment
     let data: Data?
+    /// An input, so an open preview restyles when the theme changes.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.small) {
@@ -39,7 +41,7 @@ struct AttachmentPreview: View {
 
             content
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .padding(PanelTheme.Space.medium)
         .frame(width: 340, alignment: .leading)
     }

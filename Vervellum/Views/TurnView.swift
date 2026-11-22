@@ -181,23 +181,45 @@ struct TurnView: View, Equatable {
                         // and the middle truncation are what the `Label` was giving; the
                         // selection is why this is worth the three extra lines.
                         HStack(spacing: PanelTheme.Space.tight) {
-                            Image(systemName: attachment.kind == .image ? "photo" : "doc.text")
-                                .font(PanelTheme.Font.caption(textScale))
-                                .foregroundStyle(PanelTheme.Palette.tertiaryText)
-                            // And selectable, like the question above it. Hover shows
-                            // the truncated part; only selection gets it into a search
-                            // box or a follow-up question.
-                            SelectableText(text: attachment.name,
-                                           font: PanelTheme.NativeFont.caption(textScale),
-                                           color: PanelTheme.NativePalette.tertiaryText,
-                                           // The name is the whole record of what the
-                                           // answer was looking at, and middle truncation
-                                           // eats the timestamp that tells one screenshot
-                                           // from the next. Kept anyway — both ends carry
-                                           // meaning too, and hover and selection below
-                                           // are what recover the part it hides.
-                                           layout: .singleLine(.byTruncatingMiddle))
-                            Spacer(minLength: 0)
+                            HStack(spacing: PanelTheme.Space.tight) {
+                                Image(systemName: attachment.kind == .image ? "photo" : "doc.text")
+                                    .font(PanelTheme.Font.caption(textScale))
+                                    .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                                // And selectable, like the question above it. Hover shows
+                                // the truncated part; only selection gets it into a search
+                                // box or a follow-up question.
+                                SelectableText(text: attachment.name,
+                                               font: PanelTheme.NativeFont.caption(textScale),
+                                               color: PanelTheme.NativePalette.tertiaryText,
+                                               // The name is the whole record of what the
+                                               // answer was looking at, and middle truncation
+                                               // eats the timestamp that tells one screenshot
+                                               // from the next. Kept anyway — both ends carry
+                                               // meaning too, and hover and selection below
+                                               // are what recover the part it hides.
+                                               layout: .singleLine(.byTruncatingMiddle))
+                                Spacer(minLength: 0)
+                            }
+                            // Named as an attachment, not merely named. The symbol is
+                            // decorative to VoiceOver, so this row read out as a bare
+                            // file name in the middle of a transcript — which is the
+                            // non-sequitur the paragraph above keeps out of the reading
+                            // for anyone who can see the icon. The label is read whole,
+                            // so the middle truncation does not reach it either.
+                            //
+                            // `.ignore` because the name is two views rather than one:
+                            // without it the symbol and the text would be read as separate
+                            // elements and the label below would name neither. It stops short
+                            // of the button, which has to stay an element of its own.
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Attached "
+                                + (attachment.kind == .image ? "image" : "file")
+                                + ": " + attachment.name)
+                            // Hover has the whole of it, truncation or not. Applied after the
+                            // accessibility modifiers rather than before: `.help` sets a help
+                            // trait as well as a tooltip, and the element it would have landed
+                            // on above is the one `.ignore` discards.
+                            .help(attachment.name)
                             // The bytes are still on disk; the name need not be all
                             // there is to look at. Read once on tap, so SwiftUI
                             // updates while the popover is open do not hit disk again.
@@ -225,25 +247,6 @@ struct TurnView: View, Equatable {
                             AttachmentPreview(attachment: attachment,
                                               data: previewedData)
                         }
-                        // Named as an attachment, not merely named. The symbol is
-                        // decorative to VoiceOver, so this row read out as a bare
-                        // file name in the middle of a transcript — which is the
-                        // non-sequitur the paragraph above keeps out of the reading
-                        // for anyone who can see the icon. The label is read whole,
-                        // so the middle truncation does not reach it either.
-                        //
-                        // `.ignore` because the row is now two views rather than one:
-                        // without it the symbol and the text would be read as separate
-                        // elements and the label below would name neither.
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Attached "
-                            + (attachment.kind == .image ? "image" : "file")
-                            + ": " + attachment.name)
-                        // Hover has the whole of it, truncation or not. Applied after the
-                        // accessibility modifiers rather than before: `.help` sets a help
-                        // trait as well as a tooltip, and the element it would have landed
-                        // on above is the one `.ignore` discards.
-                        .help(attachment.name)
                     }
                 }
             }
