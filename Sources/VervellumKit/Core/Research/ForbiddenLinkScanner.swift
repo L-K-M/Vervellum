@@ -37,7 +37,13 @@ enum ForbiddenLinkScanner {
 
         collect(absoluteURLRegex, in: text, range: fullRange, into: &candidates) { raw in
             let candidate = trimmingLinkPunctuation(raw)
-            return SourceHarvester.normalized(candidate, trimmingPunctuation: false)
+            // Source admission rejects URL userinfo, but model-written destinations
+            // must still be flagged even when they cannot become numbered sources.
+            guard let components = URLComponents(string: candidate),
+                  let scheme = components.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https",
+                  let host = components.host, !host.isEmpty else { return nil }
+            return candidate
         }
         collect(hierarchicalURIRegex, in: text, range: fullRange, into: &candidates) {
             trimmingLinkPunctuation($0)
