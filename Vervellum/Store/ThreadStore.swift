@@ -164,6 +164,12 @@ final class ThreadStore: ObservableObject {
         } else if attachmentEraseFailure != nil {
             eraseAttachments()
         }
+        // A retryErase that just succeeded means the thread file went in this
+        // same tap: reclaim the attachment bytes here rather than leaving them
+        // on disk until a second Try Again tap.
+        if erased && attachmentEraseFailure != nil {
+            eraseAttachments()
+        }
         // A successful erase removed the document, so a retained save snapshot
         // must not be rewritten over it — "history off means the bytes are gone".
         // The archive clears its own pending snapshot on erase; this is the

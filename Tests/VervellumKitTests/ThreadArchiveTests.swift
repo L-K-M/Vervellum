@@ -837,6 +837,9 @@ final class ThreadArchiveTests: XCTestCase {
         XCTAssertNil(store.storageFailures().save,
                      "the threads themselves were written; only the backup failed")
 
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: fileURL.appendingPathExtension("bak.tmp").path),
+                      "setup: the failed rotation must have left a staging copy")
         manager.deniedPaths.removeAll()
         store.deleteAll()
         XCTAssertNil(store.storageFailures().backup,
