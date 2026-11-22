@@ -453,18 +453,19 @@ final class DirectPageReader: PageReading {
 
     /// Decodes a page's bytes, honouring the charset the response declared.
     ///
-    /// The declaration is acted on where it is decisive. A BOM-less UTF-16 page is
-    /// valid UTF-8 — every second byte is NUL — so a UTF-8-first decode reads it as a
-    /// NUL-filled string; an explicit little- or big-endian declaration is honoured
-    /// before the generic fallback. For the single-byte charsets the order is the
+    /// The declaration is acted on where it is decisive. BOM-less UTF-16 whose text
+    /// is pure ASCII is valid UTF-8 — every second byte is NUL — so a UTF-8-first
+    /// decode reads it as a NUL-filled string (accented UTF-16 is rejected by a
+    /// strict UTF-8 decode); an explicit little- or big-endian declaration is
+    /// honoured before the generic fallback. For the single-byte charsets the order is the
     /// other way: a server that labels UTF-8 as ISO-8859-1 or Windows-1252 is common
     /// enough that a strict UTF-8 decode wins, and a genuine Windows-1252 page is not
     /// valid UTF-8, so it falls through to the declared codec. The `iso-8859-1` and
     /// `latin1` labels are decoded as Windows-1252 as well, because that is what the
     /// WHATWG Encoding Standard — and every browser — does with those labels; the
     /// codecs agree outside `0x80...0x9F`, where a real page carries the euro and the
-    /// smart quotes rather than C1 controls. Latin-1 is the last resort for a page
-    /// that declared nothing, because it cannot fail.
+    /// smart quotes rather than C1 controls. Latin-1 is the last resort — for a page
+    /// that declared nothing, or whose declared codec failed — because it cannot fail.
     static func decode(_ data: Data, contentType: String) -> String? {
         let text: String?
         switch declaredEncoding(contentType) {
@@ -572,6 +573,14 @@ final class DirectPageReader: PageReading {
 
     private static func declaredEncoding(_ contentType: String) -> DeclaredEncoding? {
         guard let marker = contentType.range(of: "charset=", options: .caseInsensitive) else {
+            return nil
+        }
+        // `charset=` must open a parameter; a match inside another token (e.g.
+        // `xcharset=`) is not a declaration.
+        let preceding = contentType[contentType.startIndex..<marker.lowerBound]
+            .reversed()
+            .drop(while: { $0 == " " || $0 == "\t" })
+        guard preceding.isEmpty || preceding.first == ";" else {
             return nil
         }
         let declared = contentType[marker.upperBound...]

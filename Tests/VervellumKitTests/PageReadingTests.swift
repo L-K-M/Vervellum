@@ -615,6 +615,14 @@ final class PageReadingTests: XCTestCase {
                        String(data: data, encoding: .isoLatin1))
     }
 
+    /// `charset=` inside another token is not a declaration.
+    func testACharsetMatchInsideAnotherTokenIsIgnored() {
+        let text = "<p>ok</p>"
+        XCTAssertEqual(DirectPageReader.decode(Data(text.utf8),
+                                              contentType: "text/html; xcharset=utf-16le"),
+                       "<p>ok</p>")
+    }
+
     // MARK: The reader server's reply
 
     /// The published documentation names the endpoint and the tool but not the argument
