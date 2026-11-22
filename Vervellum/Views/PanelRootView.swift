@@ -398,7 +398,7 @@ struct PanelRootView: View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
             if let redactionNote {
                 Label("\(redactionNote) credential-shaped value\(redactionNote == 1 ? "" : "s") "
-                      + "removed from the captured text.",
+                      + "removed from the text.",
                       systemImage: "eye.slash")
                     .font(PanelTheme.Font.caption(textScale))
                     .foregroundStyle(PanelTheme.Palette.verdict(.mixed))
@@ -485,7 +485,12 @@ struct PanelRootView: View {
                              // in Swift carries no defaults — a bare `receive` here is
                              // `(Outcome, Bool) -> Void` and does not fit. This is the
                              // intake gesture, so the default is the one it wants.
-                             onAttach: { receive($0) })
+                             onAttach: { receive($0) },
+                             // The same rule the selection shortcut follows, and the
+                             // same preference: a paste is the other way a key reaches
+                             // the composer without being read.
+                             redactPastedText: preferences.redactSecrets,
+                             onPastedTextRedacted: { redactionNote = $0 })
                     // The composer's height for its content, laid out at the width the
                     // row will actually give it: the measured row width minus what the
                     // send button and its spacing take. Measured rather than derived
