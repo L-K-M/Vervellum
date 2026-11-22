@@ -9,17 +9,27 @@ import XCTest
 final class PanelSheetTests: XCTestCase {
 
     private struct Asking: View {
+        /// One per test: an earlier test's panel is still listening while it fades.
+        let ask: Notification.Name
+        var onDelete: () -> Void = {}
+        @State private var showsHistory = true
         @State private var asks = false
 
         var body: some View {
-            Color.clear
-                .confirmationDialog("Delete this thread?", isPresented: $asks) {
-                    Button("Delete", role: .destructive) {}
+            // As in the panel: History, which owns the dialog, closes as the panel hides.
+            ZStack {
+                if showsHistory {
+                    Color.clear
+                        .confirmationDialog("Delete this thread?", isPresented: $asks) {
+                            Button("Delete", role: .destructive, action: onDelete)
+                        }
                 }
-                .onReceive(NotificationCenter.default.publisher(for: Self.ask)) { _ in asks = true }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: ask)) { _ in asks = true }
+            .onReceive(NotificationCenter.default.publisher(for: .vervellumPanelWillHide)) { _ in
+                showsHistory = false
+            }
         }
-
-        static let ask = Notification.Name("PanelSheetTests.ask")
     }
 
     func testAConfirmationDoesNotDismissThePanel() throws {
@@ -28,14 +38,16 @@ final class PanelSheetTests: XCTestCase {
         defer { SuitePlistCleanup.removeSuite(suite, from: defaults) }
         let preferences = Preferences(defaults: defaults)
         preferences.dismissOnFocusLoss = true
-        let controller = PanelController(preferences: preferences) { AnyView(Asking()) }
+        let ask = Notification.Name(suite)
+        let controller = PanelController(preferences: preferences) { AnyView(Asking(ask: ask)) }
+        let windowsBefore = NSApp.windows
         controller.show()
         defer { controller.hide(restoringActivation: false) }
         settle()
         guard controller.isOpen else { return XCTFail("the panel must open") }
-        let panel = try XCTUnwrap(NSApp.windows.first { $0 is ResearchPanel && $0.isVisible && $0.alphaValue > 0 })
+        let panel = try XCTUnwrap(panel(openedSince: windowsBefore))
 
-        NotificationCenter.default.post(name: Asking.ask, object: nil)
+        NotificationCenter.default.post(name: ask, object: nil)
         for _ in 0..<20 where panel.attachedSheet == nil { settle() }
         let sheet = try XCTUnwrap(panel.attachedSheet, "the confirmation must appear")
         defer { if panel.attachedSheet === sheet { panel.endSheet(sheet) } }
@@ -49,11 +61,16 @@ final class PanelSheetTests: XCTestCase {
         let suite = "VervellumPanelSheetTest-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { SuitePlistCleanup.removeSuite(suite, from: defaults) }
-        let controller = PanelController(preferences: Preferences(defaults: defaults)) { AnyView(Asking()) }
+        let ask = Notification.Name(suite)
+        var deletes = 0
+        let controller = PanelController(preferences: Preferences(defaults: defaults)) {
+            AnyView(Asking(ask: ask, onDelete: { deletes += 1 }))
+        }
+        let windowsBefore = NSApp.windows
         controller.show()
         settle()
-        let panel = try XCTUnwrap(NSApp.windows.first { $0 is ResearchPanel && $0.isVisible && $0.alphaValue > 0 })
-        NotificationCenter.default.post(name: Asking.ask, object: nil)
+        let panel = try XCTUnwrap(panel(openedSince: windowsBefore))
+        NotificationCenter.default.post(name: ask, object: nil)
         for _ in 0..<20 where panel.attachedSheet == nil { settle() }
         XCTAssertNotNil(panel.attachedSheet, "the confirmation must appear")
 
@@ -61,6 +78,16 @@ final class PanelSheetTests: XCTestCase {
         for _ in 0..<20 where panel.attachedSheet != nil { settle() }
         XCTAssertFalse(controller.isOpen)
         XCTAssertNil(panel.attachedSheet, "a hidden panel must not keep a question waiting")
+        XCTAssertEqual(deletes, 0, "dismissing the panel must not answer Delete")
+        for _ in 0..<20 where panel.isVisible { settle() }
+        XCTAssertFalse(panel.isVisible, "the panel must still leave the screen")
+    }
+
+    /// The window this test opened, not one an earlier test is still fading out.
+    private func panel(openedSince windows: [NSWindow]) -> NSWindow? {
+        NSApp.windows.first { window in
+            window is ResearchPanel && !windows.contains { $0 === window }
+        }
     }
 
     private func settle() {

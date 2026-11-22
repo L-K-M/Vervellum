@@ -183,13 +183,6 @@ final class PanelController {
         isPreviewing = false
         NotificationCenter.default.post(name: .vervellumPanelWillHide, object: nil)
         removeObservers()
-        // An unanswered confirmation leaves with the panel, as a cancel. Left attached,
-        // it would still be waiting over whatever the next summon shows.
-        // Ordered out as well: ending alone leaves the alert attached on macOS 26.
-        if let sheet = panel.attachedSheet {
-            panel.endSheet(sheet, returnCode: .cancel)
-            sheet.orderOut(nil)
-        }
 
         let side = preferences.panelSide
         let target = PanelPlacement.entryFrame(for: panel.frame, side: side)
