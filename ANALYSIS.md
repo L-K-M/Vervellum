@@ -3418,7 +3418,7 @@ Effort: M.
 
 ## Follow-ups from the 22 November merge pass
 
-### M01 · Sweep attachments only after the removing save succeeds
+### F01 · Sweep attachments only after the removing save succeeds
 
 Bugs — important
 
@@ -3429,7 +3429,7 @@ read-only archive or a failed erase. Found by reading; not reproduced.
 
 Where: ThreadStore.sweepAttachments, ThreadArchive. Effort: M.
 
-### M02 · Report failed test-plist cleanup
+### F02 · Report failed test-plist cleanup
 
 General issues — nice-to-have
 
@@ -3439,7 +3439,7 @@ force-unwraps values that are unset when setUp fails.
 Where: VervellumTests/SuitePlistCleanup.swift,
 VervellumTests/PreferencesTests.swift. Effort: S.
 
-### M03 · Separate critical Linux notices from contradicted verdicts
+### F03 · Separate critical Linux notices from contradicted verdicts
 
 Visual issues and layout problems — nice-to-have
 
@@ -3448,7 +3448,7 @@ verdict.
 
 Where: Sources/VervellumKit/Linux/PangoMarkup.swift. Effort: S.
 
-### M04 · Export citations that appear only in finding prose
+### F04 · Export citations that appear only in finding prose
 
 Bugs — nice-to-have
 
@@ -3457,7 +3457,7 @@ Found while reviewing #203.
 
 Where: TranscriptFormatter. Effort: S.
 
-### M05 · Name the review workflow correctly in CICD.md
+### F05 · Name the review workflow correctly in CICD.md
 
 General issues — nice-to-have
 
@@ -3466,7 +3466,7 @@ CICD.md lists `.github/workflows/glm-review.yml`; the file is
 
 Where: CICD.md. Effort: S.
 
-### M06 · Redact URL passwords that have no user name
+### F06 · Redact URL passwords that have no user name
 
 Bugs — important
 
@@ -3475,7 +3475,7 @@ not redacted.
 
 Where: Sources/VervellumKit/Core/Platform/SecretRedactor.swift. Effort: S.
 
-### M07 · Share the scheme and host predicate
+### F07 · Share the scheme and host predicate
 
 General issues — nice-to-have
 
@@ -3485,7 +3485,7 @@ explicit userinfo rule and correct the comment.
 
 Where: ForbiddenLinkScanner, SourceHarvester. Effort: S.
 
-### M08 · Clear first-answer warnings after a clean regather
+### F08 · Clear first-answer warnings after a clean regather
 
 Bugs — nice-to-have
 
@@ -3494,7 +3494,7 @@ regathered answer replaces it. Found by reading; not reproduced.
 
 Where: ResearchRunner.regather. Effort: S.
 
-### M09 · Run the pending hands-on checks
+### F09 · Run the pending hands-on checks
 
 General issues — important
 
@@ -3503,7 +3503,7 @@ release-workflow, Wayland or real-clipboard check.
 
 Where: PLAN.md verification gates. Effort: M.
 
-### M10 · Stop the serial Linux test run crashing without a display
+### F10 · Stop the serial Linux test run crashing without a display
 
 Bugs — nice-to-have
 
@@ -3513,7 +3513,7 @@ and Xvfb steps pass.
 
 Where: Tests/VervellumKitTests/LinuxPanelLifecycleTests.swift. Effort: S.
 
-### M11 · Report citation markers with broken separators
+### F11 · Report citation markers with broken separators
 
 Bugs — nice-to-have
 
@@ -3522,7 +3522,7 @@ reported as invalid, so a revision containing one still counts as clean.
 
 Where: CitationValidator. Effort: S.
 
-### M12 · Enforce owner-only permissions on an unchanged save
+### F12 · Enforce owner-only permissions on an unchanged save
 
 Bugs — nice-to-have
 
@@ -3531,7 +3531,7 @@ mode 0600. Found by reading; not reproduced.
 
 Where: ThreadArchive.writeNow. Effort: S.
 
-### M13 · Recover from a staged backup
+### F13 · Recover from a staged backup
 
 Bugs — nice-to-have
 
@@ -3541,7 +3541,7 @@ reproduced.
 
 Where: ThreadArchive.load. Effort: S.
 
-### M14 · Define thread-scroll keys while History is open
+### F14 · Define thread-scroll keys while History is open
 
 UX and accessibility — nice-to-have
 
@@ -3550,7 +3550,7 @@ consumed and scroll nothing, although help presents them as thread shortcuts.
 
 Where: PanelRootView.scrollToEdge, ResearchPanel. Effort: S.
 
-### M15 · Validate citations inside the renderer's block boundaries
+### F15 · Validate citations inside the renderer's block boundaries
 
 Bugs — nice-to-have
 
@@ -3559,7 +3559,7 @@ cited in document validation but renders as literal text with no chip.
 
 Where: CitationValidator, CitationMask, MarkdownParser. Effort: M.
 
-### M16 · Rescue UTF-8 pages mislabelled UTF-16
+### F16 · Rescue UTF-8 pages mislabelled UTF-16
 
 Bugs — nice-to-have
 
