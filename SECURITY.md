@@ -251,10 +251,12 @@ vouch for, and it is handled on those terms:
   that no longer decodes, or a picture the provider refused raise a notice on the turn
   rather than leaving an answer that ignores a file for no visible reason.
 
-### Captured text
+### Captured and pasted text
 
-The optional "research the selection" shortcut reads the frontmost app's selection
-through the Accessibility API. Before that text reaches the composer it is scanned for
+On macOS, two kinds of text are scanned before they reach the composer: the selection
+that the optional "research the selection" shortcut reads through the Accessibility
+API, and text pasted into the composer. One setting controls both, and it is on by
+default even when the shortcut is off. They are scanned for
 credential-shaped values — vendor-prefixed keys, `Authorization` headers, `KEY=value`
 lines, private-key blocks, JSON Web Tokens, URLs with embedded credentials — which are
 replaced, with a visible count of how many.
@@ -264,6 +266,9 @@ replaced, with a visible count of how many.
 - **Redaction is a safety net, not a guarantee.** A secret with no recognisable shape —
   a dictionary-word password, a customer name, an internal hostname — passes straight
   through. Read what you are about to send.
+- **Only the selection and pastes are scanned.** Text you type or drop into the
+  composer, the contents of attached files and images, and anything pasted on Linux
+  are not.
 - **The providers see your questions.** Vervellum has no way to make a remote model
   endpoint or a remote search server forget what was sent to it. Their handling is
   governed by their own policies.

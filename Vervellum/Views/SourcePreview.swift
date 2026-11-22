@@ -19,6 +19,8 @@ struct SourcePreview: View {
     @Environment(\.panelTextScale) private var textScale
 
     let source: Source
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     /// How much of the search summary to show. Four lines identifies the page from
     /// a chip hover; the details card is what a reader opens *to read it*, so it

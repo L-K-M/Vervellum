@@ -19,6 +19,8 @@ struct SourcesView: View {
 
     let sources: [Source]
     let citedNumbers: Set<Int>
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     @Binding var isExpanded: Bool
     @Binding var showsAll: Bool
 
@@ -139,6 +141,8 @@ struct SourceRow: View {
 
     let source: Source
     var isCited: Bool
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
     /// What the row's click does. Injected for the same reason `FindingsView`'s
     /// action is: a hosted test cannot let a real click reach `NSWorkspace`.
     var onOpen: (Source) -> Void = { source in
