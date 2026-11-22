@@ -22,4 +22,17 @@ final class PanelMotionTests: XCTestCase {
                        PanelTheme.Motion.disclosure,
                        "and without the setting it is the panel's ordinary disclosure")
     }
+
+    /// The streaming caret must not blink under Reduce Motion. It sits in the middle
+    /// of the panel for the whole gap between the last search and the first token, so
+    /// an edit that animated it there would put motion in front of exactly the readers
+    /// who asked for none — and no other test would notice.
+    func testReduceMotionHoldsTheStreamingCaretSteady() {
+        XCTAssertEqual(StreamingCaret.opacity(isBright: true, reduceMotion: true), 0.6)
+        XCTAssertEqual(StreamingCaret.opacity(isBright: false, reduceMotion: true), 0.6,
+                       "no tick changes the opacity: a blink is a blink at any phase")
+        XCTAssertEqual(StreamingCaret.opacity(isBright: true, reduceMotion: false), 1)
+        XCTAssertEqual(StreamingCaret.opacity(isBright: false, reduceMotion: false), 0.25,
+                       "and without the setting the caret still blinks")
+    }
 }
