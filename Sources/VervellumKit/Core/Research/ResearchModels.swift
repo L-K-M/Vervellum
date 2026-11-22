@@ -26,6 +26,12 @@ struct Source: Codable, Identifiable, Equatable {
     /// Whether the answer could have been written from the page rather than a summary.
     var wasRead: Bool { !(fullText ?? "").isEmpty }
 
+    /// Recheck the source at activation time because a reopened thread comes
+    /// from the archive, independently of validation when harvesting new hits.
+    /// NSWorkspace can launch handlers for non-web schemes, so rows and citation
+    /// chips share the same absolute HTTP(S) rule as the GTK browser action.
+    var browserURL: URL? { SourceHarvester.openableURL(url) }
+
     /// The registrable-looking host, for a compact source chip ("apple.com").
     /// Delegated to `EvidenceExtractor.domainKey` so the diversity cap and the chip
     /// the reader sees can never drift into two definitions of "same domain".
