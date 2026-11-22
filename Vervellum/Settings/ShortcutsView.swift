@@ -41,7 +41,7 @@ struct ShortcutsView: View {
                 registrationWarning(preferences.researchSelectionHotkeyRegistration,
                                     text: "Vervellum could not claim this shortcut — another app may "
                                         + "already be using it. It will try again when you change it.")
-                Toggle("Remove credential-shaped text from the selection", isOn: Binding(
+                Toggle("Remove credential-shaped text from selections and pastes", isOn: Binding(
                     get: { preferences.redactSecrets },
                     set: { preferences.redactSecrets = $0 }))
                 Text("Catches API keys, tokens, private-key blocks and KEY=value lines before "

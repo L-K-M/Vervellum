@@ -301,9 +301,45 @@ struct TurnView: View, Equatable {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
+
+            // When the question was asked. In a reopened thread this is the one
+            // fact that says how stale the evidence might be.
+            AskedAtLabel(date: turn.askedAt)
         }
     }
 
+}
+
+/// How long ago a question was asked, with the exact time on hover.
+///
+/// `Formatting.relativeDate` rather than `Text(_:style: .relative)`, which draws a
+/// bare duration ("23 days") that ticks every second and reads as how long the run
+/// took. The timeline keeps the age current without redrawing the turn around it.
+struct AskedAtLabel: View {
+    @Environment(\.panelTextScale) private var textScale
+
+    /// The finest unit `Formatting.relativeDate` shows.
+    private static let refreshInterval: TimeInterval = 60
+
+    let date: Date
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
+
+    var body: some View {
+        let exact = date.formatted(date: .complete, time: .shortened)
+        TimelineView(.periodic(from: date, by: Self.refreshInterval)) { context in
+            Text(Self.text(for: date, now: context.date))
+                .font(PanelTheme.Font.at(10, textScale))
+                .foregroundStyle(PanelTheme.Palette.tertiaryText)
+                .lineLimit(1)
+        }
+        .help(exact)
+        .accessibilityLabel("Asked \(exact)")
+    }
+
+    static func text(for date: Date, now: Date) -> String {
+        Formatting.relativeDate(date, from: now)
+    }
 }
 
 /// A blinking caret for the moment between the last search and the first token.
