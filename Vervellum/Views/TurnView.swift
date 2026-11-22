@@ -276,6 +276,8 @@ struct AskedAtLabel: View {
     private static let refreshInterval: TimeInterval = 60
 
     let date: Date
+    /// An input, so a theme change redraws this view. See `TurnView.palette`.
+    var palette: PanelPalette = PanelTheme.palette
 
     var body: some View {
         let exact = date.formatted(date: .complete, time: .shortened)
