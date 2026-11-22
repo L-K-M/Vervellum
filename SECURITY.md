@@ -296,7 +296,8 @@ replaced, with a visible count of how many.
 - **Stored threads are plain JSON.** The file is written `0600` — in Application Support
   on macOS, under `$XDG_DATA_HOME` on Linux — which protects it from other users but not
   from anything running as you. History can be turned off, and turning it off deletes the
-  primary and backup files. Failed erasure is reported and blocks further writes
+  primary and backup files, and any staged backup copy a failed rotation left.
+  Failed erasure is reported and blocks further writes
   until erasure succeeds. Session-only deletion markers reject late snapshots;
   deletion is not secure disk erasure and cannot remove external backups.
 - **Downgrades are not history-safe.** Schema 2 adds notice values that older releases

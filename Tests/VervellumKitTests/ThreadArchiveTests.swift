@@ -627,6 +627,72 @@ final class ThreadArchiveTests: XCTestCase {
         }
     }
 
+    /// A file manager that refuses one named removal, standing in for a backup the
+    /// user has locked while the primary is still writable.
+    private final class SelectiveRemoveFileManager: FileManager {
+        var deniedPaths: Set<String> = []
+        var deniesAttributeChanges = false
+
+        override func removeItem(at URL: URL) throws {
+            guard deniedPaths.contains(URL.path) else { return try super.removeItem(at: URL) }
+            throw CocoaError(.fileWriteNoPermission)
+        }
+
+        override func setAttributes(_ attributes: [FileAttributeKey: Any],
+                                    ofItemAtPath path: String) throws {
+            // Only the owner-only mode, not the directory's 0o700 fence.
+            if deniesAttributeChanges, (attributes[.posixPermissions] as? Int) == 0o600 {
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            try super.setAttributes(attributes, ofItemAtPath: path)
+        }
+    }
+
+    /// Fails directory creation until told otherwise, standing in for a folder that
+    /// is momentarily unwritable. Not one-shot: `flush()` retries a retained snapshot
+    /// and can race the debounced attempt, which would use up a single failure.
+    private final class FlakyFileManager: FileManager {
+        var createDirectoryFailures = Int.max
+
+        override func createDirectory(at URL: URL,
+                                      withIntermediateDirectories: Bool,
+                                      attributes: [FileAttributeKey: Any]?) throws {
+            if createDirectoryFailures > 0 {
+                createDirectoryFailures -= 1
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            try super.createDirectory(at: URL,
+                                      withIntermediateDirectories: withIntermediateDirectories,
+                                      attributes: attributes)
+        }
+    }
+
+    /// Refuses directory creation (a failed write) and removals (a failed
+    /// erase), standing in for a folder that became read-only. The write
+    /// failure is sticky: `flush()` retries a retained snapshot, so a one-shot
+    /// failure would be consumed by the first attempt and the retry would
+    /// succeed, making the test timing-dependent across platforms.
+    private final class CompoundFileManager: FileManager {
+        var failsCreateDirectory = false
+        var deniesRemoval = true
+
+        override func createDirectory(at URL: URL,
+                                      withIntermediateDirectories: Bool,
+                                      attributes: [FileAttributeKey: Any]?) throws {
+            if failsCreateDirectory {
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            try super.createDirectory(at: URL,
+                                      withIntermediateDirectories: withIntermediateDirectories,
+                                      attributes: attributes)
+        }
+
+        override func removeItem(at URL: URL) throws {
+            guard deniesRemoval else { return try super.removeItem(at: URL) }
+            throw CocoaError(.fileWriteNoPermission)
+        }
+    }
+
     /// "History off means the bytes are gone" is a promise; when the file system
     /// breaks it, the archive has to say so rather than let the toggle claim success.
     func testAFailedEraseIsReportedNotSwallowed() {
@@ -646,6 +712,353 @@ final class ThreadArchiveTests: XCTestCase {
         // The toggle cannot prove deletion succeeded; keep the warning and write block.
         store.isHistoryEnabled = true
         XCTAssertNotNil(store.eraseFailure)
+    }
+
+    /// A write that fails keeps its snapshot, names the problem in the interface's
+    /// terms, and is rewritten by the retry rather than silently dropped.
+    func testAFailedWriteIsReportedAndRetried() throws {
+        let manager = FlakyFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("recovered"))
+        store.flush()
+        XCTAssertNotNil(store.storageFailures().save)
+        XCTAssertNil(store.storageFailures().backup)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+
+        manager.createDirectoryFailures = 0
+        store.retrySave()
+        XCTAssertNil(store.storageFailures().save)
+        XCTAssertEqual(ThreadArchive(fileURL: fileURL, debounce: 0).library.threads.map(\.title),
+                       ["recovered"])
+    }
+
+    /// A backup rotation that cannot replace the old copy must leave the old copy
+    /// alone and say so; the retry then restores the pre-write primary as the
+    /// backup, which is what a recovery copy is for.
+    func testABackupFailureKeepsThePreviousBackupAndRetries() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+        let backupURL = fileURL.appendingPathExtension("bak")
+        let backupBefore = try Data(contentsOf: backupURL)
+
+        manager.deniedPaths.insert(backupURL.path)
+        store.save(thread("three"))
+        store.flush()
+        XCTAssertNil(store.storageFailures().save, "the primary write itself succeeded")
+        XCTAssertNotNil(store.storageFailures().backup, "a refused backup rotation must be reported")
+        XCTAssertEqual(try Data(contentsOf: backupURL), backupBefore,
+                       "the previous backup must survive a failed rotation")
+
+        manager.deniedPaths.removeAll()
+        store.retrySave()
+        XCTAssertNil(store.storageFailures().backup)
+        let rotated = ThreadArchive(fileURL: backupURL, debounce: 0)
+        XCTAssertEqual(rotated.library.threads.map(\.title), ["two", "one"],
+                       "the retry restores the pre-write primary as the backup")
+    }
+
+    /// A write that landed after a failed rotation is the next backup. Finishing the
+    /// older staged copy alone would leave that document in no file at all.
+    func testTheWriteAfterAFailedRotationBacksUpTheDocumentItReplaces() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        for title in ["one", "two"] {
+            store.save(thread(title))
+            store.flush()
+        }
+        let backupURL = fileURL.appendingPathExtension("bak")
+        manager.deniedPaths.insert(backupURL.path)
+        store.save(thread("three"))
+        store.flush()
+        XCTAssertNotNil(store.storageFailures().backup, "the rotation must have failed")
+
+        manager.deniedPaths.removeAll()
+        store.save(thread("four"))
+        store.flush()
+
+        XCTAssertNil(store.storageFailures().backup)
+        let backup = ThreadArchive(fileURL: backupURL, debounce: 0)
+        XCTAssertEqual(backup.library.threads.map(\.title), ["three", "two", "one"])
+    }
+
+    /// A half-finished erase can take the primary and leave the backup. Retrying must
+    /// not then claim that a file which is gone may be readable by others.
+    func testARetryWithoutAPrimaryClaimsNoPermissionProblem() {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        for title in ["one", "two"] {
+            store.save(thread(title))
+            store.flush()
+        }
+        manager.deniedPaths.insert(fileURL.appendingPathExtension("bak").path)
+        store.save(thread("three"))
+        store.flush()
+        store.deleteAll()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path), "the erase must take the primary")
+        XCTAssertNotNil(store.eraseFailure, "and fail on the backup")
+
+        store.retrySave()
+
+        let warning = store.storageFailures().backup ?? ""
+        XCTAssertFalse(warning.contains("readable"), warning)
+    }
+
+    /// The erase warning's retry is the difference between a refusal the reader
+    /// can act on and one they can only report.
+    func testRetryEraseClearsTheFailure() throws {
+        let manager = StubbornFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("stuck"))
+        store.flush()
+        store.deleteAll()
+        XCTAssertNotNil(store.eraseFailure)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+
+        manager.removal = .allowed
+        store.retryErase()
+        XCTAssertNil(store.eraseFailure)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertTrue(store.library.threads.isEmpty,
+                      "a retried erase must also clear the in-memory library")
+    }
+
+    /// A retried erase must not be followed by a save retry that puts the erased
+    /// document back on disk: "history off means the bytes are gone".
+    func testRetryingAfterAnErasureDoesNotResurrectTheDocument() throws {
+        let manager = CompoundFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+
+        // The second write fails after the snapshot is queued, so a retry has
+        // something to resurrect — and the old document is still on disk.
+        manager.failsCreateDirectory = true
+        store.save(thread("two"))
+        store.flush()
+        XCTAssertNotNil(store.storageFailures().save, "the second write should fail")
+
+        store.deleteAll()
+        XCTAssertNotNil(store.eraseFailure,
+                        "the erase should fail while the folder is read-only")
+
+        manager.failsCreateDirectory = false
+        manager.deniesRemoval = false
+        store.retryErase()
+        store.retrySave()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path),
+                       "a retried save must not rewrite the erased document")
+        XCTAssertTrue(store.library.threads.isEmpty)
+    }
+
+    /// A successful erase makes a failed-write warning moot; it must not survive
+    /// to a later retry.
+    func testAnErasureClearsTheWriteWarning() throws {
+        let manager = CompoundFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        manager.failsCreateDirectory = true
+        store.save(thread("two"))
+        store.flush()
+        XCTAssertNotNil(store.storageFailures().save)
+        // This test induces only a save failure; the backup half has its own
+        // companion below, and asserting the precondition here keeps the
+        // post-erase backup assertion from looking covered when it is not.
+        XCTAssertNil(store.storageFailures().backup)
+
+        manager.deniesRemoval = false
+        store.deleteAll()
+        XCTAssertNil(store.storageFailures().save,
+                     "the erased document's save warning is moot")
+        XCTAssertNil(store.storageFailures().backup)
+    }
+
+    /// The companion to the save-warning test: a backup failure is equally
+    /// moot once the document is gone.
+    func testAnErasureClearsTheBackupWarning() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+        manager.deniedPaths.insert(fileURL.appendingPathExtension("bak").path)
+        store.save(thread("three"))
+        store.flush()
+        XCTAssertNotNil(store.storageFailures().backup, "the rotation should have failed")
+        XCTAssertNil(store.storageFailures().save,
+                     "the threads themselves were written; only the backup failed")
+
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: fileURL.appendingPathExtension("bak.tmp").path),
+                      "setup: the failed rotation must have left a staging copy")
+        manager.deniedPaths.removeAll()
+        store.deleteAll()
+        XCTAssertNil(store.storageFailures().backup,
+                     "the erased document's backup warning is moot")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: fileURL.appendingPathExtension("bak.tmp").path),
+                       "a staging copy holding deleted threads must not outlive the erase")
+    }
+
+    /// When no staging copy survived, the retry falls back to rotating the current
+    /// primary afresh rather than reporting a failure it could still resolve.
+    func testABackupRetryWithoutStagingRotatesTheCurrentPrimary() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+        let backupURL = fileURL.appendingPathExtension("bak")
+        let stagingURL = backupURL.appendingPathExtension("tmp")
+
+        manager.deniedPaths.insert(backupURL.path)
+        store.save(thread("three"))
+        store.flush()
+        XCTAssertNotNil(store.storageFailures().backup)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stagingURL.path))
+
+        try FileManager.default.removeItem(at: stagingURL)
+        manager.deniedPaths.removeAll()
+        store.retrySave()
+        XCTAssertNil(store.storageFailures().backup)
+        let rotated = ThreadArchive(fileURL: backupURL, debounce: 0)
+        XCTAssertEqual(rotated.library.threads.map(\.title), ["three", "two", "one"],
+                       "the fallback rotates the current primary")
+    }
+
+    /// The owner-only permission promise is independent of the backup: a failed
+    /// rotation must not silently leave the freshly written file group-readable.
+    func testTheOwnerOnlyPermissionIsAppliedEvenWhenTheBackupFails() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+        manager.deniedPaths.insert(fileURL.appendingPathExtension("bak").path)
+        store.save(thread("three"))
+        store.flush()
+
+        XCTAssertNotNil(store.storageFailures().backup)
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let mode = try XCTUnwrap(attributes[.posixPermissions] as? Int)
+        XCTAssertEqual(mode & 0o777, 0o600, "the file that was written must be owner-only")
+    }
+
+    /// The recovery copy inherits owner-only mode from the first rotation, not
+    /// only after a later write's chmod catches up with it.
+    func testTheFirstBackupIsOwnerOnly() throws {
+        let store = ThreadArchive(fileURL: fileURL, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+        let attributes = try FileManager.default.attributesOfItem(
+            atPath: fileURL.appendingPathExtension("bak").path)
+        let mode = try XCTUnwrap(attributes[.posixPermissions] as? Int)
+        XCTAssertEqual(mode & 0o777, 0o600,
+                       "the backup must be owner-only from the first rotation")
+    }
+
+    /// A retry whose rotation fails must not replace a standing permission
+    /// warning with a backup-only one: both problems send the reader to
+    /// different places, so both stay in the message.
+    func testARetriedRotationFailureKeepsBothWarnings() throws {
+        let manager = SelectiveRemoveFileManager()
+        manager.deniesAttributeChanges = true
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        store.save(thread("two"))
+        store.flush()
+
+        // The rotation is already failing on the owner-only chmod; a denied
+        // .bak removal gives the retry a rotation failure of its own.
+        manager.deniedPaths.insert(fileURL.appendingPathExtension("bak").path)
+        store.retrySave()
+        let warning = try XCTUnwrap(store.storageFailures().backup)
+        XCTAssertTrue(warning.contains("backup copy"), warning)
+        XCTAssertTrue(warning.contains("owner-readable"), warning)
+    }
+
+    /// A failure publishes once, and a successful retry publishes again — the
+    /// Settings warning is driven by this hook, not by a render.
+    func testFailureChangesArePublished() {
+        let manager = FlakyFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        let failed = expectation(description: "failure published")
+        store.onFailureChanged = { failed.fulfill() }
+        store.save(thread("one"))
+        store.flush()
+        wait(for: [failed], timeout: 2)
+        XCTAssertNotNil(store.storageFailures().save)
+
+        manager.createDirectoryFailures = 0
+        let cleared = expectation(description: "clearing published")
+        store.onFailureChanged = { cleared.fulfill() }
+        store.retrySave()
+        wait(for: [cleared], timeout: 2)
+        XCTAssertNil(store.storageFailures().save)
+    }
+
+    /// The staging copy holds the threads that were being erased, so leaving it behind
+    /// is a failed erase like leaving the backup.
+    func testAStagingCopyThatWillNotDeleteFailsTheErase() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        let staging = fileURL.appendingPathExtension("bak").appendingPathExtension("tmp")
+        try Data("earlier threads".utf8).write(to: staging)
+        manager.deniedPaths.insert(staging.path)
+
+        store.deleteAll()
+
+        XCTAssertNotNil(store.eraseFailure)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staging.path))
+    }
+
+    /// A write can fail in the same attempt as its backup or chmod, so neither of
+    /// those warnings may claim the threads were saved.
+    func testAFailedWriteIsNeverDescribedAsSaved() throws {
+        let manager = SelectiveRemoveFileManager()
+        let store = ThreadArchive(fileURL: fileURL, fileManager: manager, debounce: 0)
+        store.save(thread("one"))
+        store.flush()
+        // A directory where the file was fails the write itself; the refused chmod
+        // fails the rotation in the same attempt.
+        try FileManager.default.removeItem(at: fileURL)
+        try FileManager.default.createDirectory(at: fileURL, withIntermediateDirectories: false)
+        try Data().write(to: fileURL.appendingPathComponent("occupied"))
+        manager.deniesAttributeChanges = true
+        store.save(thread("two"))
+        store.flush()
+
+        let failures = store.storageFailures()
+        XCTAssertNotNil(failures.save, "setup: the write itself must fail")
+        let backup = try XCTUnwrap(failures.backup)
+        XCTAssertFalse(backup.contains("was saved"), backup)
+    }
+
+    /// Core never marshals to the main queue: GLib does not drain it, so a hop there
+    /// would mean the hook never fires on Linux.
+    func testFailureHookDoesNotWaitForTheMainQueue() {
+        let store = ThreadArchive(fileURL: fileURL, fileManager: FlakyFileManager(), debounce: 0)
+        let published = expectation(description: "published")
+        published.assertForOverFulfill = false
+        var hookRan = false
+        store.onFailureChanged = { hookRan = true; published.fulfill() }
+        store.save(thread("one"))
+        store.flush()
+        XCTAssertTrue(hookRan, "the hook must have run by the time flush returns")
+        wait(for: [published], timeout: 2)
     }
 
     // MARK: Retention

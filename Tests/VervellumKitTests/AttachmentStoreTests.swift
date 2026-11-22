@@ -35,6 +35,24 @@ final class AttachmentStoreTests: XCTestCase {
         XCTAssertEqual(store.data(for: attachment), Data([1, 2, 3]))
     }
 
+    /// Finishing an old erase takes what was stored then and nothing newer or live.
+    func testRemovingWhatWasStoredByACutoffKeepsNewerAndLiveFiles() throws {
+        let store = AttachmentStore(directory: directory)
+        let (old, live, newer) = (record(), record(), record())
+        for item in [old, live, newer] { try store.write(Data([1]), for: item) }
+        let cutoff = Date(timeIntervalSince1970: 1_700_000_000)
+        for (item, offset) in [(old, -60.0), (live, -60.0), (newer, 60.0)] {
+            try FileManager.default.setAttributes([.modificationDate: cutoff.addingTimeInterval(offset)],
+                ofItemAtPath: directory.appendingPathComponent(item.id.uuidString).path)
+        }
+
+        try store.removeStored(notNewerThan: cutoff, keeping: [live.id])
+
+        XCTAssertFalse(store.exists(old))
+        XCTAssertTrue(store.exists(live))
+        XCTAssertTrue(store.exists(newer))
+    }
+
     /// Missing bytes are an ordinary outcome, not a failure: a library copied between
     /// machines without its attachments folder leaves records pointing at nothing, and
     /// the turn's job is to carry on without the picture.

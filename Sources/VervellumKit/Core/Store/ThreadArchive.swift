@@ -23,6 +23,14 @@ final class ThreadArchive {
     /// Invoked after any change to `library`, so a platform can republish it.
     var onChange: (() -> Void)?
 
+    /// Invoked when `saveFailure`, `backupFailure` or a retried erase's outcome
+    /// changes, so a front end that shows them can republish.
+    ///
+    /// Called directly, usually on the archive's private queue and sometimes inside a
+    /// `queue.sync`. Core cannot hop to the main queue, which GLib never drains. The
+    /// handler must hand off asynchronously before it calls `storageFailures()`.
+    var onFailureChanged: (() -> Void)?
+
     private(set) var library: ThreadLibrary
     // Late runner snapshots retain their IDs. Erasure must outlive those callbacks.
     private var forgottenThreadIDs: Set<UUID> = []
@@ -77,6 +85,18 @@ final class ThreadArchive {
     /// rather than shown a toggle that says off.
     private(set) var eraseFailure: String?
 
+    /// Why the last write could not be completed, in words fit for the interface;
+    /// nil after a successful write. A failed write keeps its snapshot pending, so
+    /// `retrySave()` is a real retry rather than a no-op.
+    private(set) var saveFailure: String?
+
+    /// Why the backup copy could not be replaced, or the file could not be made
+    /// owner-readable, in words fit for the interface; nil after a fully protected
+    /// write. Reported separately from `saveFailure`: the threads themselves may
+    /// have been written, and the missing half is the recovery copy or the privacy
+    /// promise.
+    private(set) var backupFailure: String?
+
     /// When false, nothing is written and nothing is remembered.
     var isHistoryEnabled: Bool {
         didSet {
@@ -107,6 +127,10 @@ final class ThreadArchive {
     // Queue-confined snapshots let continuous streams checkpoint without races.
     private var pendingSave: DispatchWorkItem?
     private var pendingSnapshot: ThreadLibrary?
+    /// A backup staging copy left behind when a rotation failed, holding the
+    /// primary as it was before the write. Queue-confined with the other write
+    /// state; `finishPendingBackupRotation` completes it on a retry.
+    private var pendingBackupStaging: URL?
     /// Whether the primary file is the "previous good copy" the `.bak` rotation
     /// promises: it decoded at launch, or this process has since written it. Set once
     /// in `init` and afterwards only on `queue`, where every write runs.
@@ -264,7 +288,9 @@ final class ThreadArchive {
             pendingSave?.cancel()
             pendingSave = nil
             pendingSnapshot = nil
-            for url in [fileURL, backupURL] where fileManager.fileExists(atPath: url.path) {
+            // The staging copy of a failed rotation holds the same threads, so it is
+            // part of the erase, and failing to remove it is a failed erase.
+            for url in [fileURL, backupURL, backupStagingURL] where fileManager.fileExists(atPath: url.path) {
                 do { try fileManager.removeItem(at: url) } catch { failure = error }
             }
             if failure == nil {
@@ -280,6 +306,14 @@ final class ThreadArchive {
                 // write to it is what keeps the flag race-free.
                 readFailure = nil
                 libraryIsTrustworthy = true
+                // The document is gone, so a write or backup failure described
+                // bytes that no longer exist. Drop it here rather than letting a
+                // later retry act on a warning the erase made moot.
+                recordFailures(save: nil, backup: nil)
+                // The staging file went above, whether or not this process made it.
+                // A stale slot would make the next rotation report a failure that
+                // never happened.
+                pendingBackupStaging = nil
             }
         }
         // Reported, not swallowed. "History off means the bytes are gone" is a promise
@@ -316,9 +350,127 @@ final class ThreadArchive {
         }
     }
 
+    /// Re-attempts the erase that recorded `eraseFailure`.
+    ///
+    /// The Settings warning offers this because a refusal that has since been fixed
+    /// — a permission grant, an unlocked file — should not stay a permanent write
+    /// block. A success clears the failure beside the file.
+    func retryErase() {
+        guard eraseFailure != nil else { return }
+        let failureBefore = eraseFailure
+        recordingFailure { try eraseEverything() }
+        // Threads started while the erase was failing were held back from disk by that
+        // failure. They are the only ones left in the library (every erase empties it),
+        // and clearing the warning without writing them would lose them at quit.
+        if eraseFailure == nil, !library.threads.isEmpty { scheduleSave() }
+        // Only republish on an actual change, matching `recordFailures`. A retry
+        // that fails again for the same reason leaves the same warning standing.
+        if eraseFailure != failureBefore { onFailureChanged?() }
+    }
+
+    /// Re-attempts a failed write or backup rotation.
+    ///
+    /// A failed write keeps its snapshot pending, so this rewrites the exact
+    /// document that failed. A backup-only failure re-runs the rotation against
+    /// the current primary, because the next ordinary write may be a long way off
+    /// and the recovery copy is worth having now. A staging copy left by the
+    /// failed rotation is finished first: it holds the pre-write primary, which is
+    /// the recovery copy the backup exists to be.
+    func retrySave() {
+        queue.sync {
+            if pendingSnapshot != nil {
+                pendingSave?.cancel()
+                pendingSave = nil
+                writePending()
+            } else if backupFailure != nil {
+                let directory = fileURL.deletingLastPathComponent()
+                var backup: String?
+                if finishPendingBackupRotation() || rotateBackup() {
+                    // A rotation completed through the staging copy never
+                    // re-attempts the primary's chmod. Retry it here so a
+                    // failed owner-only permission is not cleared while the
+                    // saved file may still be readable by others. An erase can have
+                    // taken the primary, and then there is no mode to enforce.
+                    if fileManager.fileExists(atPath: fileURL.path) {
+                        do {
+                            try fileManager.setAttributes(Self.ownerOnlyPermissions,
+                                                          ofItemAtPath: fileURL.path)
+                        } catch {
+                            backup = Self.permissionFailureMessage(
+                                in: directory, file: fileURL.lastPathComponent)
+                        }
+                    }
+                } else {
+                    backup = Self.backupFailureMessage(in: directory,
+                                                       file: fileURL.lastPathComponent)
+                    // A failed rotation can be the permission problem itself
+                    // (`rotateBackup` chmods the primary before copying) or
+                    // can mask one. Keep pursuing the owner-only mode here too,
+                    // rather than replacing a permission warning with a
+                    // backup-only one.
+                    if fileManager.fileExists(atPath: fileURL.path) {
+                        do {
+                            try fileManager.setAttributes(Self.ownerOnlyPermissions,
+                                                          ofItemAtPath: fileURL.path)
+                        } catch {
+                            backup = [backup, Self.permissionFailureMessage(
+                                        in: directory, file: fileURL.lastPathComponent)]
+                                .compactMap { $0 }.joined(separator: " ")
+                        }
+                    }
+                }
+                recordFailures(save: nil, backup: backup)
+            }
+        }
+    }
+
+    /// The owner-only mode a saved file must carry, and the retry that enforces it.
+    /// Extracted so the write path, the rotation retry and the failed-rotation path
+    /// cannot drift apart on the constant.
+    private static let ownerOnlyPermissions: [FileAttributeKey: Any] = [.posixPermissions: 0o600]
+
+    /// Publishes a pair of failure strings. Both nil clears a previous warning, so
+    /// a successful retry cannot leave a stale one beside the file.
+    private func recordFailures(save: String?, backup: String?) {
+        // Every successful write passes through here, so only a change publishes.
+        guard saveFailure != save || backupFailure != backup else { return }
+        saveFailure = save
+        backupFailure = backup
+        onFailureChanged?()
+    }
+
+    /// The write/backup failure strings, safe to read from any thread.
+    ///
+    /// The stored properties are confined to `queue`, because `writeNow` runs
+    /// there during debounced streaming saves. A reader on the main thread —
+    /// SwiftUI evaluating `ThreadStore.storageFailure`, or a retry button — goes
+    /// through here rather than racing the write. Never call this from code
+    /// already on `queue`: `queue.sync` would deadlock.
+    func storageFailures() -> (save: String?, backup: String?) {
+        queue.sync { (saveFailure, backupFailure) }
+    }
+
+    private static func saveFailureMessage(in directory: URL, file: String) -> String {
+        "Could not save \(file) in \(directory.path). The file may be locked or the "
+        + "folder read-only; nothing was written. Earlier threads are unchanged."
+    }
+
+    private static func backupFailureMessage(in directory: URL, file: String) -> String {
+        // Nothing about the write itself: this can accompany a failed one.
+        "Could not keep a backup copy of \(file) in \(directory.path), so there may be "
+        + "no recent copy to recover from."
+    }
+
+    private static func permissionFailureMessage(in directory: URL, file: String) -> String {
+        // Nothing about the write itself: this can accompany a failed one.
+        "Could not make \(file) owner-readable only in \(directory.path). It may be "
+        + "readable by others."
+    }
+
     // MARK: Persistence
 
     private var backupURL: URL { fileURL.appendingPathExtension("bak") }
+    private var backupStagingURL: URL { backupURL.appendingPathExtension("tmp") }
 
     private func scheduleSave() {
         // An unreadable document is not an empty one. Writing the in-memory library over
@@ -345,7 +497,8 @@ final class ThreadArchive {
     private func writePending() {
         pendingSave = nil
         guard let snapshot = pendingSnapshot else { return }
-        pendingSnapshot = nil
+        // `pendingSnapshot` stays until `writeNow` succeeds, so a failed write can
+        // be retried with the same document rather than being silently dropped.
         writeNow(snapshot)
     }
 
@@ -353,6 +506,7 @@ final class ThreadArchive {
         // Belt and braces around `scheduleSave`'s gate: `flush()` reaches `writePending`
         // directly, so the same refusal belongs at the one place every write passes.
         guard !isReadOnly, libraryIsTrustworthy else { return }
+        let directory = fileURL.deletingLastPathComponent()
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -360,7 +514,6 @@ final class ThreadArchive {
             let data = try encoder.encode(snapshot)
 
             // Fence off Foundation's atomic temporary files before any bytes are written.
-            let directory = fileURL.deletingLastPathComponent()
             let privateDirectory: [FileAttributeKey: Any] = [.posixPermissions: 0o700]
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true,
                                             attributes: privateDirectory)
@@ -369,7 +522,14 @@ final class ThreadArchive {
             // dismissal and at termination, and without this each one rotates the
             // previous file into `.bak` — after two flushes the backup is a byte-perfect
             // copy of the live file and has stopped being a recovery copy at all.
-            if currentContents() == data { return }
+            if currentContents() == data {
+                pendingSnapshot = nil
+                // The intended bytes are already there, so a failed *write* is
+                // resolved — but a failed backup is not: no rotation happened, and
+                // the recovery copy is still the stale one.
+                recordFailures(save: nil, backup: backupFailure)
+                return
+            }
 
             // Rotate the previous good file, so a failure during the write still leaves
             // one recoverable copy — only now, when the contents really differ, and only
@@ -377,17 +537,145 @@ final class ThreadArchive {
             // `.bak`, the primary is the corrupt one; copying it over the backup before
             // the new write is known to have succeeded would, if that write then failed
             // for the same reason (a full disk, say), leave nothing readable at all.
+            var attemptBackupFailure: String?
             if primaryIsTrustworthy, fileManager.fileExists(atPath: fileURL.path) {
-                try? fileManager.removeItem(at: backupURL)
-                try? fileManager.copyItem(at: fileURL, to: backupURL)
+                if !rotateBackup() {
+                    attemptBackupFailure = Self.backupFailureMessage(
+                        in: directory, file: fileURL.lastPathComponent)
+                }
             }
-            try data.write(to: fileURL, options: [.atomic])
-            primaryIsTrustworthy = true
+            do {
+                try data.write(to: fileURL, options: [.atomic])
+                primaryIsTrustworthy = true
+                // Consumed only now that the bytes are on disk. A failure leaves the
+                // snapshot pending so `retrySave()` can rewrite the same document.
+                pendingSnapshot = nil
+            } catch {
+                // The write failed, so the primary is untouched and a rotation
+                // that succeeded on this attempt never re-checked its mode. If
+                // this attempt reported no backup problem, re-run the chmod
+                // rather than clearing a standing permission warning.
+                var backup = attemptBackupFailure
+                // Only re-check when there is a file to check: a first save
+                // that never produced a primary has no mode to fix and no
+                // standing permission warning worth keeping.
+                if backup == nil, fileManager.fileExists(atPath: fileURL.path) {
+                    do {
+                        try fileManager.setAttributes(Self.ownerOnlyPermissions,
+                                                      ofItemAtPath: fileURL.path)
+                    } catch {
+                        backup = Self.permissionFailureMessage(
+                            in: directory, file: fileURL.lastPathComponent)
+                    }
+                }
+                recordFailures(save: Self.saveFailureMessage(in: directory,
+                                                             file: fileURL.lastPathComponent),
+                               backup: backup)
+                FileHandle.standardError.write(Data("vervellum warning: could not save threads\n".utf8))
+                return
+            }
             // Research questions are personal. Keep the file owner-only rather than
-            // inheriting the umask.
-            try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+            // inheriting the umask. A failure here does not undo the write, but it
+            // does leave the file readable by others, which is worth saying.
+            //
+            // Run regardless of the rotation result: a failed backup must not also
+            // silently drop the owner-only promise for the file that did get
+            // written. Both failures are kept, because they send the reader to two
+            // different places.
+            do {
+                try fileManager.setAttributes(Self.ownerOnlyPermissions,
+                                              ofItemAtPath: fileURL.path)
+            } catch {
+                attemptBackupFailure = [attemptBackupFailure,
+                                        Self.permissionFailureMessage(
+                                            in: directory, file: fileURL.lastPathComponent)]
+                    .compactMap { $0 }.joined(separator: " ")
+            }
+            recordFailures(save: nil, backup: attemptBackupFailure)
         } catch {
+            // Reachable only before a rotation is attempted (encoding, directory
+            // creation), so this deliberately reads the *property*: a previously
+            // recorded backup failure still stands when this write never got that far.
+            recordFailures(save: Self.saveFailureMessage(in: directory,
+                                                         file: fileURL.lastPathComponent),
+                           backup: backupFailure)
             FileHandle.standardError.write(Data("vervellum warning: could not save threads\n".utf8))
+        }
+    }
+
+    /// Copies the current primary over the backup, replacing it only once the new
+    /// copy exists.
+    ///
+    /// The old order — remove `.bak`, then copy the primary into its place — threw
+    /// away the only recovery copy whenever the copy failed: a full disk, a locked
+    /// file, a permission change. Copying to a staging name first means the previous
+    /// backup survives until the replacement is actually there.
+    @discardableResult
+    private func rotateBackup() -> Bool {
+        guard primaryIsTrustworthy, fileManager.fileExists(atPath: fileURL.path) else {
+            return true
+        }
+        let staging = backupStagingURL
+        // A staging copy inherited from a failed rotation may be the only recovery
+        // copy, so finish that rotation before staging a new copy over it. Returning
+        // false keeps the failure reported and the staging copy alive for the next
+        // attempt. Then rotate as usual: the write that followed the failure may have
+        // landed, and the document it left is the one this write is about to replace.
+        if pendingBackupStaging == staging {
+            if fileManager.fileExists(atPath: staging.path) {
+                guard finishPendingBackupRotation() else { return false }
+            } else {
+                pendingBackupStaging = nil
+            }
+        }
+        do {
+            try? fileManager.removeItem(at: staging)
+            // Tighten the primary before staging, so the copy that becomes the
+            // backup inherits owner-only mode rather than the umask default. On
+            // a fresh archive's first save the primary has not been chmod'd yet,
+            // and the backup is the copy most likely to outlive it.
+            // Correctness, not cleanup: a copy that inherits the umask must
+            // not become the recovery copy. Failing here leaves the old backup
+            // in place (it is removed only after this) and reports the problem.
+            try fileManager.setAttributes(Self.ownerOnlyPermissions,
+                                          ofItemAtPath: fileURL.path)
+            try fileManager.copyItem(at: fileURL, to: staging)
+            // Remove the old backup only once the new copy exists, so a
+            // failure here leaves the previous recovery copy untouched. The
+            // remove-and-move is deliberately not `replaceItemAt`: that API
+            // cannot be overridden portably in the shared test target, and the
+            // staging copy is what makes the failure recoverable.
+            try? fileManager.removeItem(at: backupURL)
+            try fileManager.moveItem(at: staging, to: backupURL)
+            pendingBackupStaging = nil
+            return true
+        } catch {
+            // Keep the staging copy: it is the pre-write primary, and finishing the
+            // rotation later is what turns a failed backup into a recovery copy.
+            pendingBackupStaging = fileManager.fileExists(atPath: staging.path) ? staging : nil
+            return false
+        }
+    }
+
+    /// Completes a rotation whose staging copy survived, if there is one.
+    @discardableResult
+    private func finishPendingBackupRotation() -> Bool {
+        guard let staging = pendingBackupStaging,
+              fileManager.fileExists(atPath: staging.path) else {
+            pendingBackupStaging = nil
+            return false
+        }
+        do {
+            // The inherited staging copy predates the write path's chmod; give
+            // it the same owner-only mode before it becomes the backup.
+            try fileManager.setAttributes(Self.ownerOnlyPermissions,
+                                          ofItemAtPath: staging.path)
+            try? fileManager.removeItem(at: backupURL)
+            try fileManager.moveItem(at: staging, to: backupURL)
+            pendingBackupStaging = nil
+            return true
+        } catch {
+            return false
         }
     }
 

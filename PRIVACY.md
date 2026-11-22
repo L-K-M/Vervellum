@@ -94,7 +94,8 @@ your IP address.
 - **Threads.** Questions, answers, verdicts and source lists are stored as JSON,
   readable only by your account — in Vervellum's Application Support folder on macOS,
   and under `$XDG_DATA_HOME` (usually `~/.local/share/vervellum`) on Linux. Turning
-  history off or choosing "Delete all…" deletes the primary and backup files,
+  history off or choosing "Delete all…" deletes the primary and backup files, and
+  the staged copy (`threads.json.bak.tmp`) a failed rotation can leave,
   including when launched with history disabled. Failed deletion is reported and
   blocks further writes until resolved. Active runs are checkpointed while history
   is enabled. Newer history schemas stay untouched at launch; explicit deletion
