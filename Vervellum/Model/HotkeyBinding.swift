@@ -40,7 +40,55 @@ struct HotkeyBinding: Codable, Equatable {
     /// rule refuses the OS-owned ⌘Q/W/H/M/Space/Tab (and ⇧⌘3–6) so a registration
     /// cannot swallow them, and accepts bare F1–F20 because function keys do not
     /// collide with typing. A Shift-only chord is still ordinary text.
-    var isValid: Bool { enabled && combo.isUsableGlobalHotkey }
+    /// Vervellum adds one rule of its own on top of Keycap's, because a global
+    /// hotkey is registered with Carbon for the whole system rather than for this
+    /// app: an editing command would be swallowed everywhere, not only while the
+    /// panel is open.
+    ///
+    /// Option-only chords stay allowed, though some of them type a character. They
+    /// are common summon shortcuts (⌥Space), and refusing them would switch off
+    /// shortcuts people already have saved, with a warning only Settings shows.
+    ///
+    /// Derived from `registrationProblem` rather than re-listing the rules, so the
+    /// property that refuses a chord and the sentence the Shortcuts pane shows for
+    /// it cannot drift apart.
+    var isValid: Bool { enabled && registrationProblem == nil }
+
+    /// Command (+ optional Shift) on a key every editor binds for editing.
+    ///
+    /// ⌘C/V/X/A/Z and their ⇧ variants (⇧⌘Z redo, ⇧⌘V paste-and-match-style) are
+    /// the chords a global registration would take away from every text field on
+    /// the Mac. Adding ⌥ or ⌃ makes a different chord that no editor binds, so
+    /// those stay allowed.
+    private static let protectedEditingKeys: Set<UInt32> = [
+        KeyCode.a, KeyCode.c, KeyCode.v, KeyCode.x, KeyCode.z,
+    ]
+
+    /// Whether this binding is a global version of a system editing command.
+    var isProtectedEditingShortcut: Bool {
+        let modifiers = combo.modifiers
+        guard modifiers.contains(.command),
+              modifiers.intersection([.option, .control]).isEmpty
+        else { return false }
+        return Self.protectedEditingKeys.contains(keyCode)
+    }
+
+    /// Why this binding cannot be registered, in words the Shortcuts pane can
+    /// show; nil when it can be registered. The recorder is Keycap's, so it
+    /// accepts a combo this property refuses — the warning beside it is what
+    /// keeps that honest, and `isValid` is what keeps the chord off the system.
+    var registrationProblem: String? {
+        guard enabled else { return nil }
+        if isProtectedEditingShortcut {
+            return "\(displayString) is a system editing shortcut, so Vervellum doesn't "
+                + "register it globally. Record a different one."
+        }
+        if !combo.isUsableGlobalHotkey {
+            return "\(displayString) can't be used as a global shortcut, so Vervellum "
+                + "doesn't register it. Record a new one."
+        }
+        return nil
+    }
 
     /// The modifier glyphs in canonical macOS order (⌃⌥⇧⌘).
     var modifierSymbols: String { combo.modifiers.symbols }

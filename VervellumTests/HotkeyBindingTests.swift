@@ -161,4 +161,106 @@ final class HotkeyBindingTests: XCTestCase {
         XCTAssertFalse(modifiers.contains(.control))
         XCTAssertFalse(modifiers.contains(.option))
     }
+
+    /// A global ⌘C would swallow Copy in every app on the Mac, and ⇧⌘Z is
+    /// redo. Vervellum refuses the editing family even though Keycap's own
+    /// rule accepts it; adding ⌥ or ⌃ makes a chord no editor binds.
+    func testEditingChordsAreRefused() {
+        let command = UInt32(cmdKey)
+        for keyCode in [KeyCode.a, KeyCode.c, KeyCode.v, KeyCode.x, KeyCode.z] {
+            for modifiers in [command, command | UInt32(shiftKey)] {
+                let binding = HotkeyBinding(keyCode: keyCode, modifiers: modifiers,
+                                            keyLabel: "X", enabled: true)
+                XCTAssertFalse(binding.isValid, "\(modifiers) \(keyCode) should be refused")
+                XCTAssertTrue(binding.isProtectedEditingShortcut)
+                XCTAssertNotNil(binding.registrationProblem)
+            }
+            XCTAssertTrue(HotkeyBinding(keyCode: keyCode,
+                                        modifiers: command | UInt32(optionKey),
+                                        keyLabel: "X", enabled: true).isValid,
+                          "⌥⌘\(keyCode) is not an editing chord")
+            XCTAssertTrue(HotkeyBinding(keyCode: keyCode,
+                                        modifiers: command | UInt32(controlKey),
+                                        keyLabel: "X", enabled: true).isValid,
+                          "⌃⌘\(keyCode) is not an editing chord")
+        }
+    }
+
+    /// Option-only chords type characters in some apps and are also common summon
+    /// shortcuts. They stay registerable, so a saved ⌥Space survives an upgrade.
+    func testOptionOnlyShortcutsStayAllowed() {
+        let option = UInt32(optionKey)
+        for modifiers in [option, option | UInt32(shiftKey)] {
+            for keyCode in [UInt32(kVK_Space), KeyCode.c, KeyCode.leftArrow] {
+                let saved = HotkeyBinding(keyCode: keyCode, modifiers: modifiers,
+                                          keyLabel: "X", enabled: true)
+                let decoded = HotkeyBinding.decode(saved.jsonString, fallback: .defaultSummon)
+                XCTAssertEqual(decoded, saved)
+                XCTAssertTrue(decoded.isValid, "\(modifiers) \(keyCode) should stay allowed")
+                XCTAssertNil(decoded.registrationProblem)
+            }
+        }
+    }
+
+    /// The property that refuses a chord and the sentence the pane shows for it are
+    /// derived from one rule set; this table pins the mirror property in both
+    /// directions across the modifier families and the keys the policy names.
+    func testRegistrationProblemAndValidityAlwaysAgree() {
+        let modifiers: [UInt32] = [
+            UInt32(0), UInt32(cmdKey), UInt32(cmdKey | shiftKey),
+            UInt32(optionKey), UInt32(optionKey | shiftKey),
+            UInt32(optionKey | cmdKey), UInt32(controlKey | cmdKey),
+        ]
+        let keys: [UInt32] = [KeyCode.a, KeyCode.c, KeyCode.v, KeyCode.x, KeyCode.z,
+                              KeyCode.f12, KeyCode.leftArrow]
+
+        // A bare key is the one refusal family the mirror alone cannot speak
+        // for: with no modifiers it is ordinary typing, so both properties
+        // must refuse it.
+        let bare = HotkeyBinding(keyCode: KeyCode.a, modifiers: 0,
+                                 keyLabel: "A", enabled: true)
+        XCTAssertFalse(bare.isValid)
+        XCTAssertNotNil(bare.registrationProblem)
+
+        // Ground truth for the named refusal families, independent of the
+        // mirror below: these catch a classification rule regressing, which a
+        // comparison against `registrationProblem` cannot.
+        let groundTruth: [(modifiers: UInt32, key: UInt32, expectedValid: Bool)] = [
+            (UInt32(cmdKey), KeyCode.c, false),              // ⌘C is a system editing chord
+            (UInt32(shiftKey), KeyCode.a, false),            // ⇧A is ordinary typing
+            (UInt32(optionKey), KeyCode.c, true),            // Option-only stays allowed
+            (UInt32(controlKey | cmdKey), KeyCode.c, true),  // ⌃⌘C collides with nothing
+            (UInt32(0), KeyCode.f12, true),                  // bare F-key stays registerable
+        ]
+        for (modifier, key, expectedValid) in groundTruth {
+            let binding = HotkeyBinding(keyCode: key, modifiers: modifier,
+                                        keyLabel: "X", enabled: true)
+            XCTAssertEqual(binding.isValid, expectedValid,
+                           "classification changed for modifiers=\(modifier), key=\(key)")
+        }
+
+        for enabled in [true, false] {
+            for modifier in modifiers {
+                for key in keys {
+                    let binding = HotkeyBinding(keyCode: key, modifiers: modifier,
+                                                keyLabel: "X", enabled: enabled)
+                    XCTAssertEqual(binding.isValid,
+                                   enabled && binding.registrationProblem == nil,
+                                   "validity disagrees for enabled=\(enabled), "
+                                   + "modifiers=\(modifier), key=\(key)")
+                }
+            }
+        }
+    }
+
+    /// A binding saved before this policy existed is still refused on the next
+    /// launch, and the pane's warning names the reason rather than silently
+    /// reporting success.
+    func testAStoredEditingChordStaysRefused() {
+        let stored = HotkeyBinding(keyCode: KeyCode.c, modifiers: UInt32(cmdKey),
+                                   keyLabel: "C", enabled: true)
+        let decoded = HotkeyBinding.decode(stored.jsonString, fallback: .defaultSummon)
+        XCTAssertFalse(decoded.isValid)
+        XCTAssertTrue(decoded.registrationProblem?.contains("editing shortcut") ?? false)
+    }
 }
