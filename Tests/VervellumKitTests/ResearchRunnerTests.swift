@@ -2078,16 +2078,46 @@ final class ResearchRunnerTests: XCTestCase {
 
     // MARK: Regather
 
+    func testRegatherOnlySpendsAnotherAnswerOnVisibleEvidence() throws {
+        let first = Source(number: 1, url: "https://one.example", title: "One", snippet: "")
+        var read = first
+        read.fullText = String(repeating: "page text", count: 200)
+        var second = read
+        second.number = 2
+        second.url = "https://two.example"
+        let bare = ResearchContext.measure(ResearchContext.evidence(from: [first]).entries)
+        let hidden = ResearchRunner.regatherEvidence(from: [read, second], limit: bare, comparedTo: [first])
+        XCTAssertFalse(hidden.hasAdditions)
+        XCTAssertEqual(hidden.sources, [first])
+        XCTAssertEqual(hidden.dropped, 1)
+        XCTAssertEqual(hidden.withheld, [1])
+
+        let visible = ResearchRunner.regatherEvidence(from: [read], limit: 5000, comparedTo: [first])
+        XCTAssertTrue(visible.hasAdditions)
+        XCTAssertEqual(visible.sources, [read])
+        XCTAssertFalse(ResearchRunner.regatherEvidence(from: [read], limit: 5000,
+                                                      comparedTo: [read]).hasAdditions)
+        XCTAssertTrue(ResearchRunner.regatherEvidence(from: [first, second], limit: 5000,
+                                                     comparedTo: [first]).hasAdditions)
+    }
+
     /// The first assessment's two replies, told apart by which answer they grade.
-    private static func regatherTransport(secondAssessment: StubTransport.Reply)
+    private static func regatherTransport(secondAssessment: StubTransport.Reply, crowded: Bool = false)
         -> StubTransport {
         StubTransport { call in
             switch call.kind {
             case .fetch:
+                if crowded { return .html("<p>" + String(repeating: "Page text. ", count: 260) + "</p>") }
                 return .html("<p>Text for \(call.url.path).</p>")
             case .json where call.url.path == "/search":
                 let query = URLComponents(url: call.url, resolvingAgainstBaseURL: false)?
                     .queryItems?.first { $0.name == "q" }?.value ?? ""
+                if crowded && query == "settle-it" {
+                    return .json(Self.searxng((1...24).map {
+                        (url: "https://site-\($0).example/settle-it.example/hit",
+                         title: String(repeating: "More evidence ", count: 12))
+                    }))
+                }
                 return .json(Self.searxng([(url: "https://\(query).example/hit",
                                             title: "Hit for \(query)")]))
             case .json:
@@ -2140,6 +2170,7 @@ final class ResearchRunnerTests: XCTestCase {
         XCTAssertEqual(turn.draftAnswer, "First answer [1].",
                        "the first answer is kept as the draft for comparison")
         XCTAssertEqual(turn.sources.count, 2, "the regather round's hit joined the list")
+        XCTAssertTrue(turn.sources[0].wasRead, "keep the first pass's rank-order page read")
         XCTAssertTrue(turn.notices.contains(.answerRegathered))
         XCTAssertEqual(turn.findings.first?.verdict, .supported,
                        "the findings are the second check's — they grade what is on screen")
@@ -2149,6 +2180,26 @@ final class ResearchRunnerTests: XCTestCase {
         let assesses = transport.calls.filter { Self.stage(of: $0) == .assess }
         XCTAssertEqual(assesses.count, 2)
         XCTAssertTrue(assesses.last?.userContent?.contains("settle-it.example") == true)
+    }
+
+    func testAdoptedRegatherReportsNewlyDroppedSourcesAndWithheldPages() async {
+        let transport = Self.regatherTransport(secondAssessment: .completion(json: Self.assessment),
+                                               crowded: true)
+        // Leave room for a single full page on the first pass. On regather the
+        // new summaries fill that room, displacing the page and the tail hits.
+        let fixedBytes = ResearchContext.maxCharacters - ResearchContext.answerContextReserve - 4_000
+        let question = String(repeating: "q", count: fixedBytes)
+        let turn = await run(question, mode: .deep, transport: transport)
+        XCTAssertTrue(turn.notices.contains(.answerRegathered))
+        XCTAssertEqual(turn.notices.filter { $0 == .evidenceTrimmed }.count, 1)
+        XCTAssertEqual(turn.notices.filter { $0 == .pageTextTrimmed }.count, 1)
+        XCTAssertGreaterThan(turn.sources.count, 1)
+        XCTAssertLessThan(turn.sources.count, 24)
+        XCTAssertEqual(turn.sources.first?.wasRead, false)
+        let checks = transport.calls.filter { Self.stage(of: $0) == .assess }
+        XCTAssertEqual(checks.count, 2)
+        XCTAssertEqual(checks.first?.userContent?.contains("Page text."), true)
+        XCTAssertEqual(checks.last?.userContent?.contains("Page text."), false)
     }
 
     /// A regather that cannot finish adopts nothing: the first answer, the first
@@ -2169,6 +2220,47 @@ final class ResearchRunnerTests: XCTestCase {
                        "the first check's findings grade the answer they were written about")
         // The round's searches are not rolled back: they did run.
         XCTAssertEqual(turn.searches.count, 2)
+    }
+
+    func testReadsOnlyRegatherSpendsAnotherAnswerOnlyWhenPageTextFits() async {
+        for tightBudget in [false, true] {
+            // The rank-order read fails. The planner asks to retry that same page
+            // after assessment, and this time the page is available.
+            let firstRead = DispatchSemaphore(value: 1)
+            defer { firstRead.signal() }
+            let transport = StubTransport { call in
+                switch call.kind {
+                case .fetch:
+                    if firstRead.wait(timeout: .now()) == .success {
+                        return .page(status: 404, headers: [:], text: "")
+                    }
+                    return .html("<p>" + String(repeating: "Page evidence. ", count: 400) + "</p>")
+                case .json where call.url.path == "/search":
+                    return .json(Self.searxng([(url: "https://journal.example/report", title: "Study")]))
+                case .json:
+                    switch Self.stage(of: call) {
+                    case .plan: return .completion(json: Self.plan("study"))
+                    case .deepPlan: return .completion(json: ["reading": "Ready", "searches": []])
+                    case .regatherPlan:
+                        return .completion(json: ["reading": "Retry the study", "read": [1], "searches": []])
+                    case .assess:
+                        return .completion(json: Self.assessment(verdict: "insufficient", sources: []))
+                    default: return .unrouted
+                    }
+                case .stream: return .stream(["Answer [1]."])
+                }
+            }
+            // Leave room for the summary and stage metadata but not the retrieved page.
+            let question = tightBudget ? String(repeating: "q", count: ResearchContext.maxCharacters
+                                                   - ResearchContext.answerContextReserve - 3_000) : "What changed?"
+            let turn = await run(question, mode: .deep, transport: transport)
+            XCTAssertEqual(turn.stage, .complete, turn.failure ?? "")
+            XCTAssertEqual(transport.calls.filter { $0.kind == .fetch }.count, 2)
+            XCTAssertEqual(transport.calls.filter { Self.stage(of: $0) == .answer }.count, tightBudget ? 1 : 2)
+            XCTAssertEqual(transport.calls.filter { Self.stage(of: $0) == .assess }.count, tightBudget ? 1 : 2)
+            XCTAssertEqual(turn.sources.first?.wasRead, !tightBudget)
+            XCTAssertEqual(turn.notices.contains(.answerRegathered), !tightBudget)
+        }
     }
 
     /// The round is a deep-mode discipline: a quick turn's insufficient verdict is
