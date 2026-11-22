@@ -164,8 +164,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // First launch has no keys, so the panel is the only place the user can find
         // out what is missing — show it once rather than leaving a silent menu-bar icon.
+        // Without focus: a launch-time panel that activates the app pulls Vervellum to
+        // the front over whatever the user was doing, and surfacing the missing key
+        // does not require the caret.
         if preferences.providerSettings.modelEndpoint.isEmpty {
-            panelController.show()
+            panelController.show(takingFocus: false)
         }
     }
 
