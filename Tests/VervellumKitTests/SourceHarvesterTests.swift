@@ -56,6 +56,22 @@ final class SourceHarvesterTests: XCTestCase {
         XCTAssertNotNil(SourceHarvester.normalized("http://localhost:8080/x"))
     }
 
+    func testRejectsUserinfoInStructuredAndProseSources() {
+        let links = [
+            "https://user:password@example.com/page",
+            "https://user@example.com/page",
+            "https://:password@example.com/page",
+            "https://@example.com/page",
+            "https://user%40name:secret@example.com/page",
+        ]
+        for link in links {
+            XCTAssertNil(SourceHarvester.normalized(link, trimmingPunctuation: false), link)
+            XCTAssertTrue(SourceHarvester.urls(in: ["url": link]).isEmpty, link)
+            XCTAssertTrue(SourceHarvester.bareURLs(in: "See \(link) today.").isEmpty, link)
+            XCTAssertNil(DirectPageReader.fetchableURL(link), link)
+        }
+    }
+
     /// A URL that ends a sentence picks up the punctuation. The allow-list and the
     /// audit scan must strip it identically or a legitimate citation fails.
     func testTrimsTrailingPunctuation() {

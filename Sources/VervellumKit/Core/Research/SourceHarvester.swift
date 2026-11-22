@@ -240,8 +240,9 @@ enum SourceHarvester {
         "mc_cid", "mc_eid", "ref_src",
     ]
 
-    /// Rejects anything that isn't an absolute http(s) URL with a host and, for a URL
-    /// lifted out of prose, trims the punctuation it picked up at the end of a sentence.
+    /// Rejects anything that isn't an absolute http(s) URL with a host and no
+    /// userinfo. For a URL lifted out of prose, trims the punctuation it picked up
+    /// at the end of a sentence.
     ///
     /// A structured field — a search hit's `url` — is an address, not prose. A closing
     /// parenthesis there is part of the path (`/wiki/Mercury_(planet)`), and trimming
@@ -256,7 +257,8 @@ enum SourceHarvester {
         guard let components = URLComponents(string: trimmed),
               let scheme = components.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
-              let host = components.host, !host.isEmpty
+              let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil
         else { return nil }
         return trimmed
     }
