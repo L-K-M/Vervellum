@@ -28,7 +28,8 @@ struct ProvidersView: View {
     /// Providers that already have a key in the secret store.
     @State private var storedKeys: Set<UUID> = []
     /// Explicit clears are pending form edits. The old value stays available until Save
-    /// can rotate the profile and its destination together; closing Settings cancels it.
+    /// can rotate the profile and its destination together; closing Settings cancels it
+    /// (the settings-did-close observer below reloads this state).
     @State private var modelKeysToClear: Set<UUID> = []
 
     @State private var searchProfiles: [SearchProfile] = []
@@ -215,6 +216,14 @@ struct ProvidersView: View {
                                 + "follows a redirect with a key attached.") { EmptyView() }
         }
         .onAppear(perform: load)
+        // The Settings window is kept alive when it closes (isReleasedWhenClosed is
+        // false), so this view's @State survives close/reopen and load() would not run
+        // again — a typed key, an armed Clear and a stale status would all survive with
+        // it, and one Save would commit the abandoned Clear. Closing the window reloads
+        // from disk, the same contract GeneralView's preview toggle already follows.
+        .onReceive(NotificationCenter.default.publisher(for: .vervellumSettingsDidClose)) { _ in
+            load()
+        }
     }
 
     // MARK: Rows
@@ -572,17 +581,16 @@ struct ProvidersView: View {
         searchKeyEntries = [:]
         modelKeysToClear = []
         searchKeysToClear = []
-        // Not carried across an open: the endpoints may have changed elsewhere, and a
-        // list is one click away. A fetch still running is cancelled with them — which
-        // reaches the ones this view still has a handle on, meaning a pane switch inside
-        // a Settings window that stayed open. Close the window and the `@State` goes with
-        // it, so on the next open there is nothing here to cancel and the old request
-        // runs out its own budget writing into storage nobody reads. That costs one
-        // request and cannot land anywhere, because it is a different view's dictionary;
-        // it is not, as this said before, retired.
+        // Not carried across an open or a close/reopen: the endpoints may have changed
+        // elsewhere, and a list is one click away. A fetch still running is cancelled
+        // with them — the window is kept alive on close, so the observer above runs this
+        // on close too, and a fetch abandoned that way would run out its own budget
+        // writing into storage nobody reads.
         for fetch in modelFetches.values { fetch.cancel() }
         modelFetches = [:]
         catalogues = [:]
+        status = nil
+        statusIsProblem = false
         storedKeys = Set(profiles.filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))
         storedSearchKeys = Set(searchProfiles
             .filter { keychain.hasValue(for: $0.secretAccount) }.map(\.id))

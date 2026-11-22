@@ -26,6 +26,12 @@ struct Source: Codable, Identifiable, Equatable {
     /// Whether the answer could have been written from the page rather than a summary.
     var wasRead: Bool { !(fullText ?? "").isEmpty }
 
+    /// Recheck the source at activation time because a reopened thread comes
+    /// from the archive, independently of validation when harvesting new hits.
+    /// NSWorkspace can launch handlers for non-web schemes, so rows and citation
+    /// chips share the same absolute HTTP(S) rule as the GTK browser action.
+    var browserURL: URL? { SourceHarvester.openableURL(url) }
+
     /// The registrable-looking host, for a compact source chip ("apple.com").
     /// Delegated to `EvidenceExtractor.domainKey` so the diversity cap and the chip
     /// the reader sees can never drift into two definitions of "same domain".
@@ -304,7 +310,7 @@ enum TurnNotice: String, Codable, Equatable {
                 + "Nothing below the answer has been verified."
         case .answerRevised:
             return "The check found claims the evidence does not carry, and the answer was "
-                + "rewritten against them. The findings below grade the first draft, which "
+                + "rewritten against them. The findings below grade the saved draft, which "
                 + "is what they were written about."
         case .revisionUnavailable:
             return "The check found claims worth correcting, but the rewrite could not be "
@@ -333,8 +339,7 @@ enum TurnNotice: String, Codable, Equatable {
                 + "the one that answered."
         case .answerRegathered:
             return "The first check found claims the evidence could not settle, so this "
-                + "turn went back for more evidence and answered again. The findings "
-                + "below grade this answer; the first draft is kept for comparison."
+                + "turn went back for more evidence, answered again, and checked that answer."
         case .attachmentNotStored:
             return "An attachment could not be saved, so it will not be here when this "
                 + "thread is reopened. The answer was written with it — only the stored "

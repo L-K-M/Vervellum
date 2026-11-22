@@ -49,8 +49,7 @@ struct TurnView: View, Equatable {
     @State private var trailExpanded = false
     @State private var sourcesExpanded = false
     @State private var showsAllSources = false
-    /// The first draft, collapsed. The findings grade it, and the answer above is
-    /// the rewrite; opening this is the comparison the notice promises.
+    /// Keep the comparison collapsed so the displayed answer stays in reading order.
     @State private var showsDraft = false
 
     private var validation: CitationValidator.Result {
@@ -122,12 +121,12 @@ struct TurnView: View, Equatable {
             Button {
                 showsDraft.toggle()
             } label: {
-                Text(showsDraft ? DraftComparison.hideLabel : DraftComparison.showLabel)
+                Text(DraftComparison.toggleLabel(expanded: showsDraft))
                     .font(PanelTheme.Font.caption(textScale))
                     .foregroundStyle(PanelTheme.Palette.accent)
             }
             .buttonStyle(.plain)
-            .accessibilityHint("The findings grade this draft, not the answer above")
+            .accessibilityHint(DraftComparison.description(for: turn).hint)
             if showsDraft {
                 MarkdownBody(markdown: draft, sources: turn.sources, scale: textScale)
                     .padding(.vertical, PanelTheme.Space.hair)
@@ -250,25 +249,42 @@ struct TurnView: View, Equatable {
 
 /// A blinking caret for the moment between the last search and the first token.
 struct StreamingCaret: View {
-    @State private var isBright = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The caret's opacity for a brightness tick. Under Reduce Motion it is held
+    /// steady and dimmed, so a still caret does not read as a solid block of text.
+    static func opacity(isBright: Bool, reduceMotion: Bool) -> Double {
+        reduceMotion ? 0.6 : (isBright ? 1 : 0.25)
+    }
 
     var body: some View {
+        Group {
+            if reduceMotion {
+                caret.opacity(Self.opacity(isBright: false, reduceMotion: true))
+            } else {
+                // Removing this subtree also stops an in-flight repeating animation.
+                caret.phaseAnimator([false, true]) { view, bright in
+                    view.opacity(Self.opacity(isBright: bright, reduceMotion: false))
+                } animation: { _ in .easeInOut(duration: 0.55) }
+            }
+        }
+        .accessibilityLabel("Writing the answer")
+    }
+
+    private var caret: some View {
         RoundedRectangle(cornerRadius: 1, style: .continuous)
             .fill(PanelTheme.Palette.accent)
             .frame(width: 7, height: 14)
-            .opacity(isBright ? 1 : 0.25)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) {
-                    isBright = true
-                }
-            }
-            .accessibilityLabel("Writing the answer")
     }
 }
 
 /// Vervellum's own caveats about the run — distinct from the model's stated
 /// limitations, and never collapsible. A notice exists precisely because something
 /// about this answer is less trustworthy than it looks.
+///
+/// The tone is a scanning channel, not a replacement for the sentence: a revised
+/// answer and an unchecked one are different facts, and one triangle for both is how
+/// a panel teaches its reader to ignore the triangle.
 struct NoticesView: View {
     @Environment(\.panelTextScale) private var textScale
 
@@ -282,16 +298,27 @@ struct NoticesView: View {
                         .font(PanelTheme.Font.caption(textScale))
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
-                    Image(systemName: "exclamationmark.triangle")
+                    Image(systemName: notice.tone.symbolName)
                         .font(PanelTheme.Font.at(10, textScale))
                 }
-                .foregroundStyle(PanelTheme.Palette.verdict(.mixed))
+                .foregroundStyle(Self.color(for: notice.tone))
             }
         }
         .padding(PanelTheme.Space.small)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(PanelTheme.Palette.verdict(.mixed).opacity(0.10),
+        .background(PanelTheme.Palette.cardFill,
                     in: RoundedRectangle(cornerRadius: PanelTheme.Radius.card, style: .continuous))
+    }
+
+    /// The tone's colour. Informational notices use the secondary text colour rather
+    /// than a verdict colour, so a status change does not borrow the findings table's
+    /// vocabulary.
+    private static func color(for tone: NoticeTone) -> Color {
+        switch tone {
+        case .informational: return PanelTheme.Palette.secondaryText
+        case .caution: return PanelTheme.Palette.verdict(.mixed)
+        case .critical: return PanelTheme.Palette.verdict(.contradicted)
+        }
     }
 }
 
@@ -322,7 +349,12 @@ struct FollowupsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: PanelTheme.Space.tight) {
             SectionLabel(text: "Next")
-            ForEach(followups, id: \.self) { followup in
+            // Identified by offset, not by the string: the model can suggest the same
+            // follow-up twice, and two identical ids make SwiftUI's identity ambiguous —
+            // a warning in the console and a tap that can activate the other row.
+            // `onSelect` still receives the string, so a duplicate tap asks the right
+            // question either way.
+            ForEach(Array(followups.enumerated()), id: \.offset) { _, followup in
                 Button {
                     onSelect(followup)
                 } label: {

@@ -413,6 +413,36 @@ final class AttachmentFlowTests: XCTestCase {
         XCTAssertNotNil(attachments.data(for: pending.attachment))
     }
 
+    /// A delete after a failed erase must not sweep. The launch below refuses the
+    /// thread-file erase, so threads.json survives naming the attachment and
+    /// `eraseFailure` is set; with history off the in-memory library is empty, so a
+    /// sweep would see the bytes as unreferenced and take them — and the next launch
+    /// would bring the thread back with its picture gone. The same invariant as the
+    /// launch test above, on the `delete` path that did not check it.
+    func testADeleteAfterAFailedEraseKeepsTheBytesTheFileStillNames() throws {
+        let file = directory.appendingPathComponent("threads.json")
+        let pending = try pendingImage("kept.png")
+        let attachments = AttachmentStore(
+            directory: AttachmentStore.directory(besideThreadFile: file))
+
+        var thread = ResearchThread()
+        thread.turns = [turn(with: pending.attachment)]
+        let store = ThreadStore(fileURL: file, debounce: 0)
+        store.save(thread)
+        store.flush()
+        try attachments.write(pending.data, for: pending.attachment)
+        try age(pending.attachment, in: file)
+
+        let refused = ThreadStore(fileURL: file, fileManager: RefusesToDeleteTheThreadFile(),
+                                  historyEnabled: false, debounce: 0)
+        refused.delete(id: thread.id)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path),
+                      "the launch erase was attempted and refused")
+        XCTAssertNotNil(attachments.data(for: pending.attachment),
+                        "the file on disk still names it, so the bytes must stay")
+    }
+
     /// Refuses the thread file and nothing else, so the launch erase fails while the
     /// attachment directory stays perfectly writable — which is the shape of the real
     /// failure: a permission on one file, not a broken disk.
