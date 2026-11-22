@@ -468,24 +468,33 @@ final class DirectPageReader: PageReading {
     /// that declared nothing, or whose declared codec failed — because it cannot fail.
     static func decode(_ data: Data, contentType: String) -> String? {
         let text: String?
-        switch declaredEncoding(contentType) {
-        case .utf16LittleEndian:
+        // WHATWG sniffs a byte-order mark ahead of any declared charset: a body
+        // that begins FF FE / FE FF is UTF-16LE/BE whatever the Content-Type says.
+        if data.count >= 2,
+           (data[data.startIndex] == 0xFF && data[data.startIndex + 1] == 0xFE)
+            || (data[data.startIndex] == 0xFE && data[data.startIndex + 1] == 0xFF) {
+            // `utf16` honours the BOM itself, so the default is never used.
             text = Self.utf16(data, defaultingTo: .little)
-        case .utf16BigEndian:
-            text = Self.utf16(data, defaultingTo: .big)
-        case .utf16:
-            // WHATWG maps the bare `utf-16` label to little-endian (RFC 2781 would
-            // default to big-endian; browsers do not). A byte-order mark still wins.
-            text = Self.utf16(data, defaultingTo: .little)
-        case .utf8:
-            text = String(data: data, encoding: .utf8)
-        case .windowsCP1252:
-            text = String(data: data, encoding: .utf8) ?? Self.windowsCP1252(data)
-        case .isoLatin1:
-            // The label is decoded as Windows-1252, per WHATWG; see the type comment.
-            text = String(data: data, encoding: .utf8) ?? Self.windowsCP1252(data)
-        case nil:
-            text = String(data: data, encoding: .utf8)
+        } else {
+            switch declaredEncoding(contentType) {
+            case .utf16LittleEndian:
+                text = Self.utf16(data, defaultingTo: .little)
+            case .utf16BigEndian:
+                text = Self.utf16(data, defaultingTo: .big)
+            case .utf16:
+                // WHATWG maps the bare `utf-16` label to little-endian (RFC 2781 would
+                // default to big-endian; browsers do not). A byte-order mark still wins.
+                text = Self.utf16(data, defaultingTo: .little)
+            case .utf8:
+                text = String(data: data, encoding: .utf8)
+            case .windowsCP1252:
+                text = String(data: data, encoding: .utf8) ?? Self.windowsCP1252(data)
+            case .isoLatin1:
+                // The label is decoded as Windows-1252, per WHATWG; see the type comment.
+                text = String(data: data, encoding: .utf8) ?? Self.windowsCP1252(data)
+            case nil:
+                text = String(data: data, encoding: .utf8)
+            }
         }
         guard let text else { return String(data: data, encoding: .isoLatin1) }
         // An explicit UTF-16 codec keeps a byte-order mark as U+FEFF; the extractor
@@ -504,11 +513,15 @@ final class DirectPageReader: PageReading {
     ///
     /// Foundation's `.utf16` is deliberately not used for a BOM-less body: Darwin
     /// answers nil, swift-corelibs-foundation assumes big-endian, and neither is a
-    /// contract. Decoding the two explicit codecs directly makes the result the
-    /// same on both platforms, and a BOM — which the explicit codecs would keep as
-    /// U+FEFF — is consumed here. Returns nil when the body is not valid UTF-16
-    /// (odd byte count or unpaired surrogate); the caller chooses the fallback.
-    private static func utf16(_ data: Data, defaultingTo endianness: UTF16Endianness) -> String? {
+    /// contract. Decoding the code units directly makes the result the same on both
+    /// platforms, and a BOM — which the explicit codecs would keep as U+FEFF — is
+    /// consumed here.
+    ///
+    /// An invalid code unit — an unpaired surrogate or a dangling trailing byte — is
+    /// replaced with U+FFFD rather than failing the whole body, the way WHATWG's
+    /// decoder and every browser behave: one corrupt byte should not cost the reader
+    /// the page.
+    private static func utf16(_ data: Data, defaultingTo endianness: UTF16Endianness) -> String {
         let effective: UTF16Endianness
         let body: Data
         if data.count >= 2 {
@@ -527,8 +540,41 @@ final class DirectPageReader: PageReading {
             effective = endianness
             body = data
         }
-        return String(data: body,
-                      encoding: effective == .little ? .utf16LittleEndian : .utf16BigEndian)
+
+        func unit(at index: Data.Index) -> UInt16? {
+            guard let next = body.index(index, offsetBy: 1, limitedBy: body.endIndex),
+                  next < body.endIndex else { return nil }
+            let first = UInt16(body[index]), second = UInt16(body[next])
+            return effective == .little ? first | (second << 8) : second | (first << 8)
+        }
+
+        var scalars = String.UnicodeScalarView()
+        scalars.reserveCapacity(body.count / 2)
+        var index = body.startIndex
+        while index < body.endIndex {
+            guard let leading = unit(at: index) else {
+                scalars.append("\u{FFFD}")          // a dangling trailing byte
+                break
+            }
+            index = body.index(index, offsetBy: 2)
+            if let scalar = Unicode.Scalar(leading) {
+                scalars.append(scalar)
+                continue
+            }
+            // A high surrogate must be followed by a low one. Anything else is
+            // replaced, and the surrogate itself is consumed either way.
+            if (0xD800...0xDBFF).contains(leading),
+               index < body.endIndex,
+               let trailing = unit(at: index),
+               (0xDC00...0xDFFF).contains(trailing) {
+                index = body.index(index, offsetBy: 2)
+                let combined = 0x10000 + (UInt32(leading - 0xD800) << 10) + UInt32(trailing - 0xDC00)
+                scalars.append(Unicode.Scalar(combined) ?? "\u{FFFD}")
+            } else {
+                scalars.append("\u{FFFD}")
+            }
+        }
+        return String(scalars)
     }
 
     /// Windows-1252, decoded here rather than through `String(data:encoding:)`.

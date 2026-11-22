@@ -596,23 +596,33 @@ final class PageReadingTests: XCTestCase {
         XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16be"), text)
     }
 
-    /// An invalid UTF-16 body is not silently empty: `decode` falls back to its
-    /// Latin-1 last resort, so a truncated page still yields text.
-    func testAnInvalidUTF16BodyFallsBackRatherThanEmpty() {
-        // 0x80 is the distinguisher: it decodes to U+0080 under Latin-1 and to the
-        // euro under Windows-1252, so this pins the documented last-resort codec.
-        // With 0xD8 it is also code unit 0xD880, an unpaired high surrogate.
-        let data = Data([0x80, 0xD8])
+    /// An invalid code unit is replaced with U+FFFD rather than failing the whole
+    /// body, so one corrupt byte cannot cost the reader the page.
+    func testAnInvalidUTF16CodeUnitBecomesAReplacementCharacter() {
+        let data = Data([0x80, 0xD8])   // code unit 0xD880, an unpaired high surrogate
         XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16le"),
-                       String(data: data, encoding: .isoLatin1))
+                       "\u{FFFD}")
     }
 
-    /// An odd byte count is invalid UTF-16 too; the Latin-1 fallback must still
-    /// decode every byte, including the dangling one.
-    func testAnOddLengthUTF16BodyFallsBackIncludingTheDanglingByte() {
-        let data = Data([0x00, 0xD8, 0x41])
+    /// A dangling trailing byte is a replacement character too, and the valid units
+    /// around it survive.
+    func testAnOddLengthUTF16BodyKeepsItsValidUnits() {
+        let data = Data([0x3C, 0x00, 0x70, 0x00, 0x41])   // "<p" then a dangling 'A'
         XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-16le"),
-                       String(data: data, encoding: .isoLatin1))
+                       "<p\u{FFFD}")
+    }
+
+    /// WHATWG sniffs a byte-order mark ahead of any declared charset.
+    func testABOMIsHonouredWithoutADeclaration() {
+        let text = "<p>ok</p>"
+        let data = Data([0xFF, 0xFE]) + text.data(using: .utf16LittleEndian)!
+        XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html"), text)
+    }
+
+    func testABOMIsHonouredOverAWrongDeclaration() {
+        let text = "<p>ok</p>"
+        let data = Data([0xFF, 0xFE]) + text.data(using: .utf16LittleEndian)!
+        XCTAssertEqual(DirectPageReader.decode(data, contentType: "text/html; charset=utf-8"), text)
     }
 
     /// `charset=` inside another token is not a declaration.
