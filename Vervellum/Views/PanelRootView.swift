@@ -19,6 +19,8 @@ struct PanelRootView: View {
     /// nested views below keep their `@Environment` reads, because they are descendants.
     private var textScale: Double { preferences.textScale }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @ObservedObject var engine: ResearchEngine
     @ObservedObject var store: ThreadStore
     @ObservedObject var preferences: Preferences
@@ -328,7 +330,7 @@ struct PanelRootView: View {
                     jumpToLatest(proxy)
                 }
             }
-            .animation(PanelTheme.Motion.disclosure, value: isPinnedToBottom)
+            .animation(PanelTheme.Motion.disclosureAnimation(reduceMotion), value: isPinnedToBottom)
             .onChange(of: engine.thread.turns.last?.answer) { _, _ in
                 guard isPinnedToBottom else { return }
                 scrollToBottom(proxy)
@@ -385,7 +387,7 @@ struct PanelRootView: View {
         .buttonStyle(.plain)
         .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
         .padding(.bottom, PanelTheme.Space.small)
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
+        .transition(reduceMotion ? .identity : .opacity.combined(with: .move(edge: .bottom)))
     }
 
     // MARK: Composer
